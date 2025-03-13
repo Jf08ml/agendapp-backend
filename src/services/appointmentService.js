@@ -19,19 +19,21 @@ const appointmentService = {
       additionalItems = [],
     } = appointmentData;
 
-    // Comprobar citas superpuestas
-    const overlappingAppointments = await appointmentModel.find({
-      employee,
-      $or: [
-        { startDate: { $lt: endDate, $gte: startDate } },
-        { endDate: { $gt: startDate, $lte: endDate } },
-        { startDate: { $lte: startDate }, endDate: { $gte: endDate } },
-      ],
-    });
+    console.log(employee);
 
-    if (overlappingAppointments.length > 0) {
-      throw new Error("El empleado tiene citas que se cruzan");
-    }
+    // Comprobar citas superpuestas
+    // const overlappingAppointments = await appointmentModel.find({
+    //   employee,
+    //   $or: [
+    //     { startDate: { $lt: endDate, $gte: startDate } },
+    //     { endDate: { $gt: startDate, $lte: endDate } },
+    //     { startDate: { $lte: startDate }, endDate: { $gte: endDate } },
+    //   ],
+    // });
+
+    // if (overlappingAppointments.length > 0) {
+    //   throw new Error("El empleado tiene citas que se cruzan");
+    // }
 
     // Validar adicionales (opcional)
     additionalItems.forEach((item) => {
@@ -85,11 +87,14 @@ const appointmentService = {
       organizationId
     );
 
+    console.log(client);
+
     const appointmentDetails = {
-      name: client?.name || "Estimado cliente",
+      names: client?.name || "Estimado cliente",
       date: appointmentDate,
       organization: organization.name,
       service: serviceDetails.name,
+      employee: employee.names,
       phoneNumber: organization.phoneNumber,
     };
 
@@ -186,23 +191,23 @@ const appointmentService = {
     const { employee, startDate, endDate } = updatedData;
 
     // Validar citas superpuestas
-    if (employee && startDate && endDate) {
-      const overlappingAppointments = await appointmentModel.find({
-        employee,
-        _id: { $ne: id }, // Excluir la cita actual
-        $or: [
-          { startDate: { $lt: endDate, $gte: startDate } },
-          { endDate: { $gt: startDate, $lte: endDate } },
-          { startDate: { $lte: startDate }, endDate: { $gte: endDate } },
-        ],
-      });
+    // if (employee && startDate && endDate) {
+    //   const overlappingAppointments = await appointmentModel.find({
+    //     employee,
+    //     _id: { $ne: id }, // Excluir la cita actual
+    //     $or: [
+    //       { startDate: { $lt: endDate, $gte: startDate } },
+    //       { endDate: { $gt: startDate, $lte: endDate } },
+    //       { startDate: { $lte: startDate }, endDate: { $gte: endDate } },
+    //     ],
+    //   });
 
-      if (overlappingAppointments.length > 0) {
-        throw new Error(
-          "El empleado tiene citas que se cruzan en el horario seleccionado"
-        );
-      }
-    }
+    //   if (overlappingAppointments.length > 0) {
+    //     throw new Error(
+    //       "El empleado tiene citas que se cruzan en el horario seleccionado"
+    //     );
+    //   }
+    // }
 
     // Actualizar los datos de la cita
     appointment.set(updatedData);
@@ -260,6 +265,7 @@ const appointmentService = {
           names: appointment.client.name,
           date: appointmentDate,
           organization: appointment.organizationId.name,
+          employee: appointment.employee.names,
           service: `${appointment.service.type} - ${appointment.service.name}`,
           phoneNumber: appointment.organizationId.phoneNumber,
         };

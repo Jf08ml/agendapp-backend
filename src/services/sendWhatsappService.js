@@ -7,7 +7,7 @@ const whatsappService = {
       const client = require("twilio")(accountSid, authToken);
 
       await client.messages.create({
-        contentSid: "HX4576ba6f3595ab79b6dbf18775b6d27a",
+        contentSid: "HXc1cdd029c3eba4a1f303fd922ee74da6",
         contentVariables: JSON.stringify({ ...appointmentDetails }),
         from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
         to: `whatsapp:+57${phone}`,
@@ -86,7 +86,7 @@ const whatsappService = {
       const client = require("twilio")(accountSid, authToken);
 
       await client.messages.create({
-        contentSid: "HX1bb866f2dfc4a91e9266a5c5992b72de",
+        contentSid: "HX78a056237b71cb5f3232722cbf09b63d",
         contentVariables: JSON.stringify({ ...appointmentDetails }),
         from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
         to: `whatsapp:+57${phone}`,

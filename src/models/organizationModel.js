@@ -76,6 +76,11 @@ const organizationSchema = new mongoose.Schema({
       required: true,
     },
   },
+  plan: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Plan",
+    required: false,
+  }
 });
 
 export default mongoose.model("Organization", organizationSchema);
