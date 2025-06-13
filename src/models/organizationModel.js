@@ -5,6 +5,10 @@ const organizationSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  iconUrl: {
+    type: String,
+    required: false,
+  },
   email: {
     type: String,
     required: true,

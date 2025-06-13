@@ -4,11 +4,11 @@ import jwt from "jsonwebtoken";
 
 const authController = {
   login: async (req, res) => {
-    const { email, password } = req.body;
+    const { email, password, organizationId } = req.body;
 
     try {
       // Autenticar al usuario
-      const user = await authService.authenticateUser(email, password);
+      const user = await authService.authenticateUser(email, password, organizationId);
 
       // Generar el token JWT
       const token = jwt.sign(

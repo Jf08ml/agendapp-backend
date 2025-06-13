@@ -6,6 +6,7 @@ const organizationService = {
   createOrganization: async (organizationData) => {
     const {
       name,
+      iconUrl,
       email,
       location,
       address,
@@ -30,6 +31,7 @@ const organizationService = {
 
     const newOrganization = new Organization({
       name,
+      iconUrl,
       email,
       location,
       address,
@@ -79,6 +81,7 @@ const organizationService = {
   updateOrganization: async (id, organizationData) => {
     const {
       name,
+      iconUrl,
       email,
       location,
       address,
@@ -106,6 +109,7 @@ const organizationService = {
 
     // Actualizar los campos que se proporcionen en la solicitud
     organization.name = name !== undefined ? name : organization.name;
+    organization.iconUrl = iconUrl !== undefined ? iconUrl : organization.iconUrl;
     organization.email = email !== undefined ? email : organization.email;
     organization.location =
       location !== undefined ? location : organization.location;
