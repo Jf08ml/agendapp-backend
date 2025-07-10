@@ -23,7 +23,8 @@ const organizationService = {
       serviceCount,
       serviceReward,
       openingHours,
-      plan
+      plan,
+      clientIdWhatsapp // Añadido
     } = organizationData;
 
     // Encriptar la contraseña antes de guardarla
@@ -48,7 +49,8 @@ const organizationService = {
       serviceCount: serviceCount || 0,
       serviceReward: serviceReward || null,
       openingHours: openingHours || { start: null, end: null },
-      plan
+      plan,
+      clientIdWhatsapp // Añadido
     });
 
     const savedOrganization = await newOrganization.save();
@@ -98,7 +100,8 @@ const organizationService = {
       serviceCount,
       serviceReward,
       openingHours,
-      plan
+      plan,
+      clientIdWhatsapp // Añadido
     } = organizationData;
 
     const organization = await Organization.findById(id);
@@ -141,8 +144,10 @@ const organizationService = {
       serviceReward !== undefined ? serviceReward : organization.serviceReward;
     organization.openingHours =
       openingHours !== undefined ? openingHours : organization.openingHours;
-      organization.plan =
-      openingHours !== undefined ? plan : organization.plan;
+    organization.plan =
+      plan !== undefined ? plan : organization.plan;
+    organization.clientIdWhatsapp =
+      clientIdWhatsapp !== undefined ? clientIdWhatsapp : organization.clientIdWhatsapp;
 
     // Encriptar la contraseña solo si se proporciona una nueva
     if (password) {

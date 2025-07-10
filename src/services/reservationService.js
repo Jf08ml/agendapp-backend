@@ -102,7 +102,7 @@ const reservationService = {
         try {
           await whatsappService.sendWhatsappStatusReservation(
             updateData.status,
-            reservation.customerDetails?.phone,
+            reservation,
             reservationDetails
           );
         } catch (error) {

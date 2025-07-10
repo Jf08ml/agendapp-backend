@@ -2,6 +2,7 @@ import appointmentModel from "../models/appointmentModel.js";
 import organizationService from "./organizationService.js";
 import serviceService from "./serviceService.js";
 import whatsappService from "./sendWhatsappService.js";
+import whatsappTemplates from "../utils/whatsappTemplates.js";
 
 const appointmentService = {
   // Crear una nueva cita
@@ -96,9 +97,12 @@ const appointmentService = {
 
     // Enviar confirmación por WhatsApp
     try {
-      await whatsappService.sendWhatsappScheduleAppointment(
+      const msg = whatsappTemplates.scheduleAppointment(appointmentDetails);
+
+      await whatsappService.sendMessage(
+        organizationId,
         client?.phoneNumber,
-        appointmentDetails
+        msg
       );
     } catch (error) {
       console.error(
@@ -122,32 +126,45 @@ const appointmentService = {
   },
 
   // Obtener citas por organizationId con rango de fechas opcional
-  getAppointmentsByOrganizationWithDates: async (
-    organizationId,
-    startDate,
-    endDate
-  ) => {
-    try {
-      const query = { organizationId };
+getAppointmentsByOrganizationWithDates: async (
+  organizationId,
+  startDate,
+  endDate
+) => {
+  try {
+    const query = { organizationId };
 
-      // Si se especifican fechas, añadirlas al query
-      if (startDate && endDate) {
-        query.startDate = { $gte: new Date(startDate) };
-        query.endDate = { $lte: new Date(endDate) };
-      }
+    // Si NO se especifican fechas, calcular el rango por defecto (mes anterior, actual y siguiente)
+    if (!startDate || !endDate) {
+      const now = new Date();
 
-      return await appointmentModel
-        .find(query)
-        .populate("service")
-        .populate("employee")
-        .populate("client")
-        .exec();
-    } catch (error) {
-      throw new Error(
-        "Error al obtener citas de la organización: " + error.message
-      );
+      // Primer día del mes anterior
+      const firstDayPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+
+      // Último día del mes siguiente
+      const lastDayNextMonth = new Date(now.getFullYear(), now.getMonth() + 2, 0, 23, 59, 59, 999);
+
+      startDate = firstDayPrevMonth;
+      endDate = lastDayNextMonth;
     }
-  },
+
+    // Añadir rango de fechas al query
+    query.startDate = { $gte: new Date(startDate) };
+    query.endDate = { $lte: new Date(endDate) };
+
+    return await appointmentModel
+      .find(query)
+      .populate("service")
+      .populate("employee")
+      .populate("client")
+      .exec();
+  } catch (error) {
+    throw new Error(
+      "Error al obtener citas de la organización: " + error.message
+    );
+  }
+},
+
 
   // Obtener una cita por ID
   getAppointmentById: async (id) => {
@@ -221,68 +238,73 @@ const appointmentService = {
     return { message: "Cita eliminada correctamente" };
   },
 
-sendDailyReminders: async () => {
-  const now = new Date();
-  const colombiaTime = new Date(now.getTime() - now.getTimezoneOffset() * 60000); // ya en UTC-05
+  sendDailyReminders: async () => {
+    const now = new Date();
+    const colombiaTime = new Date(
+      now.getTime() - now.getTimezoneOffset() * 60000
+    ); // ya en UTC-05
 
-  const tomorrow = new Date(colombiaTime);
-  tomorrow.setDate(colombiaTime.getDate() + 1);
-  tomorrow.setHours(8, 0, 0, 0);
+    const tomorrow = new Date(colombiaTime);
+    tomorrow.setDate(colombiaTime.getDate() + 1);
+    tomorrow.setHours(8, 0, 0, 0);
 
-  const endOfTomorrow = new Date(tomorrow);
-  endOfTomorrow.setHours(23, 59, 59, 999);
+    const endOfTomorrow = new Date(tomorrow);
+    endOfTomorrow.setHours(23, 59, 59, 999);
 
-  try {
-    const appointments = await appointmentModel
-      .find({
-        startDate: { $gte: tomorrow, $lt: endOfTomorrow },
-        reminderSent: false,
-      })
-      .populate("client")
-      .populate("service")
-      .populate("employee")
-      .populate("organizationId");
+    try {
+      const appointments = await appointmentModel
+        .find({
+          startDate: { $gte: tomorrow, $lt: endOfTomorrow },
+          reminderSent: false,
+        })
+        .populate("client")
+        .populate("service")
+        .populate("employee")
+        .populate("organizationId");
 
-    for (const appointment of appointments) {
-      // formateo fecha+hora
-      const dateObject = new Date(appointment.startDate);
-      const appointmentDateTime = new Intl.DateTimeFormat("es-ES", {
-        day: "numeric",
-        month: "long",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-        timeZone: "America/Bogota",
-      }).format(dateObject);
+      for (const appointment of appointments) {
+        // formateo fecha+hora
+        const dateObject = new Date(appointment.startDate);
+        const appointmentDateTime = new Intl.DateTimeFormat("es-ES", {
+          day: "numeric",
+          month: "long",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true,
+          timeZone: "America/Bogota",
+        }).format(dateObject);
 
-      const appointmentDetails = {
-        names: appointment.client.name,
-        date: appointmentDateTime,
-        organization: appointment.organizationId.name,
-        employee: appointment.employee.names,
-        service: `${appointment.service.type} - ${appointment.service.name}`,
-        phoneNumber: appointment.organizationId.phoneNumber,
-      };
+        const appointmentDetails = {
+          names: appointment.client.name,
+          date: appointmentDateTime,
+          organization: appointment.organizationId.name,
+          employee: appointment.employee.names,
+          service: `${appointment.service.type} - ${appointment.service.name}`,
+          phoneNumber: appointment.organizationId.phoneNumber,
+        };
 
-      try {
-        await whatsappService.sendWhatsappReminder(
-          appointment.client.phoneNumber,
-          appointmentDetails
-        );
-        appointment.reminderSent = true;
-        await appointment.save();
-      } catch (error) {
-        console.error(
-          `Error enviando recordatorio para ${appointment.client.phoneNumber}:`,
-          error.message
-        );
+        try {
+          const msg = whatsappTemplates.reminder(appointmentDetails);
+
+          await whatsappService.sendMessage(
+            appointment.organizationId._id,
+            appointment.client.phoneNumber,
+            msg
+          );
+
+          appointment.reminderSent = true;
+          await appointment.save();
+        } catch (error) {
+          console.error(
+            `Error enviando recordatorio para ${appointment.client.phoneNumber}:`,
+            error.message
+          );
+        }
       }
+    } catch (error) {
+      console.error("Error ejecutando sendDailyReminders:", error.message);
     }
-  } catch (error) {
-    console.error("Error ejecutando sendDailyReminders:", error.message);
-  }
-},
-
+  },
 };
 
 export default appointmentService;

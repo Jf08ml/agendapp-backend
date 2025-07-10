@@ -84,6 +84,10 @@ const organizationSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "Plan",
     required: false,
+  },
+  clientIdWhatsapp: {
+    type: String,
+    required: false
   }
 });
 
