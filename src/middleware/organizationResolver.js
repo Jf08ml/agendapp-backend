@@ -1,3 +1,5 @@
+import organizationModel from "../models/organizationModel.js";
+
 export async function organizationResolver(req, res, next) {
   // 1. Prioridad: x-tenant-domain (enviado manualmente, útil para APIs con axios/fetch)
   let tenantDomain = req.headers["x-tenant-domain"];
