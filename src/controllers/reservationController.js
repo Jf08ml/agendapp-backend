@@ -57,6 +57,7 @@ const reservationController = {
       const notify = {
         title: "Nueva reserva",
         message: "Tienes una nueva reserva pendiente por confirmar",
+        icon: adminOrganization.branding.pwaIcon,
       };
 
       await subscriptionService.sendNotificationToUser(

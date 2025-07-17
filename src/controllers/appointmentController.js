@@ -1,4 +1,5 @@
 import appointmentService from "../services/appointmentService.js";
+import organizationService from "../services/organizationService.js";
 import subscriptionService from "../services/subscriptionService.js";
 import sendResponse from "../utils/sendResponse.js";
 
@@ -9,13 +10,18 @@ const appointmentController = {
       const newAppointment = await appointmentService.createAppointment(
         req.body
       );
+
+      const organization = await organizationService.getOrganizationById(
+        newAppointment.organizationId
+      );
+
       const notify = {
         title: "Cita creada",
         message: "Se te ha asignado una nueva cita",
-        userId: newAppointment.employee,
+        icon: organization.branding.pwaIcon,
       };
       await subscriptionService.sendNotificationToUser(
-        notify.userId,
+        newAppointment.userId,
         JSON.stringify(notify)
       );
       sendResponse(res, 201, newAppointment, "Cita creada exitosamente");
@@ -113,9 +119,14 @@ const appointmentController = {
         req.body
       );
 
+      const organization = await organizationService.getOrganizationById(
+        updatedAppointment.organizationId
+      );
+
       const notify = {
         title: "Cita actualizada",
         message: "Se ha actualizado una cita",
+        icon: organization.branding.pwaIcon,
       };
 
       await subscriptionService.sendNotificationToUser(
@@ -140,9 +151,14 @@ const appointmentController = {
       const appointmentData = await appointmentService.getAppointmentById(id);
       const result = await appointmentService.deleteAppointment(id);
 
+      const organization = await organizationService.getOrganizationById(
+        appointmentData.organizationId
+      );
+
       const notify = {
         title: "Cita cancelada",
         message: "Se ha cancelado una cita",
+        icon: organization.branding.pwaIcon,
       };
 
       await subscriptionService.sendNotificationToUser(

@@ -24,7 +24,7 @@ const organizationService = {
       serviceReward,
       openingHours,
       plan,
-      clientIdWhatsapp // Añadido
+      clientIdWhatsapp, // Añadido
     } = organizationData;
 
     // Encriptar la contraseña antes de guardarla
@@ -50,7 +50,7 @@ const organizationService = {
       serviceReward: serviceReward || null,
       openingHours: openingHours || { start: null, end: null },
       plan,
-      clientIdWhatsapp // Añadido
+      clientIdWhatsapp, // Añadido
     });
 
     const savedOrganization = await newOrganization.save();
@@ -101,7 +101,9 @@ const organizationService = {
       serviceReward,
       openingHours,
       plan,
-      clientIdWhatsapp // Añadido
+      clientIdWhatsapp,
+      branding,
+      domain,
     } = organizationData;
 
     const organization = await Organization.findById(id);
@@ -112,7 +114,8 @@ const organizationService = {
 
     // Actualizar los campos que se proporcionen en la solicitud
     organization.name = name !== undefined ? name : organization.name;
-    organization.iconUrl = iconUrl !== undefined ? iconUrl : organization.iconUrl;
+    organization.iconUrl =
+      iconUrl !== undefined ? iconUrl : organization.iconUrl;
     organization.email = email !== undefined ? email : organization.email;
     organization.location =
       location !== undefined ? location : organization.location;
@@ -144,10 +147,22 @@ const organizationService = {
       serviceReward !== undefined ? serviceReward : organization.serviceReward;
     organization.openingHours =
       openingHours !== undefined ? openingHours : organization.openingHours;
-    organization.plan =
-      plan !== undefined ? plan : organization.plan;
+    organization.plan = plan !== undefined ? plan : organization.plan;
     organization.clientIdWhatsapp =
-      clientIdWhatsapp !== undefined ? clientIdWhatsapp : organization.clientIdWhatsapp;
+      clientIdWhatsapp !== undefined
+        ? clientIdWhatsapp
+        : organization.clientIdWhatsapp;
+
+    if (branding) {
+      organization.branding = {
+        ...organization.branding,
+        ...branding, // Solo actualiza los campos enviados
+      };
+    }
+
+    if (domain !== undefined) {
+      organization.domain = domain;
+    }
 
     // Encriptar la contraseña solo si se proporciona una nueva
     if (password) {

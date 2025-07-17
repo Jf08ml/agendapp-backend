@@ -58,7 +58,7 @@ const organizationSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
-  referredReward: { 
+  referredReward: {
     type: String,
     required: false,
   },
@@ -66,17 +66,17 @@ const organizationSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
-  serviceReward: { 
+  serviceReward: {
     type: String,
     required: false,
   },
-  openingHours: { 
+  openingHours: {
     start: {
-      type: String, 
+      type: String,
       required: true,
     },
     end: {
-      type: String, 
+      type: String,
       required: true,
     },
   },
@@ -87,8 +87,27 @@ const organizationSchema = new mongoose.Schema({
   },
   clientIdWhatsapp: {
     type: String,
-    required: false
-  }
+    required: false,
+  },
+  branding: {
+    logoUrl: String,
+    faviconUrl: String,
+    primaryColor: String,
+    secondaryColor: String, // Opcional
+    themeColor: String,
+    pwaName: String,
+    pwaIcon: String,
+    pwaShortName: String,
+    pwaDescription: String,
+    footerTextColor: String,
+    manifest: Object,
+  },
+  domain: String, // Ej: "agenda.zybizobazar.com" o "salonmaria.com"
+  plan: {
+    type: String,
+    enum: ["basic", "professional", "premium"],
+    default: "basic",
+  },
 });
 
 export default mongoose.model("Organization", organizationSchema);
