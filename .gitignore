@@ -42,9 +42,9 @@ yarn.lock
 /functions/lib
 
 # Archivos de configuración de despliegue de Vercel
-.vercel
-.vercelignore
-vercel.json
+# .vercel
+# .vercelignore
+# vercel.json
 
 # Carpeta de archivos estáticos generados
 /public
