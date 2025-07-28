@@ -80,11 +80,11 @@ const organizationSchema = new mongoose.Schema({
       required: true,
     },
   },
-  plan: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Plan",
-    required: false,
-  },
+  // plan: {
+  //   type: mongoose.Schema.Types.ObjectId,
+  //   ref: "Plan",
+  //   required: false,
+  // },
   clientIdWhatsapp: {
     type: String,
     required: false,
@@ -102,7 +102,11 @@ const organizationSchema = new mongoose.Schema({
     footerTextColor: String,
     manifest: Object,
   },
-  domain: String, // Ej: "agenda.zybizobazar.com" o "salonmaria.com"
+  domains: {
+    type: [String],
+    required: true,
+    default: [],
+  }, // Ej: "agenda.zybizobazar.com" o "salonmaria.com"
   plan: {
     type: String,
     enum: ["basic", "professional", "premium"],
