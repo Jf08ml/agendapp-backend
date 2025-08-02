@@ -14,6 +14,7 @@ router.get(
   "/appointments/organization/:organizationId/dates",
   appointmentController.getAppointmentsByOrganizationWithDates
 );
+
 // Obtener una cita específica por ID
 router.get("/appointments/:id", appointmentController.getAppointmentById);
 

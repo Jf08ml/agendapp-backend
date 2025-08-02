@@ -3,7 +3,7 @@ import Service from "../models/serviceModel.js";
 const serviceService = {
   // Crear un nuevo servicio
   createService: async (serviceData) => {
-    const { images, name, description, price, duration, type, organizationId } =
+    const { images, name, description, price, duration, type, organizationId, icon } =
       serviceData;
     const newService = new Service({
       images,
@@ -13,6 +13,7 @@ const serviceService = {
       duration,
       type,
       organizationId,
+      icon
     });
     return await newService.save();
   },

@@ -42,7 +42,7 @@ const reservationController = {
       // Crear la notificación
       const notificationData = {
         title: "Nueva reserva",
-        message: "Tienes una nueva reserva pendiente por confirmar",
+        message: `Tienes una nueva reserva pendiente por confirmar de ${customerDetails.name}`,
         organizationId: adminOrganization._id,
         type: "reservation",
         frontendRoute: `/gestionar-reservas-online`,
@@ -50,13 +50,11 @@ const reservationController = {
       };
 
       // Guardar la notificación en la base de datos
-      await notificationService.createNotification(
-        notificationData
-      );
+      await notificationService.createNotification(notificationData);
 
       const notify = {
         title: "Nueva reserva",
-        message: "Tienes una nueva reserva pendiente por confirmar",
+        message: `Tienes una nueva reserva pendiente por confirmar de ${customerDetails.name}`,
         icon: adminOrganization.branding.pwaIcon,
       };
 
