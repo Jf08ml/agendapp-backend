@@ -1,5 +1,6 @@
 import axios from "axios";
 import organizationService from "./organizationService";
+import whatsappTemplates from "../utils/whatsappTemplates";
 
 /**
  * Formatea cualquier número a internacional para WhatsApp
@@ -191,7 +192,6 @@ sendMessage: async (organizationId, phone, message, image) => {
     } else {
       msg = whatsappTemplates.statusReservationRejected(reservationDetails);
     }
-
     // Envía el mensaje usando tu backend de WhatsApp
     try {
       await axios.post("https://apiwp.zybizobazar.com/api/send", {
