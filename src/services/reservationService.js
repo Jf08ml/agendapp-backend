@@ -5,8 +5,11 @@ import whatsappService from "./sendWhatsappService.js";
 
 const reservationService = {
   // Crear una nueva reserva
-  createReservation: async (reservationData) => {
+  createReservation: async (reservationData, session = null) => {
     const reservation = new Reservation(reservationData);
+    if (session) {
+      return await reservation.save({ session });
+    }
     return await reservation.save();
   },
 
@@ -31,16 +34,16 @@ const reservationService = {
       const reservation = await Reservation.findById(id).populate(
         "serviceId employeeId customer organizationId"
       );
-  
+
       if (!reservation) {
         throw new Error("Reserva no encontrada");
       }
-  
+
       // Validar el estado de actualización
       if (updateData.status === "approved") {
         const { serviceId, employeeId, startDate, customer, organizationId } =
           reservation;
-  
+
         // Validar que el servicio exista y tenga un objeto válido
         const service = typeof serviceId === "object" ? serviceId : null;
         if (!service || !service.duration) {
@@ -48,15 +51,15 @@ const reservationService = {
             "El servicio asociado no es válido o falta la duración"
           );
         }
-  
+
         if (!startDate) {
           throw new Error("La reserva no tiene una fecha de inicio válida");
         }
-  
+
         // Calcular la fecha de finalización
         const endDate = new Date(startDate);
         endDate.setMinutes(endDate.getMinutes() + service.duration);
-  
+
         const newAppointment = {
           service: serviceId._id,
           employee: employeeId?._id || null,
@@ -67,16 +70,16 @@ const reservationService = {
           organizationId: organizationId._id,
           status: "pending",
         };
-  
+
         // Intentar crear la cita
         await appointmentService.createAppointment(newAppointment);
       }
-  
+
       // Actualizar la reserva con los datos proporcionados
       Object.assign(reservation, updateData);
-  
+
       const updatedReservation = await reservation.save();
-  
+
       if (
         updateData.status === "approved" ||
         updateData.status === "rejected"
@@ -89,7 +92,7 @@ const reservationService = {
             month: "long",
           }
         );
-  
+
         const reservationDetails = {
           names: reservation.customerDetails?.name || "Estimado cliente",
           date: appointmentDate,
@@ -97,7 +100,7 @@ const reservationService = {
           service: reservation.serviceId.name,
           phoneNumber: reservation.organizationId?.phoneNumber,
         };
-  
+
         // Enviar confirmación por WhatsApp
         try {
           await whatsappService.sendWhatsappStatusReservation(
@@ -112,7 +115,7 @@ const reservationService = {
           );
         }
       }
-  
+
       return updatedReservation;
     } catch (error) {
       // Manejo general de errores
@@ -122,15 +125,12 @@ const reservationService = {
           "No se pudo crear la cita porque el empleado tiene citas que se cruzan en ese horario."
         );
       }
-  
+
       // Otros errores
       console.error("Error actualizando la reserva:", error.message);
-      throw new Error(
-        `No se pudo actualizar la reserva: ${error.message}`
-      );
+      throw new Error(`No se pudo actualizar la reserva: ${error.message}`);
     }
   },
-  
 
   // Eliminar una reserva
   deleteReservation: async (id) => {
@@ -138,7 +138,13 @@ const reservationService = {
   },
 
   // Validar y crear cliente si no existe
-  ensureClientExists: async ({ name, phoneNumber, email, organizationId, birthDate }) => {
+  ensureClientExists: async ({
+    name,
+    phoneNumber,
+    email,
+    organizationId,
+    birthDate,
+  }) => {
     // Buscar cliente existente por teléfono y organización
     const existingClient = await Client.findOne({
       phoneNumber,
@@ -159,7 +165,7 @@ const reservationService = {
         isUpdated = true;
       }
 
-      if(birthDate && existingClient.birthDate !== birthDate) {
+      if (birthDate && existingClient.birthDate !== birthDate) {
         existingClient.birthDate = birthDate;
         isUpdated = true;
       }
@@ -173,7 +179,13 @@ const reservationService = {
     }
 
     // Crear un nuevo cliente si no existe
-    const newClient = new Client({ name, phoneNumber, email, organizationId, birthDate });
+    const newClient = new Client({
+      name,
+      phoneNumber,
+      email,
+      organizationId,
+      birthDate,
+    });
     return await newClient.save();
   },
 };

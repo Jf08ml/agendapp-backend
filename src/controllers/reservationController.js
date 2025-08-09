@@ -1,6 +1,9 @@
+import mongoose from "mongoose";
+import serviceModel from "../models/serviceModel.js";
 import notificationService from "../services/notificationService.js";
 import organizationService from "../services/organizationService.js";
 import reservationService from "../services/reservationService.js";
+import serviceService from "../services/serviceService.js";
 import subscriptionService from "../services/subscriptionService.js";
 import sendResponse from "../utils/sendResponse.js";
 
@@ -73,6 +76,94 @@ const reservationController = {
       );
     }
   },
+
+  // POST /api/reservations/multi
+createMultipleReservations: async (req, res) => {
+  const {
+    services,
+    startDate,
+    customerDetails,
+    organizationId,
+  } = req.body;
+
+  if (!services || !Array.isArray(services) || services.length === 0) {
+    return sendResponse(res, 400, null, "Debe enviar al menos un servicio.");
+  }
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    // Validar o crear cliente (fuera del loop, también dentro de la transacción)
+    const customer = await reservationService.ensureClientExists({
+      name: customerDetails.name,
+      phoneNumber: customerDetails.phone,
+      email: customerDetails.email,
+      organizationId,
+      birthDate: customerDetails.birthDate,
+    });
+
+    let currentStart = new Date(startDate);
+    const createdReservations = [];
+
+    for (const serviceItem of services) {
+      // Buscar duración en backend si no viene (recomendado)
+      let duration = serviceItem.duration;
+      if (!duration) {
+        const serviceObj = await serviceModel.findById(serviceItem.serviceId).session(session);
+        if (!serviceObj) throw new Error("Servicio no encontrado");
+        duration = serviceObj.duration;
+      }
+
+      const reservationData = {
+        serviceId: serviceItem.serviceId,
+        employeeId: serviceItem.employeeId || null,
+        startDate: new Date(currentStart),
+        customer: customer._id,
+        customerDetails,
+        organizationId,
+        status: "pending",
+      };
+
+      // IMPORTANTE: usa la sesión en la creación
+      const newReservation = await reservationService.createReservation(reservationData, session);
+      createdReservations.push(newReservation);
+
+      currentStart.setMinutes(currentStart.getMinutes() + duration);
+    }
+
+    // Notificaciones y demás lógica (fuera de la transacción si no afecta la DB, o dentro si también deben ser atómicas)
+
+    await session.commitTransaction();
+    session.endSession();
+
+    // Notificación fuera de la transacción (si se cae, igual la data ya está bien)
+    const adminOrganization = await organizationService.getOrganizationById(organizationId);
+    await notificationService.createNotification({
+      title: "Nueva reserva múltiple",
+      message: `Tienes nuevas reservas de ${customerDetails.name}`,
+      organizationId: adminOrganization._id,
+      type: "reservation",
+      frontendRoute: `/gestionar-reservas-online`,
+      status: "unread",
+    });
+
+    await subscriptionService.sendNotificationToUser(
+      adminOrganization._id,
+      JSON.stringify({
+        title: "Nueva reserva múltiple",
+        message: `Tienes nuevas reservas de ${customerDetails.name}`,
+        icon: adminOrganization.branding.pwaIcon,
+      })
+    );
+
+    sendResponse(res, 201, createdReservations, "Reservas múltiples creadas exitosamente");
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    sendResponse(res, 500, null, `Error al crear reservas múltiples: ${error.message}`);
+  }
+},
 
   // Obtener todas las reservas de una organización
   getReservationsByOrganization: async (req, res) => {

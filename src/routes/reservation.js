@@ -5,6 +5,7 @@ const router = express.Router();
 
 // Rutas para reservas
 router.post("/reservations", reservationController.createReservation);
+router.post("/reservations/multi", reservationController.createMultipleReservations);
 router.get(
   "/reservations/:organizationId",
   reservationController.getReservationsByOrganization

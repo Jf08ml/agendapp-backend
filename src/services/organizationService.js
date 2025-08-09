@@ -50,7 +50,9 @@ const organizationService = {
       serviceReward: serviceReward || null,
       openingHours: openingHours || { start: null, end: null },
       plan,
-      clientIdWhatsapp, // Añadido
+      clientIdWhatsapp,
+      branding: organizationData.branding || {}, 
+      domains: organizationData.domains || [],
     });
 
     const savedOrganization = await newOrganization.save();
@@ -156,12 +158,12 @@ const organizationService = {
     if (branding) {
       organization.branding = {
         ...organization.branding,
-        ...branding, // Solo actualiza los campos enviados
+        ...branding,
       };
     }
 
     if (domain !== undefined) {
-      organization.domain = domain;
+      organization.domains = Array.isArray(domain) ? domain : [domain];
     }
 
     // Encriptar la contraseña solo si se proporciona una nueva

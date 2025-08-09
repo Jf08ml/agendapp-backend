@@ -1,5 +1,22 @@
 import mongoose from "mongoose";
 
+const BrandingSchema = new mongoose.Schema(
+  {
+    logoUrl: String,
+    faviconUrl: String,
+    primaryColor: String,
+    secondaryColor: String,
+    themeColor: String,
+    pwaName: String,
+    pwaIcon: String,
+    pwaShortName: String,
+    pwaDescription: String,
+    footerTextColor: String,
+    manifest: Object,
+  },
+  { _id: false }
+);
+
 const organizationSchema = new mongoose.Schema({
   name: {
     type: String,
@@ -90,17 +107,8 @@ const organizationSchema = new mongoose.Schema({
     required: false,
   },
   branding: {
-    logoUrl: String,
-    faviconUrl: String,
-    primaryColor: String,
-    secondaryColor: String, // Opcional
-    themeColor: String,
-    pwaName: String,
-    pwaIcon: String,
-    pwaShortName: String,
-    pwaDescription: String,
-    footerTextColor: String,
-    manifest: Object,
+    type: BrandingSchema,
+    default: {},
   },
   domains: {
     type: [String],
