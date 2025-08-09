@@ -6,7 +6,7 @@ const whatsappTemplates = {
     service,
     employee,
   }) =>
-    `📅 ¡Hola, ${names}! 👋
+    `📅 ¡Hola, ${names}! 
 
 ¡Tu cita ha sido agendada exitosamente!
 
@@ -17,10 +17,10 @@ const whatsappTemplates = {
 
 Si tienes alguna pregunta o necesitas modificar tu cita, *puedes responder directamente a este chat de WhatsApp*. Estamos atentos a ayudarte.
 
-¡Te esperamos pronto! 😊`,
+¡Te esperamos pronto!`,
 
   reminder: ({ names, date, organization, service, employee }) =>
-    `📅 ¡Hola, ${names}! 👋
+    `📅 ¡Hola, ${names}!
 
 Te recordamos que tienes una cita programada:
 
@@ -31,7 +31,7 @@ Te recordamos que tienes una cita programada:
 
 Por favor confirma tu cita *respondiendo a este chat de WhatsApp*.
 
-¡Nos vemos pronto! 😊`,
+¡Nos vemos pronto!`,
 
   statusReservationApproved: ({
     names,
@@ -56,7 +56,7 @@ Lo lamentamos mucho, pero tu reserva para el ${date} en ${organization} no pudo 
 
 Si tienes preguntas o deseas reprogramar, *responde a este chat de WhatsApp*. 
 
-Esperamos poder atenderte pronto. ¡Gracias por tu comprensión! 😊`,
+Esperamos poder atenderte pronto. ¡Gracias por tu comprensión!`,
 };
 
 export default whatsappTemplates;
