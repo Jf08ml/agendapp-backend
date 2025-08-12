@@ -1,11 +1,5 @@
 const whatsappTemplates = {
-  scheduleAppointment: ({
-    names,
-    date,
-    organization,
-    service,
-    employee,
-  }) =>
+  scheduleAppointment: ({ names, date, organization, service, employee }) =>
     `📅 ¡Hola, ${names}! 
 
 ¡Tu cita ha sido agendada exitosamente!
@@ -30,15 +24,11 @@ Te recordamos que tienes una cita programada:
 👩‍💼 Te atenderá: ${employee}
 
 Por favor confirma tu cita *respondiendo a este chat de WhatsApp*.
+Si no confirmas, podríamos asignar tu turno a otra persona en lista de espera.
 
 ¡Nos vemos pronto!`,
 
-  statusReservationApproved: ({
-    names,
-    date,
-    organization,
-    service,
-  }) =>
+  statusReservationApproved: ({ names, date, organization, service }) =>
     `¡Hola, ${names}! 🎉
 
 Tu reserva para el ${date} en ${organization} ha sido *aprobada*.
@@ -50,13 +40,13 @@ Si tienes dudas o necesitas reprogramar, *responde a este chat de WhatsApp*. ¡E
 ¡Te esperamos!`,
 
   statusReservationRejected: ({ names, date, organization }) =>
-    `¡Hola, ${names}!
+    `¡Hola, ${names}! 👋
 
-Lo lamentamos mucho, pero tu reserva para el ${date} en ${organization} no pudo ser aceptada porque el horario seleccionado no está disponible.
+Lamentamos informarte que tu reserva para el *${date}* en *${organization}* no pudo ser confirmada, ya que el horario seleccionado no está disponible.
 
-Si tienes preguntas o deseas reprogramar, *responde a este chat de WhatsApp*. 
+Si deseas reprogramar o tienes alguna pregunta, simplemente responde a este mensaje de WhatsApp y con gusto te ayudaremos.
 
-Esperamos poder atenderte pronto. ¡Gracias por tu comprensión!`,
+Gracias por tu comprensión. ¡Esperamos atenderte pronto! 😊`,
 };
 
 export default whatsappTemplates;
