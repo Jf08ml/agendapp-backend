@@ -26,7 +26,10 @@ function formatPhone(phone, countryCode = "57", localLength = 10) {
   }
 
   // Si ya comienza con el código de país (ej: 57, 34, 52, etc.) y tiene el largo internacional, lo deja igual
-  if (digits.startsWith(countryCode) && digits.length === countryCode.length + localLength) {
+  if (
+    digits.startsWith(countryCode) &&
+    digits.length === countryCode.length + localLength
+  ) {
     return digits;
   }
 
@@ -36,10 +39,7 @@ function formatPhone(phone, countryCode = "57", localLength = 10) {
   }
 
   // Si tiene longitud internacional pero NO empieza con el código de país, se lo agregamos (por si viene de 001234567890, 1234567890, etc.)
-  if (
-    digits.length > localLength &&
-    !digits.startsWith(countryCode)
-  ) {
+  if (digits.length > localLength && !digits.startsWith(countryCode)) {
     return countryCode + digits;
   }
 
@@ -47,7 +47,6 @@ function formatPhone(phone, countryCode = "57", localLength = 10) {
   console.warn("Número de teléfono en formato inesperado:", phone, digits);
   return digits;
 }
-
 
 const whatsappService = {
   sendWhatsappReminder: async (phone, appointmentDetails) => {
@@ -124,43 +123,44 @@ const whatsappService = {
    * @param {String} message - Mensaje de texto
    * @param {String} [image] - (opcional) Imagen (url o base64)
    */
-sendMessage: async (organizationId, phone, message, image) => {
-  // 1. Busca la organización para obtener su clientIdWhatsapp
-  const org = await organizationService.getOrganizationById(organizationId);
-  if (!org || !org.clientIdWhatsapp) {
-    throw new Error("La organización no tiene sesión de WhatsApp configurada");
-  }
-
-  // 2. Formatea el número
-  const formattedPhone = formatPhone(phone);
-
-  // 3. Prepara el payload
-  const payload = {
-    clientId: org.clientIdWhatsapp,
-    phone: formattedPhone,
-    message,
-  };
-  if (image) payload.image = image;
-
-  // 4. Enviar request al backend multi-sesión
-  try {
-    const { data } = await axios.post(
-      "https://apiwp.zybizobazar.com/api/send",
-      payload
-    );
-    return data;
-  } catch (error) {
-    if (error.response) {
-      console.error("❌ Error respuesta WhatsApp API:", error.response.data);
+  sendMessage: async (organizationId, phone, message, image) => {
+    // 1. Busca la organización para obtener su clientIdWhatsapp
+    const org = await organizationService.getOrganizationById(organizationId);
+    if (!org || !org.clientIdWhatsapp) {
       throw new Error(
-        `Error WhatsApp API: ${JSON.stringify(error.response.data)}`
+        "La organización no tiene sesión de WhatsApp configurada"
       );
     }
-    console.error("❌ Error general al enviar WhatsApp:", error.message);
-    throw error;
-  }
-},
 
+    // 2. Formatea el número
+    const formattedPhone = formatPhone(phone);
+
+    // 3. Prepara el payload
+    const payload = {
+      clientId: org.clientIdWhatsapp,
+      phone: formattedPhone,
+      message,
+    };
+    if (image) payload.image = image;
+
+    // 4. Enviar request al backend multi-sesión
+    try {
+      const { data } = await axios.post(
+        "https://apiwp.zybizobazar.com/api/send",
+        payload
+      );
+      return data;
+    } catch (error) {
+      if (error.response) {
+        console.error("❌ Error respuesta WhatsApp API:", error.response.data);
+        throw new Error(
+          `Error WhatsApp API: ${JSON.stringify(error.response.data)}`
+        );
+      }
+      console.error("❌ Error general al enviar WhatsApp:", error.message);
+      throw error;
+    }
+  },
 
   /**
    * Envía un mensaje de WhatsApp al cliente notificando el estado de su reserva (aprobada o rechazada),

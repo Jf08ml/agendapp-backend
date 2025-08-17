@@ -250,20 +250,29 @@ const appointmentService = {
   },
 
   sendDailyReminders: async () => {
+    const ADMIN_PHONE = "+573132735116"; // número fijo admin (E.164)
+
+    const fmtBogota = (date) =>
+      new Intl.DateTimeFormat("es-ES", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+        timeZone: "America/Bogota",
+      }).format(date);
+
     try {
-      // "Ahora" en UTC y su equivalente calendario en Bogotá
+      // Ventana: todo el día de hoy en Bogotá
       const nowUtc = Date.now();
       const bogotaNow = new Date(nowUtc - 5 * 60 * 60 * 1000); // Bogotá = UTC-5
-
       const y = bogotaNow.getUTCFullYear();
       const m = bogotaNow.getUTCMonth();
       const d = bogotaNow.getUTCDate();
 
-      // Hoy 00:00 Bogotá -> 05:00 UTC
-      const startUTC = new Date(Date.UTC(y, m, d, 5, 0, 0, 0));
-
-      // Hoy 23:59:59.999 Bogotá -> 04:59:59.999 UTC del día siguiente
-      const endUTC = new Date(Date.UTC(y, m, d + 1, 4, 59, 59, 999));
+      const startUTC = new Date(Date.UTC(y, m, d, 5, 0, 0, 0)); // 00:00 BOG = 05:00 UTC
+      const endUTC = new Date(Date.UTC(y, m, d + 1, 4, 59, 59, 999)); // 23:59:59.999 BOG = 04:59:59.999 UTC (+1)
 
       const appointments = await appointmentModel
         .find({
@@ -275,43 +284,127 @@ const appointmentService = {
         .populate("employee")
         .populate("organizationId");
 
-      for (const appointment of appointments) {
-        const appointmentDateTime = new Intl.DateTimeFormat("es-ES", {
-          day: "numeric",
-          month: "long",
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: true,
-          timeZone: "America/Bogota",
-        }).format(new Date(appointment.startDate));
+      // Agrupar por organización
+      const byOrg = new Map();
+      for (const appt of appointments) {
+        const orgId = appt.organizationId?._id?.toString();
+        if (!orgId) continue;
+        if (!byOrg.has(orgId)) byOrg.set(orgId, []);
+        byOrg.get(orgId).push(appt);
+      }
 
-        const details = {
-          names: appointment.client.name,
-          date: appointmentDateTime,
-          organization: appointment.organizationId.name,
-          employee: appointment.employee.names,
-          service: `${appointment.service.type} - ${appointment.service.name}`,
-          phoneNumber: appointment.organizationId.phoneNumber,
-        };
+      if (byOrg.size === 0) {
+        console.log("No hay citas para enviar recordatorios hoy.");
 
+        // Aviso opcional si defines ADMIN_ORG_ID en .env
+        if (process.env.ADMIN_ORG_ID) {
+          try {
+            await whatsappService.sendMessage(
+              process.env.ADMIN_ORG_ID,
+              ADMIN_PHONE,
+              `ℹ️ No hay citas para enviar hoy.\nRango Bogotá: ${fmtBogota(
+                startUTC
+              )} a ${fmtBogota(endUTC)}`
+            );
+          } catch (e) {
+            console.error("Error enviando aviso 'sin citas':", e.message);
+          }
+        }
+        return;
+      }
+
+      // Procesar por organización
+      for (const [orgId, appts] of byOrg.entries()) {
+        // Aviso de inicio por org
         try {
-          const msg = whatsappTemplates.reminder(details);
           await whatsappService.sendMessage(
-            appointment.organizationId._id,
-            appointment.client.phoneNumber,
-            msg
+            orgId,
+            ADMIN_PHONE,
+            `▶️ Iniciando envío de recordatorios.\nRango Bogotá: ${fmtBogota(
+              startUTC
+            )} a ${fmtBogota(endUTC)}\nCitas encontradas: ${appts.length}`
           );
-          appointment.reminderSent = true;
-          await appointment.save();
         } catch (e) {
           console.error(
-            `Error enviando recordatorio a ${appointment.client.phoneNumber}:`,
+            "Error enviando aviso de inicio (org:",
+            orgId,
+            "):",
+            e.message
+          );
+        }
+
+        let ok = 0;
+        let fail = 0;
+
+        for (const appointment of appts) {
+          const appointmentDateTime = new Intl.DateTimeFormat("es-ES", {
+            day: "numeric",
+            month: "long",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: true,
+            timeZone: "America/Bogota",
+          }).format(new Date(appointment.startDate));
+
+          const details = {
+            names: appointment.client.name,
+            date: appointmentDateTime,
+            organization: appointment.organizationId.name,
+            employee: appointment.employee.names,
+            service: `${appointment.service.type} - ${appointment.service.name}`,
+            phoneNumber: appointment.organizationId.phoneNumber,
+          };
+
+          try {
+            const msg = whatsappTemplates.reminder(details);
+            await whatsappService.sendMessage(
+              orgId, // ← mismo organizationId
+              appointment.client.phoneNumber,
+              msg
+            );
+            appointment.reminderSent = true;
+            await appointment.save();
+            ok++;
+          } catch (e) {
+            fail++;
+            console.error(
+              `Error enviando recordatorio a ${appointment.client.phoneNumber} (org ${orgId}):`,
+              e.message
+            );
+          }
+        }
+
+        // Aviso de fin por org
+        try {
+          await whatsappService.sendMessage(
+            orgId,
+            ADMIN_PHONE,
+            `✅ Finalizado envío de recordatorios.\nÉxitos: ${ok}\nFallos: ${fail}\nTotal procesadas: ${appts.length}`
+          );
+        } catch (e) {
+          console.error(
+            "Error enviando aviso de fin (org:",
+            orgId,
+            "):",
             e.message
           );
         }
       }
     } catch (e) {
       console.error("Error ejecutando sendDailyReminders:", e.message);
+
+      // Aviso de error fatal (usa ADMIN_ORG_ID si lo tienes configurado)
+      if (process.env.ADMIN_ORG_ID) {
+        try {
+          await whatsappService.sendMessage(
+            process.env.ADMIN_ORG_ID,
+            ADMIN_PHONE,
+            `⛔ Error en sendDailyReminders: ${e.message}`
+          );
+        } catch (e2) {
+          console.error("Además falló el aviso admin:", e2.message);
+        }
+      }
     }
   },
 };
