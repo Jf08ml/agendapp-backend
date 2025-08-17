@@ -126,45 +126,56 @@ const appointmentService = {
   },
 
   // Obtener citas por organizationId con rango de fechas opcional
-getAppointmentsByOrganizationWithDates: async (
-  organizationId,
-  startDate,
-  endDate
-) => {
-  try {
-    const query = { organizationId };
+  getAppointmentsByOrganizationWithDates: async (
+    organizationId,
+    startDate,
+    endDate
+  ) => {
+    try {
+      const query = { organizationId };
 
-    // Si NO se especifican fechas, calcular el rango por defecto (mes anterior, actual y siguiente)
-    if (!startDate || !endDate) {
-      const now = new Date();
+      // Si NO se especifican fechas, calcular el rango por defecto (mes anterior, actual y siguiente)
+      if (!startDate || !endDate) {
+        const now = new Date();
 
-      // Primer día del mes anterior
-      const firstDayPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        // Primer día del mes anterior
+        const firstDayPrevMonth = new Date(
+          now.getFullYear(),
+          now.getMonth() - 1,
+          1
+        );
 
-      // Último día del mes siguiente
-      const lastDayNextMonth = new Date(now.getFullYear(), now.getMonth() + 2, 0, 23, 59, 59, 999);
+        // Último día del mes siguiente
+        const lastDayNextMonth = new Date(
+          now.getFullYear(),
+          now.getMonth() + 2,
+          0,
+          23,
+          59,
+          59,
+          999
+        );
 
-      startDate = firstDayPrevMonth;
-      endDate = lastDayNextMonth;
+        startDate = firstDayPrevMonth;
+        endDate = lastDayNextMonth;
+      }
+
+      // Añadir rango de fechas al query
+      query.startDate = { $gte: new Date(startDate) };
+      query.endDate = { $lte: new Date(endDate) };
+
+      return await appointmentModel
+        .find(query)
+        .populate("service")
+        .populate("employee")
+        .populate("client")
+        .exec();
+    } catch (error) {
+      throw new Error(
+        "Error al obtener citas de la organización: " + error.message
+      );
     }
-
-    // Añadir rango de fechas al query
-    query.startDate = { $gte: new Date(startDate) };
-    query.endDate = { $lte: new Date(endDate) };
-
-    return await appointmentModel
-      .find(query)
-      .populate("service")
-      .populate("employee")
-      .populate("client")
-      .exec();
-  } catch (error) {
-    throw new Error(
-      "Error al obtener citas de la organización: " + error.message
-    );
-  }
-},
-
+  },
 
   // Obtener una cita por ID
   getAppointmentById: async (id) => {
@@ -239,22 +250,24 @@ getAppointmentsByOrganizationWithDates: async (
   },
 
   sendDailyReminders: async () => {
-    const now = new Date();
-    const colombiaTime = new Date(
-      now.getTime() - now.getTimezoneOffset() * 60000
-    ); // ya en UTC-05
-
-    const tomorrow = new Date(colombiaTime);
-    tomorrow.setDate(colombiaTime.getDate() + 1);
-    tomorrow.setHours(8, 0, 0, 0);
-
-    const endOfTomorrow = new Date(tomorrow);
-    endOfTomorrow.setHours(23, 59, 59, 999);
-
     try {
+      // "Ahora" en UTC y su equivalente calendario en Bogotá
+      const nowUtc = Date.now();
+      const bogotaNow = new Date(nowUtc - 5 * 60 * 60 * 1000); // Bogotá = UTC-5
+
+      const y = bogotaNow.getUTCFullYear();
+      const m = bogotaNow.getUTCMonth();
+      const d = bogotaNow.getUTCDate();
+
+      // Hoy 00:00 Bogotá -> 05:00 UTC
+      const startUTC = new Date(Date.UTC(y, m, d, 5, 0, 0, 0));
+
+      // Hoy 23:59:59.999 Bogotá -> 04:59:59.999 UTC del día siguiente
+      const endUTC = new Date(Date.UTC(y, m, d + 1, 4, 59, 59, 999));
+
       const appointments = await appointmentModel
         .find({
-          startDate: { $gte: tomorrow, $lt: endOfTomorrow },
+          startDate: { $gte: startUTC, $lt: endUTC },
           reminderSent: false,
         })
         .populate("client")
@@ -263,8 +276,6 @@ getAppointmentsByOrganizationWithDates: async (
         .populate("organizationId");
 
       for (const appointment of appointments) {
-        // formateo fecha+hora
-        const dateObject = new Date(appointment.startDate);
         const appointmentDateTime = new Intl.DateTimeFormat("es-ES", {
           day: "numeric",
           month: "long",
@@ -272,9 +283,9 @@ getAppointmentsByOrganizationWithDates: async (
           minute: "2-digit",
           hour12: true,
           timeZone: "America/Bogota",
-        }).format(dateObject);
+        }).format(new Date(appointment.startDate));
 
-        const appointmentDetails = {
+        const details = {
           names: appointment.client.name,
           date: appointmentDateTime,
           organization: appointment.organizationId.name,
@@ -284,25 +295,23 @@ getAppointmentsByOrganizationWithDates: async (
         };
 
         try {
-          const msg = whatsappTemplates.reminder(appointmentDetails);
-
+          const msg = whatsappTemplates.reminder(details);
           await whatsappService.sendMessage(
             appointment.organizationId._id,
             appointment.client.phoneNumber,
             msg
           );
-
           appointment.reminderSent = true;
           await appointment.save();
-        } catch (error) {
+        } catch (e) {
           console.error(
-            `Error enviando recordatorio para ${appointment.client.phoneNumber}:`,
-            error.message
+            `Error enviando recordatorio a ${appointment.client.phoneNumber}:`,
+            e.message
           );
         }
       }
-    } catch (error) {
-      console.error("Error ejecutando sendDailyReminders:", error.message);
+    } catch (e) {
+      console.error("Error ejecutando sendDailyReminders:", e.message);
     }
   },
 };
