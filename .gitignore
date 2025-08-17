@@ -49,3 +49,4 @@ yarn.lock
 # Carpeta de archivos estáticos generados
 /public
 .qodo
+.vercel
