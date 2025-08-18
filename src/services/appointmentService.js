@@ -3,6 +3,16 @@ import organizationService from "./organizationService.js";
 import serviceService from "./serviceService.js";
 import whatsappService from "./sendWhatsappService.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
+// Helpers locales
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Valida que haya dígitos suficientes (tu whatsappService.formatPhone ya normaliza)
+// Aquí solo filtramos vacíos o absurdamente cortos.
+const hasUsablePhone = (phone) => {
+  if (!phone) return false;
+  const digits = String(phone).replace(/\D/g, "");
+  return digits.length >= 8; // ajusta si quieres ser más estricto (10)
+};
 
 const appointmentService = {
   // Crear una nueva cita
@@ -250,7 +260,7 @@ const appointmentService = {
   },
 
   sendDailyReminders: async () => {
-    const ADMIN_PHONE = "+573132735116"; // número fijo admin (E.164)
+    const ADMIN_PHONE = "+573132735116"; // E.164 (con +)
 
     const fmtBogota = (date) =>
       new Intl.DateTimeFormat("es-ES", {
@@ -292,6 +302,9 @@ const appointmentService = {
         if (!byOrg.has(orgId)) byOrg.set(orgId, []);
         byOrg.get(orgId).push(appt);
       }
+
+      let totalOk = 0;
+      let totalFail = 0;
 
       if (byOrg.size === 0) {
         console.log("No hay citas para enviar recordatorios hoy.");
@@ -337,6 +350,19 @@ const appointmentService = {
         let fail = 0;
 
         for (const appointment of appts) {
+          // Validación rápida de teléfono
+          const rawPhone = appointment?.client?.phoneNumber;
+          if (!hasUsablePhone(rawPhone)) {
+            fail++;
+            console.warn(
+              `⚠️ Teléfono inválido/ausente para cliente '${
+                appointment?.client?.name || "Desconocido"
+              }' (org ${orgId}).`
+            );
+            continue;
+          }
+
+          // Fecha amigable
           const appointmentDateTime = new Intl.DateTimeFormat("es-ES", {
             day: "numeric",
             month: "long",
@@ -346,32 +372,43 @@ const appointmentService = {
             timeZone: "America/Bogota",
           }).format(new Date(appointment.startDate));
 
+          // Detalles a prueba de undefined
           const details = {
-            names: appointment.client.name,
+            names: appointment?.client?.name || "Cliente",
             date: appointmentDateTime,
-            organization: appointment.organizationId.name,
-            employee: appointment.employee.names,
-            service: `${appointment.service.type} - ${appointment.service.name}`,
-            phoneNumber: appointment.organizationId.phoneNumber,
+            organization: appointment?.organizationId?.name || "",
+            employee: appointment?.employee?.names || "",
+            service: appointment?.service
+              ? `${appointment.service.type || ""} - ${
+                  appointment.service.name || ""
+                }`.trim()
+              : "",
+            phoneNumber: appointment?.organizationId?.phoneNumber || "",
           };
 
           try {
             const msg = whatsappTemplates.reminder(details);
             await whatsappService.sendMessage(
               orgId, // ← mismo organizationId
-              appointment.client.phoneNumber,
+              rawPhone,
               msg
             );
+
             appointment.reminderSent = true;
             await appointment.save();
             ok++;
+            totalOk++;
           } catch (e) {
             fail++;
+            totalFail++;
             console.error(
-              `Error enviando recordatorio a ${appointment.client.phoneNumber} (org ${orgId}):`,
+              `Error enviando recordatorio a ${rawPhone} (org ${orgId}):`,
               e.message
             );
           }
+
+          // Pequeño respiro para no saturar
+          await sleep(150);
         }
 
         // Aviso de fin por org
@@ -388,6 +425,28 @@ const appointmentService = {
             "):",
             e.message
           );
+        }
+      }
+
+      // Resumen global (opcional)
+      console.log(
+        `📊 Resumen global recordatorios — OK: ${totalOk} | Fallos: ${totalFail} | Total: ${
+          totalOk + totalFail
+        }`
+      );
+
+      // Aviso global opcional al admin
+      if (process.env.ADMIN_ORG_ID) {
+        try {
+          await whatsappService.sendMessage(
+            process.env.ADMIN_ORG_ID,
+            ADMIN_PHONE,
+            `📊 Resumen global recordatorios\nOK: ${totalOk}\nFallos: ${totalFail}\nTotal: ${
+              totalOk + totalFail
+            }`
+          );
+        } catch (e) {
+          console.error("Error enviando resumen global al admin:", e.message);
         }
       }
     } catch (e) {
