@@ -1,12 +1,14 @@
 // src/services/whatsappService.js
 import axiosBase from "axios";
+import http from "http";
+import https from "https";
 import organizationService from "./organizationService.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
 
 /** ===================== CONFIG ===================== */
 const BASE_URL =
-  process.env.WHATSAPP_API_URL || process.env.VITE_API_URL_WHATSAPP; // ej: https://apiwp.zybizobazar.com
-const API_KEY = process.env.WHATSAPP_API_KEY || process.env.VITE_API_KEY; // el mismo del backend
+  process.env.WHATSAPP_API_URL || process.env.VITE_API_URL_WHATSAPP;
+const API_KEY = process.env.WHATSAPP_API_KEY || process.env.VITE_API_KEY;
 
 if (!BASE_URL)
   console.warn(
@@ -15,11 +17,28 @@ if (!BASE_URL)
 if (!API_KEY)
   console.warn("[whatsappService] WHATSAPP_API_KEY / VITE_API_KEY no definido");
 
+// Reutiliza conexiones (evita TIME_WAIT y latencias)
+const keepAliveHttp = new http.Agent({ keepAlive: true, maxSockets: 50 });
+const keepAliveHttps = new https.Agent({ keepAlive: true, maxSockets: 50 });
+
+// Cliente “corto” (para acciones normales)
 const api = axiosBase.create({
   baseURL: (BASE_URL || "").replace(/\/$/, ""),
   headers: { "x-api-key": API_KEY },
   timeout: 20_000,
+  httpAgent: keepAliveHttp,
+  httpsAgent: keepAliveHttps,
 });
+
+// Cliente “largo” (para jobs/lotes como recordatorios)
+const apiLong = axiosBase.create({
+  baseURL: (BASE_URL || "").replace(/\/$/, ""),
+  headers: { "x-api-key": API_KEY },
+  timeout: 90_000, // <<— más holgado
+  httpAgent: keepAliveHttp,
+  httpsAgent: keepAliveHttps,
+});
+
 /** =================================================== */
 
 /**
@@ -120,9 +139,8 @@ const whatsappService = {
   async ensureSession(clientId) {
     if (!clientId) return;
     try {
-      await api.post(`/api/session`, { clientId });
+      await api.post(`/api/session`, { clientId }, { timeout: 5000 });
     } catch (e) {
-      // No rompemos el flujo: el /api/send también intentará
       console.warn(
         "[whatsappService.ensureSession] No se pudo asegurar sesión:",
         e?.message
@@ -130,15 +148,32 @@ const whatsappService = {
     }
   },
 
+  // NEW: consulta estados para saber si una sesión está lista
+  async isClientReady(clientId) {
+    try {
+      const { data } = await api.get(`/api/sessions`, { timeout: 8000 });
+      return !!data.find(
+        (s) => s.clientId === clientId && s.status === "ready"
+      );
+    } catch (e) {
+      console.warn(
+        "[whatsappService.isClientReady] No se pudo leer /api/sessions:",
+        e?.message
+      );
+      return false;
+    }
+  },
+
   // Enviar con reintento suave si es el clásico "Session/Target closed"
-  async sendViaMultiSession(payload) {
+  async sendViaMultiSession(payload, { longTimeout = false } = {}) {
     await this.ensureSession(payload.clientId);
+    const client = longTimeout ? apiLong : api;
 
     try {
-      const { data } = await api.post(`/api/send`, payload);
+      const { data } = await client.post(`/api/send`, payload);
       return data;
     } catch (error) {
-      // error enriquecido desde backend
+      // Respuesta con error del backend
       if (error?.response?.data) {
         const body = error.response.data;
         const raw = String(body.error || "");
@@ -147,13 +182,14 @@ const whatsappService = {
             raw
           )
         ) {
-          // breve espera y reintento (el backend suele re-inicializar)
+          // breve espera y un reintento
           await new Promise((r) => setTimeout(r, 800));
-          const { data } = await api.post(`/api/send`, payload);
+          const { data } = await client.post(`/api/send`, payload);
           return data;
         }
         throw new Error(body.error || "Error WhatsApp API");
       }
+      // Timeout de Axios u otros de red
       throw new Error(error?.message || "Error de red enviando WhatsApp");
     }
   },
@@ -165,14 +201,13 @@ const whatsappService = {
    * @param {string} message
    * @param {string} [image] url o base64
    */
-  async sendMessage(organizationId, phone, message, image) {
+  async sendMessage(organizationId, phone, message, image, opts = {}) {
     const org = await organizationService.getOrganizationById(organizationId);
     if (!org || !org.clientIdWhatsapp) {
       throw new Error(
         "La organización no tiene sesión de WhatsApp configurada"
       );
     }
-
     const payload = {
       clientId: org.clientIdWhatsapp,
       phone: formatPhone(phone),
@@ -180,20 +215,24 @@ const whatsappService = {
     };
     if (image) payload.image = image;
 
-    return this.sendViaMultiSession(payload);
+    return this.sendViaMultiSession(payload, opts); // <<— usa opts.longTimeout para jobs
   },
 
   /**
    * Notifica estado de reserva (aprobada/rechazada) por la sesión WA de la organización.
    */
-  async sendWhatsappStatusReservation(status, reservation, reservationDetails) {
+  async sendWhatsappStatusReservation(
+    status,
+    reservation,
+    reservationDetails,
+    opts = {}
+  ) {
     const org = reservation?.organizationId;
     if (!org?.clientIdWhatsapp) {
       throw new Error(
         "La organización no tiene sesión de WhatsApp configurada"
       );
     }
-
     const msg =
       status === "approved"
         ? whatsappTemplates.statusReservationApproved(reservationDetails)
@@ -205,7 +244,7 @@ const whatsappService = {
       message: msg,
     };
 
-    return this.sendViaMultiSession(payload);
+    return this.sendViaMultiSession(payload, opts);
   },
 };
 

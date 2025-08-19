@@ -3,16 +3,34 @@ import organizationService from "./organizationService.js";
 import serviceService from "./serviceService.js";
 import whatsappService from "./sendWhatsappService.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
-// Helpers locales
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Valida que haya dígitos suficientes (tu whatsappService.formatPhone ya normaliza)
-// Aquí solo filtramos vacíos o absurdamente cortos.
-const hasUsablePhone = (phone) => {
-  if (!phone) return false;
-  const digits = String(phone).replace(/\D/g, "");
-  return digits.length >= 8; // ajusta si quieres ser más estricto (10)
-};
+// Utilidades mínimas (si ya las tienes, quítalas de aquí)
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const hasUsablePhone = (p) => !!String(p || "").replace(/\D/g, "").length;
+
+/**
+ * Obtiene el inicio y fin de "hoy" en Bogotá, en UTC.
+ * Bogotá no tiene DST: offset fijo UTC-5.
+ */
+function getBogotaTodayWindowUTC(baseDate = new Date()) {
+  // “Fecha hoy” en Bogotá
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Bogota",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(baseDate);
+
+  const y = Number(parts.find((p) => p.type === "year").value);
+  const m = Number(parts.find((p) => p.type === "month").value) - 1; // 0-11
+  const d = Number(parts.find((p) => p.type === "day").value);
+
+  // 00:00 Bogotá -> 05:00 UTC del mismo día
+  const dayStartUTC = new Date(Date.UTC(y, m, d, 5, 0, 0, 0));
+  // 23:59:59.999 Bogotá -> 04:59:59.999 UTC del día siguiente
+  const dayEndUTC = new Date(Date.UTC(y, m, d + 1, 4, 59, 59, 999));
+  return { dayStartUTC, dayEndUTC };
+}
 
 const appointmentService = {
   // Crear una nueva cita
@@ -260,33 +278,13 @@ const appointmentService = {
   },
 
   sendDailyReminders: async () => {
-    const ADMIN_PHONE = "+573132735116"; // E.164 (con +)
-
-    const fmtBogota = (date) =>
-      new Intl.DateTimeFormat("es-ES", {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-        timeZone: "America/Bogota",
-      }).format(date);
-
     try {
-      // Ventana: todo el día de hoy en Bogotá
-      const nowUtc = Date.now();
-      const bogotaNow = new Date(nowUtc - 5 * 60 * 60 * 1000); // Bogotá = UTC-5
-      const y = bogotaNow.getUTCFullYear();
-      const m = bogotaNow.getUTCMonth();
-      const d = bogotaNow.getUTCDate();
+      const { dayStartUTC, dayEndUTC } = getBogotaTodayWindowUTC();
 
-      const startUTC = new Date(Date.UTC(y, m, d, 5, 0, 0, 0)); // 00:00 BOG = 05:00 UTC
-      const endUTC = new Date(Date.UTC(y, m, d + 1, 4, 59, 59, 999)); // 23:59:59.999 BOG = 04:59:59.999 UTC (+1)
-
+      // 1) Todas las citas de HOY (Bogotá), sin recordatorio enviado aún
       const appointments = await appointmentModel
         .find({
-          startDate: { $gte: startUTC, $lt: endUTC },
+          startDate: { $gte: dayStartUTC, $lt: dayEndUTC },
           reminderSent: false,
         })
         .populate("client")
@@ -294,75 +292,47 @@ const appointmentService = {
         .populate("employee")
         .populate("organizationId");
 
-      // Agrupar por organización
+      if (!appointments.length) {
+        console.log("[Reminders] No hay citas hoy.");
+        return;
+      }
+
+      // 2) Agrupar por organización
       const byOrg = new Map();
-      for (const appt of appointments) {
-        const orgId = appt.organizationId?._id?.toString();
+      for (const a of appointments) {
+        const orgId = a?.organizationId?._id?.toString();
         if (!orgId) continue;
         if (!byOrg.has(orgId)) byOrg.set(orgId, []);
-        byOrg.get(orgId).push(appt);
+        byOrg.get(orgId).push(a);
       }
 
       let totalOk = 0;
       let totalFail = 0;
 
-      if (byOrg.size === 0) {
-        console.log("No hay citas para enviar recordatorios hoy.");
-
-        // Aviso opcional si defines ADMIN_ORG_ID en .env
-        if (process.env.ADMIN_ORG_ID) {
-          try {
-            await whatsappService.sendMessage(
-              process.env.ADMIN_ORG_ID,
-              ADMIN_PHONE,
-              `ℹ️ No hay citas para enviar hoy.\nRango Bogotá: ${fmtBogota(
-                startUTC
-              )} a ${fmtBogota(endUTC)}`
-            );
-          } catch (e) {
-            console.error("Error enviando aviso 'sin citas':", e.message);
-          }
-        }
-        return;
-      }
-
-      // Procesar por organización
+      // 3) Procesar por organización (secuencial por org para no saturar)
       for (const [orgId, appts] of byOrg.entries()) {
-        // Aviso de inicio por org
-        try {
-          await whatsappService.sendMessage(
-            orgId,
-            ADMIN_PHONE,
-            `▶️ Iniciando envío de recordatorios.\nRango Bogotá: ${fmtBogota(
-              startUTC
-            )} a ${fmtBogota(endUTC)}\nCitas encontradas: ${appts.length}`
+        const orgClientId = appts[0]?.organizationId?.clientIdWhatsapp;
+        if (
+          !orgClientId ||
+          !(await whatsappService.isClientReady(orgClientId))
+        ) {
+          console.warn(
+            `[${orgId}] Sesión WA no lista. Se omiten ${appts.length} recordatorios.`
           );
-        } catch (e) {
-          console.error(
-            "Error enviando aviso de inicio (org:",
-            orgId,
-            "):",
-            e.message
-          );
+          continue;
         }
 
         let ok = 0;
         let fail = 0;
 
         for (const appointment of appts) {
-          // Validación rápida de teléfono
           const rawPhone = appointment?.client?.phoneNumber;
           if (!hasUsablePhone(rawPhone)) {
             fail++;
-            console.warn(
-              `⚠️ Teléfono inválido/ausente para cliente '${
-                appointment?.client?.name || "Desconocido"
-              }' (org ${orgId}).`
-            );
             continue;
           }
 
-          // Fecha amigable
+          // Fecha legible en Bogotá
           const appointmentDateTime = new Intl.DateTimeFormat("es-ES", {
             day: "numeric",
             month: "long",
@@ -372,7 +342,6 @@ const appointmentService = {
             timeZone: "America/Bogota",
           }).format(new Date(appointment.startDate));
 
-          // Detalles a prueba de undefined
           const details = {
             names: appointment?.client?.name || "Cliente",
             date: appointmentDateTime,
@@ -388,82 +357,38 @@ const appointmentService = {
 
           try {
             const msg = whatsappTemplates.reminder(details);
-            await whatsappService.sendMessage(
-              orgId, // ← mismo organizationId
-              rawPhone,
-              msg
-            );
-
+            await whatsappService.sendMessage(orgId, rawPhone, msg, null, {
+              longTimeout: true,
+            });
             appointment.reminderSent = true;
             await appointment.save();
             ok++;
             totalOk++;
-          } catch (e) {
+          } catch (err) {
+            console.error(
+              `[${orgId}] Error enviando a ${rawPhone}:`,
+              err.message
+            );
             fail++;
             totalFail++;
-            console.error(
-              `Error enviando recordatorio a ${rawPhone} (org ${orgId}):`,
-              e.message
-            );
           }
 
-          // Pequeño respiro para no saturar
+          // Pequeño respiro para no saturar la sesión/cola
           await sleep(150);
         }
 
-        // Aviso de fin por org
-        try {
-          await whatsappService.sendMessage(
-            orgId,
-            ADMIN_PHONE,
-            `✅ Finalizado envío de recordatorios.\nÉxitos: ${ok}\nFallos: ${fail}\nTotal procesadas: ${appts.length}`
-          );
-        } catch (e) {
-          console.error(
-            "Error enviando aviso de fin (org:",
-            orgId,
-            "):",
-            e.message
-          );
-        }
+        console.log(
+          `[${orgId}] Finalizado: OK=${ok} | Fail=${fail} | Total=${appts.length}`
+        );
       }
 
-      // Resumen global (opcional)
       console.log(
-        `📊 Resumen global recordatorios — OK: ${totalOk} | Fallos: ${totalFail} | Total: ${
+        `[Reminders] Global — OK=${totalOk} | Fail=${totalFail} | Total=${
           totalOk + totalFail
         }`
       );
-
-      // Aviso global opcional al admin
-      if (process.env.ADMIN_ORG_ID) {
-        try {
-          await whatsappService.sendMessage(
-            process.env.ADMIN_ORG_ID,
-            ADMIN_PHONE,
-            `📊 Resumen global recordatorios\nOK: ${totalOk}\nFallos: ${totalFail}\nTotal: ${
-              totalOk + totalFail
-            }`
-          );
-        } catch (e) {
-          console.error("Error enviando resumen global al admin:", e.message);
-        }
-      }
     } catch (e) {
-      console.error("Error ejecutando sendDailyReminders:", e.message);
-
-      // Aviso de error fatal (usa ADMIN_ORG_ID si lo tienes configurado)
-      if (process.env.ADMIN_ORG_ID) {
-        try {
-          await whatsappService.sendMessage(
-            process.env.ADMIN_ORG_ID,
-            ADMIN_PHONE,
-            `⛔ Error en sendDailyReminders: ${e.message}`
-          );
-        } catch (e2) {
-          console.error("Además falló el aviso admin:", e2.message);
-        }
-      }
+      console.error("Error en sendDailyReminders:", e.message);
     }
   },
 };
