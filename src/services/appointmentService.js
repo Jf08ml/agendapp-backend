@@ -124,20 +124,20 @@ const appointmentService = {
     };
 
     // Enviar confirmación por WhatsApp
-    try {
-      const msg = whatsappTemplates.scheduleAppointment(appointmentDetails);
+    // try {
+    //   const msg = whatsappTemplates.scheduleAppointment(appointmentDetails);
 
-      await whatsappService.sendMessage(
-        organizationId,
-        client?.phoneNumber,
-        msg
-      );
-    } catch (error) {
-      console.error(
-        `Error enviando la confirmación para ${client?.phoneNumber}:`,
-        error.message
-      );
-    }
+    //   await whatsappService.sendMessage(
+    //     organizationId,
+    //     client?.phoneNumber,
+    //     msg
+    //   );
+    // } catch (error) {
+    //   console.error(
+    //     `Error enviando la confirmación para ${client?.phoneNumber}:`,
+    //     error.message
+    //   );
+    // }
 
     // Guardar la cita en la base de datos
     return await newAppointment.save();
