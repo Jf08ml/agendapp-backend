@@ -6,6 +6,9 @@ const router = express.Router();
 // Crear una nueva cita
 router.post("/appointments", appointmentController.createAppointment);
 
+// Crear múltiples citas (batch)
+router.post("/appointments/batch", appointmentController.createAppointmentsBatch);
+
 // Obtener todas las citas
 router.get("/appointments", appointmentController.getAppointments);
 

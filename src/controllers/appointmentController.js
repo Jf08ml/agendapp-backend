@@ -30,6 +30,43 @@ const appointmentController = {
     }
   },
 
+  // Controlador para crear múltiples citas (batch)
+  createAppointmentsBatch: async (req, res) => {
+    try {
+      const createdAppointments =
+        await appointmentService.createAppointmentsBatch(req.body);
+
+      // Notificación webpush (una o varias, según tu UX)
+      // Por ejemplo, notificar al empleado:
+      if (createdAppointments.length > 0) {
+        const org = await organizationService.getOrganizationById(
+          createdAppointments[0].organizationId
+        );
+
+        const notify = {
+          title: "Citas creadas",
+          message: `Se te asignaron ${createdAppointments.length} citas`,
+          icon: org.branding?.pwaIcon,
+        };
+
+        // Usa el campo correcto (employee puede ser id u objeto; ajústalo)
+        await subscriptionService.sendNotificationToUser(
+          createdAppointments[0].employee,
+          JSON.stringify(notify)
+        );
+      }
+
+      sendResponse(
+        res,
+        201,
+        createdAppointments,
+        "Citas creadas exitosamente (batch)"
+      );
+    } catch (error) {
+      sendResponse(res, 500, null, error.message);
+    }
+  },
+
   // Controlador para obtener todas las citas
   getAppointments: async (req, res) => {
     try {

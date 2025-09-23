@@ -50,14 +50,15 @@ const appointmentModelSchema = new mongoose.Schema(
       default: 0,
     },
     customPrice: {
-      type: Number, 
+      type: Number,
       default: null,
     },
-    additionalItems: [additionalItemSchema], 
+    additionalItems: [additionalItemSchema],
     totalPrice: {
       type: Number,
       required: true,
     },
+    groupId: { type: mongoose.Schema.Types.ObjectId, index: true },
   },
   {
     timestamps: true,

@@ -3,6 +3,9 @@ import organizationService from "./organizationService.js";
 import serviceService from "./serviceService.js";
 import whatsappService from "./sendWhatsappService.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
+import clientService from "../services/clientService.js"
+import employeeService from "../services/employeeService.js";
+import mongoose from "mongoose";
 
 // Utilidades mínimas (si ya las tienes, quítalas de aquí)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -31,6 +34,26 @@ function getBogotaTodayWindowUTC(baseDate = new Date()) {
   const dayEndUTC = new Date(Date.UTC(y, m, d + 1, 4, 59, 59, 999));
   return { dayStartUTC, dayEndUTC };
 }
+
+// Helpers de formato (añádelos arriba, cerca de getBogotaTodayWindowUTC)
+const TZ = "America/Bogota";
+const fmt = (d) =>
+  new Intl.DateTimeFormat("es-ES", {
+    day: "numeric",
+    month: "long",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: TZ,
+  }).format(new Date(d));
+
+const fmtTime = (d) =>
+  new Intl.DateTimeFormat("es-ES", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: TZ,
+  }).format(new Date(d));
 
 const appointmentService = {
   // Crear una nueva cita
@@ -141,6 +164,167 @@ const appointmentService = {
 
     // Guardar la cita en la base de datos
     return await newAppointment.save();
+  },
+
+  // Crear múltiples citas (batch)
+  createAppointmentsBatch: async (payload) => {
+    const {
+      services,
+      employee,
+      employeeRequestedByClient,
+      client,
+      startDate,
+      organizationId,
+      advancePayment,
+      customPrices = {},
+      additionalItemsByService = {},
+    } = payload;
+
+    if (!Array.isArray(services) || services.length === 0) {
+      throw new Error("Debe enviar al menos un servicio.");
+    }
+    if (!employee || !client || !startDate || !organizationId) {
+      throw new Error("Faltan datos requeridos para crear las citas.");
+    }
+
+    const org = await organizationService.getOrganizationById(organizationId);
+    if (!org) throw new Error("Organización no encontrada.");
+
+    const session = await mongoose.startSession();
+    let committed = false;
+
+    // Variables para uso posterior (fuera de la TX)
+    const created = [];
+    const groupId = new mongoose.Types.ObjectId();
+
+    try {
+      session.startTransaction();
+
+      let currentStart = new Date(startDate);
+
+      for (const serviceId of services) {
+        const svc = await serviceService.getServiceById(serviceId);
+        if (!svc) throw new Error(`Servicio no encontrado: ${serviceId}`);
+
+        const duration = svc.duration ?? 0; // minutos
+        const serviceEnd = new Date(currentStart.getTime() + duration * 60000);
+
+        const additionalItems = additionalItemsByService[serviceId] || [];
+        for (const item of additionalItems) {
+          if (
+            !item?.name ||
+            item.price == null ||
+            item.price < 0 ||
+            item.quantity < 0
+          ) {
+            throw new Error("Adicionales inválidos en la cita");
+          }
+        }
+
+        const basePrice = customPrices[serviceId] ?? svc.price ?? 0;
+        const additionalCost = additionalItems.reduce(
+          (sum, item) => sum + item.price * item.quantity,
+          0
+        );
+        const totalPrice = basePrice + additionalCost;
+
+        const doc = new appointmentModel({
+          groupId,
+          service: serviceId,
+          employee,
+          employeeRequestedByClient: !!employeeRequestedByClient,
+          client,
+          startDate: currentStart,
+          endDate: serviceEnd,
+          organizationId,
+          advancePayment,
+          customPrice: customPrices[serviceId],
+          additionalItems,
+          totalPrice,
+          status: "pending",
+        });
+
+        const saved = await doc.save({ session });
+        created.push({
+          saved,
+          svc,
+          start: new Date(currentStart),
+          end: new Date(serviceEnd),
+        });
+        currentStart = serviceEnd; // siguiente inicia donde terminó este
+      }
+
+      // (Opcional) validación de solapes a nivel batch aquí…
+
+      await session.commitTransaction();
+      committed = true;
+    } catch (err) {
+      if (!committed) {
+        try {
+          await session.abortTransaction();
+        } catch {}
+      }
+      throw err;
+    } finally {
+      await session.endSession();
+    }
+
+    // ---------- EFECTOS EXTERNOS (fuera de la transacción) ----------
+    try {
+      if (created.length > 0) {
+        const first = created[0];
+        const last = created[created.length - 1];
+
+        const dateRange =
+          created.length === 1
+            ? fmt(first.start)
+            : `${fmt(first.start)} – ${fmtTime(last.end)}`;
+
+        const servicesForMsg = created.map((c, i) => ({
+          name: c.svc.name,
+          start: fmtTime(c.start),
+          end: fmtTime(c.end),
+        }));
+
+        // 🔹 Cargar cliente/empleado cuando son IDs
+        const clientDoc =
+          typeof client === "string"
+            ? await clientService.getClientById(client)
+            : client;
+        const employeeDoc =
+          typeof employee === "string"
+            ? await employeeService.getEmployeeById(employee)
+            : employee;
+
+        const phone = clientDoc?.phoneNumber;
+        if (!hasUsablePhone(phone)) {
+          console.warn(
+            "Cliente sin teléfono utilizable; no se enviará WhatsApp."
+          );
+          return created.map((c) => c.saved);
+        }
+
+        const msg = whatsappTemplates.scheduleAppointmentBatch({
+          names: clientDoc?.name || "Estimado cliente",
+          dateRange,
+          organization: org.name,
+          services: servicesForMsg,
+          employee: employeeDoc?.names || "Nuestro equipo",
+        });
+
+        await whatsappService.sendMessage(organizationId, phone, msg, null, {
+          longTimeout: true,
+        });
+      }
+    } catch (error) {
+      // Importante: NO intentes abortar/commit aquí; la TX ya terminó.
+      console.error(
+        `Error enviando la confirmación batch a ${client?.phoneNumber}:`,
+        error.message
+      );
+    }
+
+    return created.map((c) => c.saved);
   },
 
   // Obtener todas las citas

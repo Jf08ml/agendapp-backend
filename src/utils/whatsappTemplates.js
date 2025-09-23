@@ -13,6 +13,33 @@ Si tienes alguna pregunta o necesitas modificar tu cita, *puedes responder direc
 
 ¡Te esperamos pronto!`,
 
+  scheduleAppointmentBatch: ({
+    names,
+    dateRange,
+    organization,
+    services,
+    employee,
+  }) => {
+    // services: [{ name, start, end }]
+    const list = services
+      .map((s, i) => `  ${i + 1}. ${s.name} (${s.start} – ${s.end})`)
+      .join("\n");
+
+    return `📅 ¡Hola, ${names}!
+
+¡Tus citas han sido agendadas exitosamente!
+
+🗓️ Franja: ${dateRange}
+📍 Lugar: ${organization}
+✨ Servicios:
+${list}
+👩‍💼 Te atenderá: ${employee}
+
+Si necesitas ajustar horarios o cambiar algún servicio, *responde a este chat* y con gusto te ayudamos.
+
+¡Te esperamos!`;
+  },
+
   reminder: ({ names, date, organization, service, employee }) =>
     `📅 ¡Hola, ${names}!
 
