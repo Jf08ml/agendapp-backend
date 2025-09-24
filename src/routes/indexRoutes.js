@@ -9,6 +9,7 @@ import employeeRoutes from "./employee";
 import advanceRoutes from "./advance";
 import roleRoutes from "./role";
 import organizationRoutes from "./organizationRoutes";
+import organizationRoutesPublic from "./organizationRoutesPublic";
 import authRoutes from "./authRoutes";
 import subscriptionRoutes from "./subscriptionRoutes";
 import whatsappRoutes from "./whatsappRoutes";
@@ -90,6 +91,7 @@ router.use(organizationResolver, reservationRoutes);
 router.use(organizationResolver, organizationRoutes);
 
 // Rutas que NO dependen de tenant/organización
+router.use(organizationRoutesPublic);
 router.use(roleRoutes);
 router.use(authRoutes);
 router.use(subscriptionRoutes);
