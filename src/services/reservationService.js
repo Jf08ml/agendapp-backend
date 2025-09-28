@@ -102,18 +102,18 @@ const reservationService = {
         };
 
         // Enviar confirmación por WhatsApp
-        try {
-          await whatsappService.sendWhatsappStatusReservation(
-            updateData.status,
-            reservation,
-            reservationDetails
-          );
-        } catch (error) {
-          console.error(
-            `Error enviando la confirmación para ${reservation.customerDetails?.phone}:`,
-            error.message
-          );
-        }
+        // try {
+        //   await whatsappService.sendWhatsappStatusReservation(
+        //     updateData.status,
+        //     reservation,
+        //     reservationDetails
+        //   );
+        // } catch (error) {
+        //   console.error(
+        //     `Error enviando la confirmación para ${reservation.customerDetails?.phone}:`,
+        //     error.message
+        //   );
+        // }
       }
 
       return updatedReservation;
