@@ -312,9 +312,9 @@ const appointmentService = {
           employee: employeeDoc?.names || "Nuestro equipo",
         });
 
-        await whatsappService.sendMessage(organizationId, phone, msg, null, {
-          longTimeout: true,
-        });
+        // await whatsappService.sendMessage(organizationId, phone, msg, null, {
+        //   longTimeout: true,
+        // });
       }
     } catch (error) {
       // Importante: NO intentes abortar/commit aquí; la TX ya terminó.
