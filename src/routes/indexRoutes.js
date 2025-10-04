@@ -17,6 +17,8 @@ import cronRoutes from "./cronRoutes";
 import reservationRoutes from "./reservation";
 import notificationRoutes from "./notification";
 import planRoutes from "./planRoutes";
+import waRoutes from "./waRoutes";
+import reminderRoutes from "./reminderRoutes";
 import { organizationResolver } from "../middleware/organizationResolver";
 
 const router = Router();
@@ -99,5 +101,7 @@ router.use(whatsappRoutes);
 router.use(cronRoutes);
 router.use(notificationRoutes);
 router.use(planRoutes);
+router.use(waRoutes);
+router.use(reminderRoutes);
 
 export default router;
