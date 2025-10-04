@@ -46,6 +46,7 @@ export const waIntegrationService = {
   // ⬇️ NUEVO: enviar mensaje vía wa-backend
   async sendMessage({ orgId, clientId, phone, message, image }) {
     const org = await Organization.findById(orgId);
+    console.log("sendMessage", { orgId, clientId, phone, message, image });
     if (!org) throw new Error("Organización no encontrada");
     if (!clientId) clientId = org.clientIdWhatsapp;
     if (!clientId)
@@ -54,8 +55,9 @@ export const waIntegrationService = {
     // Validación básica
     if (!phone) throw new Error("Falta phone");
     if (!message && !image) throw new Error("Debes enviar 'message' o 'image'");
-
+    console.log("Enviando WhatsApp a", phone, { message, image });
     const r = await waSend({ clientId, phone, message, image });
+    console.log("waSend result:", r);
     return r;
   },
 

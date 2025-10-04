@@ -3,14 +3,14 @@ import organizationService from "./organizationService.js";
 import serviceService from "./serviceService.js";
 import whatsappService from "./sendWhatsappService.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
-import clientService from "../services/clientService.js"
+import clientService from "../services/clientService.js";
 import employeeService from "../services/employeeService.js";
+import { waIntegrationService } from "../services/waIntegrationService.js";
+import { hasUsablePhone, normalizeToCOE164 } from "../utils/timeAndPhones.js";
 import mongoose from "mongoose";
 
 // Utilidades mínimas (si ya las tienes, quítalas de aquí)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const hasUsablePhone = (p) => !!String(p || "").replace(/\D/g, "").length;
-
 /**
  * Obtiene el inicio y fin de "hoy" en Bogotá, en UTC.
  * Bogotá no tiene DST: offset fijo UTC-5.
@@ -193,7 +193,6 @@ const appointmentService = {
     const session = await mongoose.startSession();
     let committed = false;
 
-    // Variables para uso posterior (fuera de la TX)
     const created = [];
     const groupId = new mongoose.Types.ObjectId();
 
@@ -206,7 +205,7 @@ const appointmentService = {
         const svc = await serviceService.getServiceById(serviceId);
         if (!svc) throw new Error(`Servicio no encontrado: ${serviceId}`);
 
-        const duration = svc.duration ?? 0; // minutos
+        const duration = svc.duration ?? 0; // en minutos
         const serviceEnd = new Date(currentStart.getTime() + duration * 60000);
 
         const additionalItems = additionalItemsByService[serviceId] || [];
@@ -251,10 +250,8 @@ const appointmentService = {
           start: new Date(currentStart),
           end: new Date(serviceEnd),
         });
-        currentStart = serviceEnd; // siguiente inicia donde terminó este
+        currentStart = serviceEnd; // la siguiente inicia donde terminó esta
       }
-
-      // (Opcional) validación de solapes a nivel batch aquí…
 
       await session.commitTransaction();
       committed = true;
@@ -280,13 +277,13 @@ const appointmentService = {
             ? fmt(first.start)
             : `${fmt(first.start)} – ${fmtTime(last.end)}`;
 
-        const servicesForMsg = created.map((c, i) => ({
+        const servicesForMsg = created.map((c) => ({
           name: c.svc.name,
           start: fmtTime(c.start),
           end: fmtTime(c.end),
         }));
 
-        // 🔹 Cargar cliente/empleado cuando son IDs
+        // Cargar cliente/empleado si vinieron como IDs
         const clientDoc =
           typeof client === "string"
             ? await clientService.getClientById(client)
@@ -296,31 +293,42 @@ const appointmentService = {
             ? await employeeService.getEmployeeById(employee)
             : employee;
 
-        const phone = clientDoc?.phoneNumber;
-        if (!hasUsablePhone(phone)) {
+        const rawPhone = clientDoc?.phoneNumber;
+
+        // 1) validar con tu hasUsablePhone (retorna "57XXXXXXXXXX" o null)
+        const usable = hasUsablePhone(rawPhone);
+        if (!usable) {
           console.warn(
             "Cliente sin teléfono utilizable; no se enviará WhatsApp."
           );
           return created.map((c) => c.saved);
         }
 
+        // 2) normalizar a E.164 (+57XXXXXXXXXX) para el envío 1-a-1
+        //    Si tu wa-backend acepta también "57XXXXXXXXXX", podrías usar `usable` directo.
+        const phoneE164 = hasUsablePhone(rawPhone) || `+${usable}`;
+
+        // Armar mensaje final con tu template existente
         const msg = whatsappTemplates.scheduleAppointmentBatch({
           names: clientDoc?.name || "Estimado cliente",
           dateRange,
           organization: org.name,
-          services: servicesForMsg,
+          services: servicesForMsg, // [{ name, start, end }]
           employee: employeeDoc?.names || "Nuestro equipo",
         });
 
-        // await whatsappService.sendMessage(organizationId, phone, msg, null, {
-        //   longTimeout: true,
-        // });
+        // Envío 1-a-1 (mensaje ya renderizado)
+        await waIntegrationService.sendMessage({
+          orgId: organizationId,
+          phone: phoneE164,
+          message: msg,
+          image: null,
+        });
       }
     } catch (error) {
-      // Importante: NO intentes abortar/commit aquí; la TX ya terminó.
       console.error(
         `Error enviando la confirmación batch a ${client?.phoneNumber}:`,
-        error.message
+        error?.message || error
       );
     }
 
