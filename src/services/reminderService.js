@@ -9,9 +9,18 @@ import {
 import { messageTplReminder } from "../utils/bulkTemplates.js";
 
 export const reminderService = {
+  /**
+   * Envía recordatorios de las citas del día agrupando por organización y por teléfono del cliente.
+   * Un cliente con varias citas en el día recibirá un solo mensaje con la lista de servicios/horas.
+   *
+   * @param {Object} params
+   * @param {string} [params.orgId] - Si se pasa, filtra por organización
+   * @param {boolean} [params.dryRun=false] - Si true, prepara pero no envía
+   */
   sendDailyRemindersViaCampaign: async ({ orgId, dryRun = false } = {}) => {
     const { dayStartUTC, dayEndUTC } = getBogotaTodayWindowUTC();
 
+    // 1) Traer citas de hoy aún no notificadas
     const appointments = await appointmentModel
       .find({
         ...(orgId ? { organizationId: orgId } : {}),
@@ -25,66 +34,134 @@ export const reminderService = {
       return { ok: true, created: 0 };
     }
 
-    // agrupar por org
+    // 2) Agrupar por organización
     const byOrg = new Map();
     for (const a of appointments) {
-      const orgId = a?.organizationId?._id?.toString();
-      if (!orgId) continue;
-      if (!byOrg.has(orgId)) byOrg.set(orgId, []);
-      byOrg.get(orgId).push(a);
+      const _orgId = a?.organizationId?._id?.toString();
+      if (!_orgId) continue;
+      if (!byOrg.has(_orgId)) byOrg.set(_orgId, []);
+      byOrg.get(_orgId).push(a);
     }
 
     const results = [];
 
-    for (const [orgId, appts] of byOrg.entries()) {
+    // Formatters reutilizables
+    const fmtHour = new Intl.DateTimeFormat("es-ES", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: "America/Bogota",
+    });
+    const fmtDay = new Intl.DateTimeFormat("es-ES", {
+      day: "numeric",
+      month: "long",
+      timeZone: "America/Bogota",
+    });
+
+    // 3) Por cada organización, construir campañas con items unificados por teléfono
+    for (const [_orgId, appts] of byOrg.entries()) {
       const org = appts[0]?.organizationId;
       const clientId = org?.clientIdWhatsapp;
       if (!clientId) {
-        console.warn(`[${orgId}] Sin clientIdWhatsapp, omito ${appts.length}.`);
+        console.warn(
+          `[${_orgId}] Sin clientIdWhatsapp, omito ${appts.length}.`
+        );
         continue;
       }
 
-      // construir items
-      const items = [];
+      // --- Unificar por teléfono ---
+      // phone -> bucket con info agregada
+      const byPhone = new Map();
       for (const a of appts) {
-        const normalized = hasUsablePhone(a?.client?.phoneNumber);
-        if (!normalized) continue; // si no es válido/normalizable, lo saltamos
+        const phone = hasUsablePhone(a?.client?.phoneNumber);
+        if (!phone) continue; // ignora si no es normalizable/usable
 
-        const appointmentDateTime = new Intl.DateTimeFormat("es-ES", {
-          day: "numeric",
-          month: "long",
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: true,
-          timeZone: "America/Bogota",
-        }).format(new Date(a.startDate));
+        const start = new Date(a.startDate);
+        const end = a.endDate ? new Date(a.endDate) : null;
 
-        const vars = {
-          names: a?.client?.name || "Cliente",
-          date: appointmentDateTime,
-          organization: org?.name || "",
-          employee: a?.employee?.names || "",
-          service: a?.service
-            ? `${a.service.type || ""} - ${a.service.name || ""}`.trim()
-            : "",
-        };
+        const serviceName = a?.service
+          ? `${a.service.type || ""} - ${a.service.name || ""}`.trim()
+          : "Servicio";
 
-        items.push({ phone: normalized, vars });
+        const timeLabel = end
+          ? `${fmtHour.format(start)} – ${fmtHour.format(end)}`
+          : `${fmtHour.format(start)}`;
+
+        if (!byPhone.has(phone)) {
+          byPhone.set(phone, {
+            phone,
+            names: a?.client?.name || "Cliente",
+            services: [], // { name, time }
+            firstStart: start,
+            lastEnd: end || start,
+            employees: new Set(),
+            apptIds: new Set(),
+          });
+        }
+
+        const bucket = byPhone.get(phone);
+        bucket.services.push({ name: serviceName, time: timeLabel });
+        if (start < bucket.firstStart) bucket.firstStart = start;
+        if ((end || start) > bucket.lastEnd) bucket.lastEnd = end || start;
+        if (a?.employee?.names) bucket.employees.add(a.employee.names);
+        bucket.apptIds.add(String(a._id));
       }
 
-      if (!items.length) continue;
+      // 4) Construir items de campaña finales
+      const items = [];
+      const includedIds = [];
 
-      // (opcional) sincronizar opt-in basado en tu DB:
+      for (const bucket of byPhone.values()) {
+        if (!bucket.services.length) continue;
+
+        const servicesList = bucket.services
+          .map((s, i) => `  ${i + 1}. ${s.name} (${s.time})`)
+          .join("\n");
+
+        const dateRange =
+          bucket.firstStart.getTime() === bucket.lastEnd.getTime()
+            ? `${fmtDay.format(bucket.firstStart)} ${fmtHour.format(
+                bucket.firstStart
+              )}`
+            : `${fmtDay.format(bucket.firstStart)} ${fmtHour.format(
+                bucket.firstStart
+              )} – ${fmtHour.format(bucket.lastEnd)}`;
+
+        const countNum = bucket.services.length;
+        const isSingle = countNum === 1;
+
+        const vars = {
+          names: bucket.names,
+          date_range: dateRange,
+          organization: org?.name || "",
+          services_list: servicesList,
+          employee: Array.from(bucket.employees).join(", "),
+          count: String(countNum),
+          cita_pal: isSingle ? "cita" : "citas",
+          agendada_pal: isSingle ? "agendada" : "agendadas",
+        };
+
+        items.push({ phone: bucket.phone, vars });
+        includedIds.push(...Array.from(bucket.apptIds));
+      }
+
+      if (!items.length) {
+        console.log(`[${_orgId}] No hay items válidos (teléfonos/vars).`);
+        continue;
+      }
+
+      // 5) (opcional) Sincronizar opt-in
       try {
         await waBulkOptIn(items.map((it) => it.phone));
       } catch (e) {
-        console.warn(`[${orgId}] OptIn falló: ${e.message}`);
+        console.warn(`[${_orgId}] OptIn falló: ${e?.message || e}`);
       }
 
-      // enviar campaña
+      // 6) Enviar campaña
       const title = `Recordatorios ${new Date().toISOString().slice(0, 10)} (${
-        org?.name || orgId
+        org?.name || _orgId
       })`;
+
       const r = await waBulkSend({
         clientId,
         title,
@@ -94,17 +171,31 @@ export const reminderService = {
       });
 
       console.log(
-        `[${orgId}] Enviados ${r.prepared} mensajes (dryRun=${dryRun})`
+        `[${_orgId}] Enviados ${r.prepared} mensajes (dryRun=${dryRun})`
       );
 
-      results.push({ orgId, bulkId: r.bulkId, prepared: r.prepared, title });
-      // 👇 Opcional: marca preventivamente las citas para no reintentar en el mismo día (estrategia "optimista")
-      await appointmentModel.updateMany(
-        { _id: { $in: appts.map((a) => a._id) } },
-        { $set: { reminderSent: true, reminderBulkId: r.bulkId } }
-      );
+      results.push({
+        orgId: _orgId,
+        bulkId: r.bulkId,
+        prepared: r.prepared,
+        title,
+      });
 
-      // pequeño respiro si quieres
+      // 7) Marcar como recordatorio enviado SOLO las citas incluidas
+      try {
+        if (includedIds.length) {
+          await appointmentModel.updateMany(
+            { _id: { $in: includedIds } },
+            { $set: { reminderSent: true, reminderBulkId: r.bulkId } }
+          );
+        }
+      } catch (e) {
+        console.warn(
+          `[${_orgId}] Error al marcar reminderSent: ${e?.message || e}`
+        );
+      }
+
+      // 8) Pequeño respiro para no saturar
       await sleep(200);
     }
 
