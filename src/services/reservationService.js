@@ -16,14 +16,14 @@ const reservationService = {
   // Obtener todas las reservas de una organización
   getReservationsByOrganization: async (organizationId) => {
     return await Reservation.find({ organizationId }).populate(
-      "serviceId employeeId customer"
+      "serviceId employeeId customer appointmentId"
     );
   },
 
   // Obtener una reserva por ID
   getReservationById: async (id) => {
     return await Reservation.findById(id).populate(
-      "serviceId employeeId customer"
+      "serviceId employeeId customer appointmentId"
     );
   },
 
@@ -72,7 +72,10 @@ const reservationService = {
         };
 
         // Intentar crear la cita
-        await appointmentService.createAppointment(newAppointment);
+        const appt = await appointmentService.createAppointment(newAppointment);
+
+        // ← Guarda la referencia para trazabilidad
+        reservation.appointmentId = appt?._id || reservation.appointmentId;
       }
 
       // Actualizar la reserva con los datos proporcionados

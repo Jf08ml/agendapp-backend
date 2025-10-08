@@ -120,6 +120,11 @@ const organizationSchema = new mongoose.Schema({
     enum: ["basic", "professional", "premium"],
     default: "basic",
   },
+  reservationPolicy: {
+    type: String,
+    enum: ["manual", "auto_if_available"],
+    default: "manual",
+  },
 });
 
 export default mongoose.model("Organization", organizationSchema);

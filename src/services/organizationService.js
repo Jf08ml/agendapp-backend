@@ -24,7 +24,8 @@ const organizationService = {
       serviceReward,
       openingHours,
       plan,
-      clientIdWhatsapp, // Añadido
+      clientIdWhatsapp,
+      reservationPolicy,
     } = organizationData;
 
     // Encriptar la contraseña antes de guardarla
@@ -51,8 +52,12 @@ const organizationService = {
       openingHours: openingHours || { start: null, end: null },
       plan,
       clientIdWhatsapp,
-      branding: organizationData.branding || {}, 
+      branding: organizationData.branding || {},
       domains: organizationData.domains || [],
+      reservationPolicy:
+        reservationPolicy === "auto_if_available"
+          ? "auto_if_available"
+          : "manual",
     });
 
     const savedOrganization = await newOrganization.save();
@@ -106,6 +111,7 @@ const organizationService = {
       clientIdWhatsapp,
       branding,
       domain,
+      reservationPolicy,
     } = organizationData;
 
     const organization = await Organization.findById(id);
@@ -164,6 +170,13 @@ const organizationService = {
 
     if (domain !== undefined) {
       organization.domains = Array.isArray(domain) ? domain : [domain];
+    }
+
+    if (reservationPolicy !== undefined) {
+      if (!["manual", "auto_if_available"].includes(reservationPolicy)) {
+        throw new Error("reservationPolicy inválida");
+      }
+      organization.reservationPolicy = reservationPolicy;
     }
 
     // Encriptar la contraseña solo si se proporciona una nueva

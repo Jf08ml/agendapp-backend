@@ -180,6 +180,8 @@ const appointmentService = {
       additionalItemsByService = {},
     } = payload;
 
+    console.log(payload);
+
     if (!Array.isArray(services) || services.length === 0) {
       throw new Error("Debe enviar al menos un servicio.");
     }
