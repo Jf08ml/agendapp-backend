@@ -180,8 +180,6 @@ const appointmentService = {
       additionalItemsByService = {},
     } = payload;
 
-    console.log(payload);
-
     if (!Array.isArray(services) || services.length === 0) {
       throw new Error("Debe enviar al menos un servicio.");
     }
@@ -426,38 +424,136 @@ const appointmentService = {
       .exec();
   },
 
-  // Actualizar una cita
+  // Reemplaza tu updateAppointment por este
   updateAppointment: async (id, updatedData) => {
-    const appointment = await appointmentModel.findById(id);
+    const appt = await appointmentModel.findById(id);
+    if (!appt) throw new Error("Cita no encontrada");
 
-    if (!appointment) {
-      throw new Error("Cita no encontrada");
+    // 1) Resolver el "nuevo servicio" a partir de:
+    //    - updatedData.service (preferido), o
+    //    - updatedData.services[0] (compatibilidad si el FE envía array)
+    let newServiceId =
+      updatedData.service ??
+      (Array.isArray(updatedData.services)
+        ? updatedData.services[0]
+        : undefined);
+
+    // 2) Determinar startDate base para cálculos (si no llega, usamos el actual)
+    const newStart = updatedData.startDate
+      ? new Date(updatedData.startDate)
+      : new Date(appt.startDate);
+
+    // 3) Resolver additionalItems (dos formatos soportados)
+    //    - updatedData.additionalItems (array plano)
+    //    - updatedData.additionalItemsByService[serviceId] (mapa por servicio)
+    let additionalItems = updatedData.additionalItems;
+    if (
+      !additionalItems &&
+      updatedData.additionalItemsByService &&
+      newServiceId
+    ) {
+      additionalItems = updatedData.additionalItemsByService[newServiceId];
+    }
+    if (!Array.isArray(additionalItems)) {
+      additionalItems = appt.additionalItems || [];
     }
 
-    const { employee, startDate, endDate } = updatedData;
+    // Validar additionalItems
+    for (const item of additionalItems) {
+      if (
+        !item?.name ||
+        item.price == null ||
+        item.price < 0 ||
+        item.quantity < 0
+      ) {
+        throw new Error("Adicionales inválidos en la cita");
+      }
+    }
 
-    // Validar citas superpuestas
-    // if (employee && startDate && endDate) {
-    //   const overlappingAppointments = await appointmentModel.find({
-    //     employee,
-    //     _id: { $ne: id }, // Excluir la cita actual
-    //     $or: [
-    //       { startDate: { $lt: endDate, $gte: startDate } },
-    //       { endDate: { $gt: startDate, $lte: endDate } },
-    //       { startDate: { $lte: startDate }, endDate: { $gte: endDate } },
-    //     ],
-    //   });
+    // 4) Cargar servicio (si cambió) o el actual si necesitamos precio/duración
+    let svc = null;
+    let serviceChanged = false;
 
-    //   if (overlappingAppointments.length > 0) {
-    //     throw new Error(
-    //       "El empleado tiene citas que se cruzan en el horario seleccionado"
-    //     );
-    //   }
-    // }
+    if (newServiceId && String(newServiceId) !== String(appt.service)) {
+      svc = await serviceService.getServiceById(newServiceId);
+      if (!svc) throw new Error("Servicio nuevo no encontrado");
+      serviceChanged = true;
+    } else {
+      // Si no cambió el servicio pero necesitamos precio/duración, lo cargamos igual
+      // (por si el documento no tiene el service poblado)
+      svc = await serviceService.getServiceById(appt.service);
+      if (!svc) throw new Error("Servicio actual no encontrado");
+    }
 
-    // Actualizar los datos de la cita
-    appointment.set(updatedData);
-    return await appointment.save();
+    // 5) customPrice (prioriza el explícito del payload)
+    //    Si no hay customPrice, tomamos el precio del servicio
+    const explicitCustomPrice =
+      updatedData.customPrice != null
+        ? Number(updatedData.customPrice)
+        : appt.customPrice != null
+        ? Number(appt.customPrice)
+        : undefined;
+
+    const basePrice =
+      explicitCustomPrice != null
+        ? explicitCustomPrice
+        : Number(svc.price ?? 0);
+
+    // 6) Recalcular totalPrice
+    const additionalCost = additionalItems.reduce(
+      (sum, it) => sum + Number(it.price) * Number(it.quantity),
+      0
+    );
+    const totalPrice = basePrice + additionalCost;
+
+    // 7) Recalcular endDate:
+    //    - Si cambió el servicio → usar la duración del nuevo servicio
+    //    - Si no cambió pero llegó startDate → mantener la misma duración anterior
+    //      (duración = appt.endDate - appt.startDate)
+    let newEnd;
+    if (serviceChanged) {
+      const durationMin = Number(svc.duration ?? 0);
+      newEnd = new Date(newStart.getTime() + durationMin * 60000);
+    } else if (updatedData.startDate) {
+      const prevDurationMs =
+        new Date(appt.endDate).getTime() - new Date(appt.startDate).getTime();
+      newEnd = new Date(newStart.getTime() + Math.max(prevDurationMs, 0));
+    } else {
+      // No cambió servicio ni startDate → endDate queda igual salvo que FE lo envíe
+      newEnd = updatedData.endDate
+        ? new Date(updatedData.endDate)
+        : new Date(appt.endDate);
+    }
+
+    // 8) Set de campos básicos
+    if (serviceChanged) appt.service = newServiceId;
+    if (updatedData.employee) appt.employee = updatedData.employee;
+    if (updatedData.employeeRequestedByClient != null) {
+      appt.employeeRequestedByClient = !!updatedData.employeeRequestedByClient;
+    }
+    if (updatedData.client) appt.client = updatedData.client;
+    if (updatedData.organizationId)
+      appt.organizationId = updatedData.organizationId;
+    if (updatedData.advancePayment != null)
+      appt.advancePayment = updatedData.advancePayment;
+
+    // Fechas
+    appt.startDate = newStart;
+    appt.endDate = newEnd;
+
+    // Precios / adicionales
+    appt.customPrice =
+      explicitCustomPrice != null ? explicitCustomPrice : undefined;
+    appt.additionalItems = additionalItems;
+    appt.totalPrice = totalPrice;
+
+    // Si envían status u otros campos sueltos (nota, etc.), respétalos
+    const passthrough = ["status", "notes", "source", "meta"];
+    for (const k of passthrough) {
+      if (updatedData[k] != null) appt[k] = updatedData[k];
+    }
+
+    return await appt.save();
   },
 
   // Eliminar una cita
