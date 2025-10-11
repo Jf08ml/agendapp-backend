@@ -1,5 +1,15 @@
 import mongoose from "mongoose";
 
+const OpeningBreakSchema = new mongoose.Schema(
+  {
+    day: { type: Number, min: 0, max: 6, required: true }, // 0=Dom .. 6=Sáb
+    start: { type: String, required: true }, // "12:00"
+    end: { type: String, required: true }, // "13:00"
+    note: { type: String },
+  },
+  { _id: false }
+);
+
 const BrandingSchema = new mongoose.Schema(
   {
     logoUrl: String,
@@ -88,13 +98,17 @@ const organizationSchema = new mongoose.Schema({
     required: false,
   },
   openingHours: {
-    start: {
-      type: String,
-      required: true,
+    start: { type: String, required: true },
+    end: { type: String, required: true },
+
+    // NUEVO:
+    businessDays: {
+      type: [Number], // 0..6
+      default: [1, 2, 3, 4, 5], // L-V
     },
-    end: {
-      type: String,
-      required: true,
+    breaks: {
+      type: [OpeningBreakSchema],
+      default: [],
     },
   },
   // plan: {
