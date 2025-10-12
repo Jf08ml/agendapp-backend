@@ -1,23 +1,30 @@
+// src/services/reservationService.js
 import Reservation from "../models/reservationModel.js";
 import Client from "../models/clientModel.js";
 import appointmentService from "./appointmentService.js";
 import whatsappService from "./sendWhatsappService.js";
+import { RES_STATUS } from "../constants/reservationStatus.js";
 
 const reservationService = {
   // Crear una nueva reserva
   createReservation: async (reservationData, session = null) => {
     const reservation = new Reservation(reservationData);
-    if (session) {
-      return await reservation.save({ session });
-    }
+    if (session) return await reservation.save({ session });
     return await reservation.save();
   },
 
-  // Obtener todas las reservas de una organización
+  // Obtener todas las reservas de una organización (con orden por fecha)
   getReservationsByOrganization: async (organizationId) => {
-    return await Reservation.find({ organizationId }).populate(
-      "serviceId employeeId customer appointmentId"
-    );
+    return await Reservation.find({ organizationId })
+      .populate("serviceId employeeId customer appointmentId")
+      .sort({ startDate: 1, createdAt: -1 }); // primero próximas por fecha
+  },
+
+  // (Opcional) Filtrar por estado
+  getReservationsByOrgAndStatus: async (organizationId, status) => {
+    return await Reservation.find({ organizationId, status })
+      .populate("serviceId employeeId customer appointmentId")
+      .sort({ startDate: 1, createdAt: -1 });
   },
 
   // Obtener una reserva por ID
@@ -30,106 +37,72 @@ const reservationService = {
   // Actualizar una reserva
   updateReservation: async (id, updateData) => {
     try {
-      // Buscar la reserva y popular los campos necesarios
       const reservation = await Reservation.findById(id).populate(
         "serviceId employeeId customer organizationId"
       );
+      if (!reservation) throw new Error("Reserva no encontrada");
 
-      if (!reservation) {
-        throw new Error("Reserva no encontrada");
-      }
+      const nextStatus = updateData.status;
 
-      // Validar el estado de actualización
-      if (updateData.status === "approved") {
+      // Solo crear cita vía batch si pasa a "approved" y no hay appointment aún
+      const mustCreateAppointment =
+        nextStatus === RES_STATUS.APPROVED && !reservation.appointmentId;
+
+      if (mustCreateAppointment) {
         const { serviceId, employeeId, startDate, customer, organizationId } =
           reservation;
 
-        // Validar que el servicio exista y tenga un objeto válido
-        const service = typeof serviceId === "object" ? serviceId : null;
-        if (!service || !service.duration) {
+        // Validaciones mínimas
+        const serviceObj = typeof serviceId === "object" ? serviceId : null;
+        if (!serviceObj || !serviceObj.duration) {
           throw new Error(
             "El servicio asociado no es válido o falta la duración"
           );
         }
-
         if (!startDate) {
           throw new Error("La reserva no tiene una fecha de inicio válida");
         }
 
-        // Calcular la fecha de finalización
-        const endDate = new Date(startDate);
-        endDate.setMinutes(endDate.getMinutes() + service.duration);
-
-        const newAppointment = {
-          service: serviceId._id,
-          employee: employeeId?._id || null,
+        // Usa el batch incluso para un solo servicio (reutiliza notificación y lógica)
+        const createdAppts = await appointmentService.createAppointmentsBatch({
+          services: [serviceObj._id || serviceId], // arreglo obligatorio
+          employee: employeeId?._id || employeeId || null, // puede ser null
           employeeRequestedByClient: !!employeeId,
-          client: customer._id,
-          startDate,
-          endDate,
-          organizationId: organizationId._id,
-          status: "pending",
-        };
+          client: typeof customer === "object" ? customer._id.toString() : customer,
+          startDate, // la función encadena si hubiera más servicios
+          organizationId: organizationId._id || organizationId,
+          // Opcionales si los manejas en tu flujo:
+          // advancePayment,
+          // customPrices: { [serviceId]: precioCustom },
+          // additionalItemsByService: { [serviceId]: [...] },
+        });
 
-        // Intentar crear la cita
-        const appt = await appointmentService.createAppointment(newAppointment);
-
-        // ← Guarda la referencia para trazabilidad
-        reservation.appointmentId = appt?._id || reservation.appointmentId;
+        // Guarda referencia de la cita creada (primer y único elemento)
+        const createdFirst = Array.isArray(createdAppts)
+          ? createdAppts[0]
+          : null;
+        if (createdFirst?._id) {
+          reservation.appointmentId = createdFirst._id;
+        }
       }
 
-      // Actualizar la reserva con los datos proporcionados
+      // Si el estado es auto_approved, aquí NO creamos cita (decisión actual)
       Object.assign(reservation, updateData);
 
       const updatedReservation = await reservation.save();
 
-      if (
-        updateData.status === "approved" ||
-        updateData.status === "rejected"
-      ) {
-        // Preparar los detalles para el mensaje de WhatsApp
-        const appointmentDate = reservation.startDate.toLocaleDateString(
-          "es-ES",
-          {
-            day: "numeric",
-            month: "long",
-          }
-        );
-
-        const reservationDetails = {
-          names: reservation.customerDetails?.name || "Estimado cliente",
-          date: appointmentDate,
-          organization: reservation.organizationId?.name,
-          service: reservation.serviceId.name,
-          phoneNumber: reservation.organizationId?.phoneNumber,
-        };
-
-        // Enviar confirmación por WhatsApp
-        // try {
-        //   await whatsappService.sendWhatsappStatusReservation(
-        //     updateData.status,
-        //     reservation,
-        //     reservationDetails
-        //   );
-        // } catch (error) {
-        //   console.error(
-        //     `Error enviando la confirmación para ${reservation.customerDetails?.phone}:`,
-        //     error.message
-        //   );
-        // }
-      }
+      // (Opcional) Notificaciones por WhatsApp según estado
+      // if ([RES_STATUS.APPROVED, RES_STATUS.REJECTED, RES_STATUS.AUTO_APPROVED].includes(nextStatus)) {
+      //   // ... arma y envía mensaje
+      // }
 
       return updatedReservation;
     } catch (error) {
-      // Manejo general de errores
       if (error.message.includes("citas que se cruzan")) {
-        // Error específico de citas cruzadas
         throw new Error(
           "No se pudo crear la cita porque el empleado tiene citas que se cruzan en ese horario."
         );
       }
-
-      // Otros errores
       console.error("Error actualizando la reserva:", error.message);
       throw new Error(`No se pudo actualizar la reserva: ${error.message}`);
     }
@@ -148,7 +121,6 @@ const reservationService = {
     organizationId,
     birthDate,
   }) => {
-    // Buscar cliente existente por teléfono y organización
     const existingClient = await Client.findOne({
       phoneNumber,
       organizationId,
@@ -156,32 +128,22 @@ const reservationService = {
 
     if (existingClient) {
       let isUpdated = false;
-
-      // Verificar y actualizar si hay diferencias
       if (name && existingClient.name !== name) {
         existingClient.name = name;
         isUpdated = true;
       }
-
       if (email && existingClient.email !== email) {
         existingClient.email = email;
         isUpdated = true;
       }
-
       if (birthDate && existingClient.birthDate !== birthDate) {
         existingClient.birthDate = birthDate;
         isUpdated = true;
       }
-
-      // Guardar cambios si hubo actualizaciones
-      if (isUpdated) {
-        await existingClient.save();
-      }
-
+      if (isUpdated) await existingClient.save();
       return existingClient;
     }
 
-    // Crear un nuevo cliente si no existe
     const newClient = new Client({
       name,
       phoneNumber,

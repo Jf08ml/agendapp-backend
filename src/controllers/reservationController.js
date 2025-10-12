@@ -176,43 +176,141 @@ const reservationController = {
       });
 
       // === AUTO: crear citas batch (una sola transacción/mensaje)
-      if (policy === "auto_if_available") {
-        const commonEmployee = services[0]?.employeeId || null;
-        const employeeData = await employeeService.getEmployeeById(commonEmployee);
-        if (employeeData) {
-          try {
-            console.log(employeeData);
-            console.log(customer)
-            const createdAppointments =
-              await appointmentService.createAppointmentsBatch({
-                services: services.map((s) => s.serviceId),
-                employee: employeeData,
-                employeeRequestedByClient: true,
-                client: customer,
-                startDate,
-                organizationId,
-                // advancePayment, customPrices, additionalItemsByService: si aplica
-              });
+      const normalizeId = (v) =>
+        typeof v === "object" && v !== null ? v._id?.toString() : v?.toString();
 
-            await notifyNewBooking(org, customerDetails, {
-              isAuto: true,
-              multi: true,
-            });
+      // === AUTO: crear citas batch por empleado (grupos contiguos) y reservas auto-aprobadas
+      if (policy === "auto_if_available") {
+        try {
+          // 1) Validaciones mínimas
+          if (!Array.isArray(services) || services.length === 0) {
             return sendResponse(
               res,
-              201,
-              {
-                policy,
-                outcome: "approved_and_appointed",
-                appointments: createdAppointments,
-              },
-              "Citas creadas automáticamente"
+              400,
+              null,
+              "Debe enviar al menos un servicio."
             );
-          } catch (err) {
-            // cae a reservas pending si no hay disponibilidad o falla
           }
+          // Cada item debe traer employeeId para poder agendar de una vez
+          if (services.some((s) => !s.employeeId)) {
+            // Puedes elegir: (a) caer a pending, (b) error 400. Aquí aviso claro:
+            return sendResponse(
+              res,
+              400,
+              null,
+              "Para auto-reserva, cada servicio debe tener un empleado asignado."
+            );
+          }
+
+          // 2) Normalizar duraciones y calcular startDate encadenado por servicio
+          let cursor = new Date(startDate);
+          const normalized = [];
+          for (const item of services) {
+            let duration = item.duration;
+            if (!duration) {
+              const svcObj = await serviceModel.findById(item.serviceId);
+              if (!svcObj) throw new Error("Servicio no encontrado");
+              duration = Number(svcObj.duration || 0);
+            }
+            const itemStart = new Date(cursor);
+            cursor.setMinutes(cursor.getMinutes() + duration);
+
+            normalized.push({
+              serviceId: item.serviceId,
+              employeeId: normalizeId(item.employeeId),
+              startDate: itemStart,
+              duration,
+            });
+          }
+
+          // 3) Agrupar por empleado **respetando segmentos contiguos**
+          //    createAppointmentsBatch usa un solo employee por llamada
+          const groups = []; // [{ employeeId, services: [serviceId...], startDate, indices: [i...] }]
+          let currentGroup = null;
+
+          for (let i = 0; i < normalized.length; i++) {
+            const n = normalized[i];
+            if (!currentGroup || currentGroup.employeeId !== n.employeeId) {
+              // abrir grupo nuevo
+              currentGroup = {
+                employeeId: n.employeeId,
+                services: [],
+                startDate: n.startDate, // el primer startDate del grupo
+                indices: [], // para mapear luego
+              };
+              groups.push(currentGroup);
+            }
+            currentGroup.services.push(n.serviceId);
+            currentGroup.indices.push(i);
+          }
+
+          // 4) Crear citas por grupo (una llamada por empleado/segmento)
+          const allAppointments = new Array(normalized.length); // mapear por índice original
+          for (const g of groups) {
+            const batch = await appointmentService.createAppointmentsBatch({
+              services: g.services,
+              employee: g.employeeId,
+              employeeRequestedByClient: true,
+              client: normalizeId(customer),
+              startDate: g.startDate, // la función encadena internamente
+              organizationId: normalizeId(organizationId),
+              // Si manejas precios/adicionales por servicio:
+              // customPrices: {...},
+              // additionalItemsByService: {...},
+            });
+
+            // Mapear las citas del batch a los índices originales de 'normalized'
+            // createAppointmentsBatch devuelve en el mismo orden de 'services'
+            for (let k = 0; k < g.indices.length; k++) {
+              const idx = g.indices[k]; // índice original en 'normalized'
+              const appt = batch[k] || null; // cita creada para ese servicio
+              allAppointments[idx] = appt;
+            }
+          }
+
+          // 5) Crear Reservations auto-aprobadas y (opcional) enlazar appointmentId
+          const createdReservations = [];
+          for (let i = 0; i < normalized.length; i++) {
+            const n = normalized[i];
+            const appt = allAppointments[i];
+
+            const reservationData = {
+              serviceId: n.serviceId,
+              employeeId: n.employeeId,
+              startDate: n.startDate,
+              customer: normalizeId(customer),
+              customerDetails,
+              organizationId: normalizeId(organizationId),
+              status: "auto_approved",
+              auto: true,
+              appointmentId: appt?._id || null, // ⬅️ si NO quieres vínculo aún, quita esta línea
+            };
+
+            const newReservation = await reservationService.createReservation(
+              reservationData
+            );
+            createdReservations.push(newReservation);
+          }
+
+          await notifyNewBooking(org, customerDetails, {
+            isAuto: true,
+            multi: true,
+          });
+
+          return sendResponse(
+            res,
+            201,
+            {
+              policy,
+              outcome: "approved_and_appointed",
+              appointments: allAppointments, // útil si quieres verlas en la respuesta
+              reservations: createdReservations, // para listar en tu UI
+            },
+            "Citas y reservas auto-aprobadas creadas correctamente"
+          );
+        } catch (err) {
+          // Si algo falla, dejas caer al flujo MANUAL (pending) como tenías
         }
-        // sin empleado común → cae a reservas pending
       }
 
       // === MANUAL (o AUTO que cayó) → crear reservas pendientes en transacción

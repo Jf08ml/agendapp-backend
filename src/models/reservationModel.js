@@ -30,8 +30,12 @@ const reservationSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "approved", "rejected"],
+      enum: ["pending", "approved", "rejected", "auto_approved"],
       default: "pending",
+    },
+    auto: {
+      type: Boolean,
+      default: false,
     },
     appointmentId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -43,5 +47,7 @@ const reservationSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+reservationSchema.index({ organizationId: 1, status: 1 });
 
 export default mongoose.model("Reservation", reservationSchema);
