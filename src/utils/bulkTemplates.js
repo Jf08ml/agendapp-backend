@@ -3,7 +3,7 @@
 export const messageTplReminder = `
 📅 ¡Hola, {{names}}!
 
-Tienes {{count}} {{cita_pal}} {{agendada_pal}} para hoy.
+Recuerda que tienes {{count}} {{cita_pal}} {{agendada_pal}}.
 
 🗓️ Franja: {{date_range}}
 📍 Lugar: {{organization}}

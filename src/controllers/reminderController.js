@@ -3,15 +3,20 @@ import { reminderService } from "../services/reminderService.js";
 import sendResponse from "../utils/sendResponse.js";
 
 const reminderController = {
-  /** POST /organizations/:id/wa/reminders  body: { dryRun?: boolean } */
+  /** POST /organizations/:id/wa/reminders
+   *  body: { dryRun?: boolean, targetDate?: string }
+   */
   sendForOrganization: async (req, res) => {
     try {
       const orgId = req.params.id;
-      const { dryRun = false } = req.body || {};
+      const { dryRun = false, targetDate } = req.body || {};
+
       const r = await reminderService.sendDailyRemindersViaCampaign({
         orgId,
         dryRun,
+        targetDate,
       });
+
       return sendResponse(
         res,
         200,

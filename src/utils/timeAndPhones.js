@@ -72,3 +72,12 @@ export function getBogotaTodayWindowUTC(now = new Date()) {
 
   return { dayStartUTC, dayEndUTC };
 }
+
+/**
+ * Igual que getBogotaTodayWindowUTC, pero permitiendo pasar una fecha objetivo.
+ * Si no se pasa targetDate, se comporta igual que "hoy".
+ */
+export function getBogotaDayWindowUTC(targetDate) {
+  const base = targetDate ? new Date(targetDate) : new Date();
+  return getBogotaTodayWindowUTC(base);
+}

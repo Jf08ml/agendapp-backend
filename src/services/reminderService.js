@@ -3,24 +3,30 @@ import { waBulkSend, waBulkOptIn } from "./waHttpService.js";
 import appointmentModel from "../models/appointmentModel.js";
 import {
   hasUsablePhone,
-  getBogotaTodayWindowUTC,
+  getBogotaDayWindowUTC, // 👈 usamos la nueva
   sleep,
 } from "../utils/timeAndPhones.js";
 import { messageTplReminder } from "../utils/bulkTemplates.js";
 
 export const reminderService = {
   /**
-   * Envía recordatorios de las citas del día agrupando por organización y por teléfono del cliente.
-   * Un cliente con varias citas en el día recibirá un solo mensaje con la lista de servicios/horas.
+   * Envía recordatorios de las citas de un día específico (no solo hoy)
+   * agrupando por organización y por teléfono del cliente.
    *
    * @param {Object} params
-   * @param {string} [params.orgId] - Si se pasa, filtra por organización
-   * @param {boolean} [params.dryRun=false] - Si true, prepara pero no envía
+   * @param {string} [params.orgId]           - Si se pasa, filtra por organización
+   * @param {boolean} [params.dryRun=false]   - Si true, prepara pero no envía
+   * @param {string|Date} [params.targetDate] - Fecha objetivo (ej: "2025-11-24" o ISO)
    */
-  sendDailyRemindersViaCampaign: async ({ orgId, dryRun = false } = {}) => {
-    const { dayStartUTC, dayEndUTC } = getBogotaTodayWindowUTC();
+  sendDailyRemindersViaCampaign: async ({
+    orgId,
+    dryRun = false,
+    targetDate,
+  } = {}) => {
+    // 👇 ahora la ventana es para la fecha elegida
+    const { dayStartUTC, dayEndUTC } = getBogotaDayWindowUTC(targetDate);
 
-    // 1) Traer citas de hoy aún no notificadas
+    // 1) Traer citas de ese día aún no notificadas
     const appointments = await appointmentModel
       .find({
         ...(orgId ? { organizationId: orgId } : {}),
@@ -30,8 +36,8 @@ export const reminderService = {
       .populate("client service employee organizationId");
 
     if (!appointments.length) {
-      console.log("[RemindersBulk] No hay citas hoy.");
-      return { ok: true, created: 0 };
+      console.log("[RemindersBulk] No hay citas en la fecha seleccionada.");
+      return { ok: true, created: 0, results: [] };
     }
 
     // 2) Agrupar por organización
@@ -70,11 +76,10 @@ export const reminderService = {
       }
 
       // --- Unificar por teléfono ---
-      // phone -> bucket con info agregada
       const byPhone = new Map();
       for (const a of appts) {
         const phone = hasUsablePhone(a?.client?.phoneNumber);
-        if (!phone) continue; // ignora si no es normalizable/usable
+        if (!phone) continue;
 
         const start = new Date(a.startDate);
         const end = a.endDate ? new Date(a.endDate) : null;
@@ -91,7 +96,7 @@ export const reminderService = {
           byPhone.set(phone, {
             phone,
             names: a?.client?.name || "Cliente",
-            services: [], // { name, time }
+            services: [],
             firstStart: start,
             lastEnd: end || start,
             employees: new Set(),
@@ -158,9 +163,10 @@ export const reminderService = {
       }
 
       // 6) Enviar campaña
-      const title = `Recordatorios ${new Date().toISOString().slice(0, 10)} (${
-        org?.name || _orgId
-      })`;
+      const targetDateForTitle = targetDate ? new Date(targetDate) : new Date();
+      const titleDateStr = targetDateForTitle.toISOString().slice(0, 10);
+
+      const title = `Recordatorios ${titleDateStr} (${org?.name || _orgId})`;
 
       const r = await waBulkSend({
         clientId,
