@@ -7,16 +7,18 @@ const waController = {
   connectSession: async (req, res) => {
     try {
       const orgId = req.params.id;
-      const { clientId } = req.body;
+      const { clientId, pairingPhone } = req.body;
       if (!clientId) return sendResponse(res, 400, null, "Falta clientId");
       const userId = req.user?.id || "system";
       const data = await waIntegrationService.connectOrganizationSession({
         orgId,
         clientId,
         userId,
+        pairingPhone,
       });
       sendResponse(res, 200, data, "Sesión de WhatsApp inicializada");
     } catch (err) {
+      console.error(err);
       sendResponse(res, 500, null, err.message);
     }
   },

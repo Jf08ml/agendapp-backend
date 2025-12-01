@@ -6,24 +6,37 @@ import {
   waSend,
   waRestart,
   waLogout,
+  waStartPairing,
 } from "./waHttpService.js";
 import { issueWsToken } from "./wsTokenService.js";
 
 export const waIntegrationService = {
-  async connectOrganizationSession({ orgId, clientId, userId }) {
+  async connectOrganizationSession({ orgId, clientId, userId, pairingPhone }) {
     const org = await Organization.findById(orgId);
     if (!org) throw new Error("Organización no encontrada");
 
     org.clientIdWhatsapp = clientId;
     await org.save();
 
-    await waStartSession(clientId);
+    // LÓGICA DE DECISIÓN: ¿QR o Pairing?
+    if (pairingPhone) {
+      // Si hay teléfono, iniciamos modo Pairing
+      console.log(
+        `[WA] Iniciando Pairing para ${clientId} con ${pairingPhone}`
+      );
+      await waStartPairing(clientId, pairingPhone);
+    } else {
+      // Si no, iniciamos modo QR estándar
+      console.log(`[WA] Iniciando QR para ${clientId}`);
+      await waStartSession(clientId);
+    }
 
     const { token, expiresIn } = issueWsToken({ userId, orgId, clientId });
 
     return {
       ok: true,
       clientId,
+      mode: pairingPhone ? "pairing" : "qr", // Le avisamos al front qué modo se activó
       ws: { url: process.env.WA_WS_URL, token, expiresIn },
     };
   },

@@ -9,21 +9,34 @@ function headers() {
   };
 }
 
-export async function waStartSession(clientId) {
-  const r = await fetch(`${WA_API_URL}/api/session`, {
-    method: "POST",
-    headers: headers(),
-    body: JSON.stringify({ clientId }),
-  });
+async function handleResponse(r, context) {
   let data = null;
   try {
     data = await r.json();
   } catch {}
   if (!r.ok) {
     const msg = (data && data.error) || r.statusText;
-    throw new Error(`WA /api/session ${r.status}: ${msg}`);
+    throw new Error(`WA ${context} ${r.status}: ${msg}`);
   }
   return data;
+}
+
+export async function waStartSession(clientId) {
+  const r = await fetch(`${WA_API_URL}/api/session`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({ clientId }),
+  });
+  return handleResponse(r, "POST /api/session");
+}
+
+export async function waStartPairing(clientId, phone) {
+  const r = await fetch(`${WA_API_URL}/api/session/pairing`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({ clientId, phone }),
+  });
+  return handleResponse(r, "POST /api/session/pairing");
 }
 
 export async function waGetStatus(clientId) {
