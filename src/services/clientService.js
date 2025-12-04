@@ -26,6 +26,25 @@ const clientService = {
     return await Client.find({ organizationId });
   },
 
+  // 🚀 Búsqueda optimizada de clientes con filtros y paginación
+  searchClients: async (organizationId, searchQuery = "", limit = 20) => {
+    const query = { organizationId };
+    
+    // Si hay búsqueda, agregar filtro por nombre o teléfono
+    if (searchQuery) {
+      query.$or = [
+        { name: { $regex: searchQuery, $options: "i" } },
+        { phoneNumber: { $regex: searchQuery, $options: "i" } },
+      ];
+    }
+
+    return await Client.find(query)
+      .limit(limit)
+      .select("_id name phoneNumber email birthDate")
+      .sort({ name: 1 })
+      .lean();
+  },
+
   // Obtener un cliente por ID
   getClientById: async (id) => {
     const client = await Client.findById(id);

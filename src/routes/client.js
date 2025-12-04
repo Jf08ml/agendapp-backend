@@ -15,6 +15,12 @@ router.get(
   clientController.getClientsByOrganizationId
 );
 
+// 🚀 Búsqueda optimizada de clientes (con query params: search, limit)
+router.get(
+  "/clients/organization/:organizationId/search",
+  clientController.searchClients
+);
+
 // Ruta para obtener un cliente específico por ID
 router.get("/clients/:id", clientController.getClientById);
 

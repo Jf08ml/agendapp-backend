@@ -41,6 +41,27 @@ const clientController = {
     }
   },
 
+  // 🚀 Controlador para búsqueda optimizada de clientes
+  searchClients: async (req, res) => {
+    const { organizationId } = req.params;
+    const { search = "", limit = 20 } = req.query;
+    try {
+      const clients = await clientService.searchClients(
+        organizationId,
+        search,
+        parseInt(limit)
+      );
+      sendResponse(
+        res,
+        200,
+        clients,
+        "Clientes encontrados exitosamente"
+      );
+    } catch (error) {
+      sendResponse(res, 500, null, error.message);
+    }
+  },
+
   // Controlador para obtener un cliente por ID
   getClientById: async (req, res) => {
     const { id } = req.params;
