@@ -112,6 +112,7 @@ const organizationService = {
       branding,
       domain,
       reservationPolicy,
+      showLoyaltyProgram,
     } = organizationData;
 
     const organization = await Organization.findById(id);
@@ -177,6 +178,10 @@ const organizationService = {
         throw new Error("reservationPolicy inválida");
       }
       organization.reservationPolicy = reservationPolicy;
+    }
+
+    if (showLoyaltyProgram !== undefined) {
+      organization.showLoyaltyProgram = showLoyaltyProgram;
     }
 
     // Encriptar la contraseña solo si se proporciona una nueva

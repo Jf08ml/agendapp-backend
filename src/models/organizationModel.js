@@ -139,6 +139,10 @@ const organizationSchema = new mongoose.Schema({
     enum: ["manual", "auto_if_available"],
     default: "manual",
   },
+  showLoyaltyProgram: {
+    type: Boolean,
+    default: true,
+  },
 });
 
 export default mongoose.model("Organization", organizationSchema);
