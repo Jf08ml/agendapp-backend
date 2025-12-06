@@ -143,6 +143,14 @@ const organizationSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  welcomeTitle: {
+    type: String,
+    default: "¡Hola! Bienvenido",
+  },
+  welcomeDescription: {
+    type: String,
+    default: "Estamos felices de tenerte aquí. Mereces lo mejor, ¡y aquí lo encontrarás! ✨",
+  },
 });
 
 export default mongoose.model("Organization", organizationSchema);

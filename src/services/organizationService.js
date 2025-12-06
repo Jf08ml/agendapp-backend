@@ -113,6 +113,8 @@ const organizationService = {
       domain,
       reservationPolicy,
       showLoyaltyProgram,
+      welcomeTitle,
+      welcomeDescription,
     } = organizationData;
 
     const organization = await Organization.findById(id);
@@ -182,6 +184,14 @@ const organizationService = {
 
     if (showLoyaltyProgram !== undefined) {
       organization.showLoyaltyProgram = showLoyaltyProgram;
+    }
+
+    if (welcomeTitle !== undefined) {
+      organization.welcomeTitle = welcomeTitle;
+    }
+
+    if (welcomeDescription !== undefined) {
+      organization.welcomeDescription = welcomeDescription;
     }
 
     // Encriptar la contraseña solo si se proporciona una nueva
