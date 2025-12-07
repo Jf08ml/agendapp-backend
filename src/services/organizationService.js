@@ -115,6 +115,7 @@ const organizationService = {
       showLoyaltyProgram,
       welcomeTitle,
       welcomeDescription,
+      homeLayout,
     } = organizationData;
 
     const organization = await Organization.findById(id);
@@ -192,6 +193,10 @@ const organizationService = {
 
     if (welcomeDescription !== undefined) {
       organization.welcomeDescription = welcomeDescription;
+    }
+
+    if (homeLayout !== undefined) {
+      organization.homeLayout = homeLayout;
     }
 
     // Encriptar la contraseña solo si se proporciona una nueva

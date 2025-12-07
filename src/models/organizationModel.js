@@ -151,6 +151,11 @@ const organizationSchema = new mongoose.Schema({
     type: String,
     default: "Estamos felices de tenerte aquí. Mereces lo mejor, ¡y aquí lo encontrarás! ✨",
   },
+  homeLayout: {
+    type: String,
+    enum: ["modern", "minimal", "cards"],
+    default: "modern",
+  },
 });
 
 export default mongoose.model("Organization", organizationSchema);
