@@ -156,6 +156,26 @@ const organizationSchema = new mongoose.Schema({
     enum: ["modern", "minimal", "cards"],
     default: "modern",
   },
+  reminderSettings: {
+    enabled: {
+      type: Boolean,
+      default: true,
+    },
+    hoursBefore: {
+      type: Number,
+      default: 24,
+      min: 1,
+      max: 72, // Máximo 3 días antes
+    },
+    sendTimeStart: {
+      type: String,
+      default: "07:00", // Hora inicio para enviar (formato HH:mm)
+    },
+    sendTimeEnd: {
+      type: String,
+      default: "20:00", // Hora fin para enviar (formato HH:mm)
+    },
+  },
 });
 
 export default mongoose.model("Organization", organizationSchema);

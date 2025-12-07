@@ -116,6 +116,7 @@ const organizationService = {
       welcomeTitle,
       welcomeDescription,
       homeLayout,
+      reminderSettings,
     } = organizationData;
 
     const organization = await Organization.findById(id);
@@ -197,6 +198,13 @@ const organizationService = {
 
     if (homeLayout !== undefined) {
       organization.homeLayout = homeLayout;
+    }
+
+    if (reminderSettings !== undefined) {
+      organization.reminderSettings = {
+        ...organization.reminderSettings,
+        ...reminderSettings,
+      };
     }
 
     // Encriptar la contraseña solo si se proporciona una nueva
