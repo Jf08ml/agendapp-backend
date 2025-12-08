@@ -1,11 +1,5 @@
 {
   "version": 2,
   "builds": [{ "src": "src/app.js", "use": "@vercel/node" }],
-  "routes": [{ "src": "/api/(.*)", "dest": "/src/app.js" }],
-  "crons": [
-    { 
-      "path": "/api/cron/daily-reminder", 
-      "schedule": "0 * * * *"
-    }
-  ]
+  "routes": [{ "src": "/api/(.*)", "dest": "/src/app.js" }]
 }
