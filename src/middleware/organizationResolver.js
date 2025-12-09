@@ -1,6 +1,11 @@
 import organizationModel from "../models/organizationModel.js";
 
 export async function organizationResolver(req, res, next) {
+  // Saltar el middleware para rutas que no necesitan organización
+  if (req.path.startsWith("/cron/")) {
+    return next();
+  }
+
   let tenantDomain =
     req.headers["x-tenant-domain"] ||
     req.headers["x-forwarded-host"]?.split(":")[0] ||
