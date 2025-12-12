@@ -117,6 +117,9 @@ const organizationService = {
       welcomeDescription,
       homeLayout,
       reminderSettings,
+      paymentMethods,
+      requireReservationDeposit,
+      reservationDepositPercentage,
     } = organizationData;
 
     const organization = await Organization.findById(id);
@@ -205,6 +208,18 @@ const organizationService = {
         ...organization.reminderSettings,
         ...reminderSettings,
       };
+    }
+
+    if (paymentMethods !== undefined) {
+      organization.paymentMethods = paymentMethods;
+    }
+
+    if (requireReservationDeposit !== undefined) {
+      organization.requireReservationDeposit = requireReservationDeposit;
+    }
+
+    if (reservationDepositPercentage !== undefined) {
+      organization.reservationDepositPercentage = reservationDepositPercentage;
     }
 
     // Encriptar la contraseña solo si se proporciona una nueva

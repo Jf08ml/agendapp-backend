@@ -27,6 +27,18 @@ const BrandingSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const PaymentMethodSchema = new mongoose.Schema(
+  {
+    type: { type: String, enum: ["nequi", "bancolombia", "daviplata", "otros"], required: true },
+    accountName: { type: String },
+    accountNumber: { type: String },
+    phoneNumber: { type: String },
+    qrCodeUrl: { type: String },
+    notes: { type: String },
+  },
+  { _id: false }
+);
+
 const organizationSchema = new mongoose.Schema({
   name: {
     type: String,
@@ -161,6 +173,20 @@ const organizationSchema = new mongoose.Schema({
   showLoyaltyProgram: {
     type: Boolean,
     default: true,
+  },
+  paymentMethods: {
+    type: [PaymentMethodSchema],
+    default: [],
+  },
+  requireReservationDeposit: {
+    type: Boolean,
+    default: false,
+  },
+  reservationDepositPercentage: {
+    type: Number,
+    default: 50,
+    min: 0,
+    max: 100,
   },
   welcomeTitle: {
     type: String,
