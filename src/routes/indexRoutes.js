@@ -19,6 +19,7 @@ import notificationRoutes from "./notification";
 import planRoutes from "./planRoutes";
 import waRoutes from "./waRoutes";
 import reminderRoutes from "./reminderRoutes";
+import membershipRoutes from "./membershipRoutes";
 import { organizationResolver } from "../middleware/organizationResolver";
 
 const router = Router();
@@ -100,7 +101,8 @@ router.use(subscriptionRoutes);
 router.use(whatsappRoutes);
 router.use(cronRoutes);
 router.use(notificationRoutes);
-router.use(planRoutes);
+router.use("/plans", planRoutes);
+router.use("/memberships", membershipRoutes);
 router.use(waRoutes);
 router.use(reminderRoutes);
 

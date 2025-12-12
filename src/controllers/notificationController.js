@@ -165,6 +165,38 @@ const notificationController = {
       sendResponse(res, 404, null, error.message);
     }
   },
+
+  // Obtener notificaciones del admin/organización (sin employeeId)
+  getAdminNotifications: async (req, res) => {
+    const { organizationId } = req.params;
+    try {
+      const notifications = await notificationService.getAdminNotifications(organizationId);
+      sendResponse(
+        res,
+        200,
+        notifications,
+        "Notificaciones del admin obtenidas exitosamente"
+      );
+    } catch (error) {
+      sendResponse(res, 500, null, error.message);
+    }
+  },
+
+  // Obtener solo notificaciones de membresía
+  getMembershipNotifications: async (req, res) => {
+    const { organizationId } = req.params;
+    try {
+      const notifications = await notificationService.getMembershipNotifications(organizationId);
+      sendResponse(
+        res,
+        200,
+        notifications,
+        "Notificaciones de membresía obtenidas exitosamente"
+      );
+    } catch (error) {
+      sendResponse(res, 500, null, error.message);
+    }
+  },
 };
 
 export default notificationController;

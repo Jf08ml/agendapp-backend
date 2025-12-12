@@ -129,11 +129,30 @@ const organizationSchema = new mongoose.Schema({
     required: true,
     default: [],
   }, // Ej: "agenda.zybizobazar.com" o "salonmaria.com"
+  
+  // Sistema de membresías
+  currentMembershipId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Membership",
+    default: null,
+  },
+  membershipStatus: {
+    type: String,
+    enum: ["active", "trial", "suspended", "none"],
+    default: "trial",
+  },
+  hasAccessBlocked: {
+    type: Boolean,
+    default: false,
+  },
+  
+  // DEPRECATED: Mantener temporalmente para migración
   plan: {
     type: String,
     enum: ["basic", "professional", "premium"],
     default: "basic",
   },
+  
   reservationPolicy: {
     type: String,
     enum: ["manual", "auto_if_available"],

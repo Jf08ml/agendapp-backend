@@ -7,6 +7,8 @@ import express from "express";
 import morgan from "morgan";
 import cors from "cors";
 import routes from "./routes/indexRoutes.js";
+import membershipCheckJob from "./cron/membershipCheckJob.js";
+import reminderJob from "./cron/reminderJob.js";
 
 const app = express();
 
@@ -52,6 +54,12 @@ dbConnection()
         `✨ Server listening on port ${PORT}, ${process.env.NODE_ENV} ✨`
       );
     });
+    
+    // Los cron jobs ahora se ejecutan desde Vercel Cron
+    // No es necesario iniciarlos manualmente aquí
+    console.log("⏰ Cron jobs configurados en Vercel:");
+    console.log("  - Verificación de membresías: Diario a las 9 AM (hora Colombia)");
+    console.log("  - Recordatorios: Configurados en servidor Vultr (cada hora)");
   })
   .catch((err) => {
     console.error("Failed to connect to the database", err);

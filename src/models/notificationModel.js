@@ -28,11 +28,12 @@ const notificationSchema = new mongoose.Schema(
       type: {
         type: String,
         required: true,
-        enum: ["reservation"],
+        enum: ["reservation", "membership", "system"],
       },
       frontendRoute: {
         type: String,
-        required: true,
+        required: false,
+        default: "/admin",
       },
     },
     {

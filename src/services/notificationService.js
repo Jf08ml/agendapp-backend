@@ -14,9 +14,26 @@ const notificationService = {
     return await Notification.find({ employeeId });
   },
 
-  // Obtener notificaciones por organizationId
+  // Obtener notificaciones por organizationId (todas)
   getNotificationsByOrganization: async (organizationId) => {
     return await Notification.find({ organizationId });
+  },
+
+  // Obtener notificaciones SOLO del admin (sin employeeId, para el dueño/organización)
+  getAdminNotifications: async (organizationId) => {
+    return await Notification.find({ 
+      organizationId,
+      employeeId: null // Solo notificaciones para el admin
+    }).sort({ createdAt: -1 });
+  },
+
+  // Obtener notificaciones de membresía específicamente
+  getMembershipNotifications: async (organizationId) => {
+    return await Notification.find({ 
+      organizationId,
+      employeeId: null,
+      type: "membership"
+    }).sort({ createdAt: -1 });
   },
 
   getNotificationById: async (id) => {
