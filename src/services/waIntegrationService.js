@@ -68,8 +68,26 @@ export const waIntegrationService = {
     // Validación básica
     if (!phone) throw new Error("Falta phone");
     if (!message && !image) throw new Error("Debes enviar 'message' o 'image'");
-    console.log("Enviando WhatsApp a", phone, { message, image });
-    const r = await waSend({ clientId, phone, message, image });
+    
+    // 🌍 Normalizar teléfono a E.164 sin el símbolo + (Baileys lo requiere así)
+    let normalizedPhone = phone;
+    
+    // Importar utilidad de normalización
+    const { normalizePhoneNumber } = await import('../utils/phoneUtils.js');
+    const result = normalizePhoneNumber(phone, org.default_country || 'CO');
+    
+    if (result.isValid && result.phone_e164) {
+      // Remover el + inicial que Baileys no necesita
+      normalizedPhone = result.phone_e164.replace('+', '');
+      console.log(`[waIntegrationService] Normalizado: ${phone} → ${result.phone_e164} → ${normalizedPhone}`);
+    } else {
+      // Fallback: limpiar el número de caracteres no numéricos
+      normalizedPhone = phone.replace(/[^\d]/g, '');
+      console.warn(`[waIntegrationService] Normalización falló para: ${phone}, usando limpio: ${normalizedPhone}`);
+    }
+    
+    console.log("Enviando WhatsApp a", normalizedPhone, { message, image });
+    const r = await waSend({ clientId, phone: normalizedPhone, message, image });
     console.log("waSend result:", r);
     return r;
   },

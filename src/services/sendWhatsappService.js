@@ -4,6 +4,7 @@ import http from "http";
 import https from "https";
 import organizationService from "./organizationService.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
+import { normalizePhoneNumber, formatPhone } from "../utils/phoneUtils.js";
 
 /** ===================== CONFIG ===================== */
 const BASE_URL =
@@ -41,37 +42,24 @@ const apiLong = axiosBase.create({
 
 /** =================================================== */
 
-/**
- * Normaliza un teléfono hacia formato internacional (E.164 sin '+').
- * - Limpia caracteres no numéricos
- * - Quita '00' o '0' iniciales
- * - Prefija el código de país si hace falta (por defecto CO: 57)
- */
-export function formatPhone(phone, countryCode = "57", localLength = 10) {
-  if (!phone) return "";
-  let digits = String(phone).replace(/\D/g, "");
-
-  while (digits.startsWith("00")) digits = digits.slice(2);
-  if (digits.startsWith("0")) digits = digits.slice(1);
-
-  if (
-    digits.startsWith(countryCode) &&
-    digits.length === countryCode.length + localLength
-  ) {
-    return digits;
-  }
-  if (digits.length === localLength) {
-    return countryCode + digits;
-  }
-  if (digits.length > localLength && !digits.startsWith(countryCode)) {
-    return countryCode + digits;
-  }
-
-  console.warn("[formatPhone] Formato inesperado:", phone, "=>", digits);
-  return digits;
-}
-
 const whatsappService = {
+  /** ⚡ Helper para normalizar teléfonos para WhatsApp */
+  normalizePhoneForWhatsapp(phone, defaultCountry = 'CO') {
+    if (!phone) return '';
+    
+    // Usar normalización internacional
+    const result = normalizePhoneNumber(phone, defaultCountry);
+    if (result.isValid && result.phone_e164) {
+      // Baileys requiere solo dígitos, sin el símbolo +
+      return result.phone_e164.replace('+', '');
+    }
+    
+    // Fallback: limpiar caracteres no numéricos
+    const cleaned = phone.replace(/[^\d]/g, '');
+    console.warn('[whatsappService] Fallback para:', phone, '→', cleaned);
+    return cleaned;
+  },
+
   /** ===================== TWILIO (opcional en servidor) ===================== */
   async sendWhatsappReminder(phone, appointmentDetails) {
     try {
@@ -83,7 +71,7 @@ const whatsappService = {
         contentSid: "HXc1cdd029c3eba4a1f303fd922ee74da6",
         contentVariables: JSON.stringify({ ...appointmentDetails }),
         from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
-        to: `whatsapp:+${formatPhone(phone)}`,
+        to: `whatsapp:+${this.normalizePhoneForWhatsapp(phone, 'CO')}`,
       });
       return { message: "Mensaje enviado correctamente" };
     } catch (error) {
@@ -104,7 +92,7 @@ const whatsappService = {
             : "HX3c8a17fed3dc853f82d4eaabdb115857",
         contentVariables: JSON.stringify({ ...reservationDetails }),
         from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
-        to: `whatsapp:+${formatPhone(phone)}`,
+        to: `whatsapp:+${this.normalizePhoneForWhatsapp(phone, 'CO')}`,
       });
 
       return { message: "Mensaje enviado correctamente" };
@@ -123,7 +111,7 @@ const whatsappService = {
         contentSid: "HX78a056237b71cb5f3232722cbf09b63d",
         contentVariables: JSON.stringify({ ...appointmentDetails }),
         from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
-        to: `whatsapp:+${formatPhone(phone)}`,
+        to: `whatsapp:+${this.normalizePhoneForWhatsapp(phone, 'CO')}`,
       });
 
       return { message: "Mensaje enviado correctamente" };
@@ -210,7 +198,7 @@ const whatsappService = {
     }
     const payload = {
       clientId: org.clientIdWhatsapp,
-      phone: formatPhone(phone),
+      phone: this.normalizePhoneForWhatsapp(phone, 'CO'),
       message,
     };
     if (image) payload.image = image;
@@ -240,7 +228,7 @@ const whatsappService = {
 
     const payload = {
       clientId: org.clientIdWhatsapp,
-      phone: formatPhone(reservation?.customerDetails?.phone),
+      phone: this.normalizePhoneForWhatsapp(reservation?.customerDetails?.phone, org.default_country),
       message: msg,
     };
 

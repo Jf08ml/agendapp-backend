@@ -26,6 +26,7 @@ const organizationService = {
       plan,
       clientIdWhatsapp,
       reservationPolicy,
+      default_country,
     } = organizationData;
 
     // Encriptar la contraseña antes de guardarla
@@ -58,6 +59,7 @@ const organizationService = {
         reservationPolicy === "auto_if_available"
           ? "auto_if_available"
           : "manual",
+      default_country: default_country || 'CO', // 🌍 País por defecto
     });
 
     const savedOrganization = await newOrganization.save();
@@ -120,6 +122,7 @@ const organizationService = {
       paymentMethods,
       requireReservationDeposit,
       reservationDepositPercentage,
+      default_country,
     } = organizationData;
 
     const organization = await Organization.findById(id);
@@ -226,6 +229,11 @@ const organizationService = {
 
     if (reservationDepositPercentage !== undefined) {
       organization.reservationDepositPercentage = reservationDepositPercentage;
+    }
+
+    // 🌍 Actualizar país por defecto
+    if (default_country !== undefined) {
+      organization.default_country = default_country;
     }
 
     // Encriptar la contraseña solo si se proporciona una nueva

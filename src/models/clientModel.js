@@ -15,6 +15,17 @@ const clientSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    // 🌍 Campos internacionales
+    phone_e164: {
+      type: String,
+      required: false, // Se poblará progresivamente
+      index: true,
+    },
+    phone_country: {
+      type: String,
+      required: false, // ISO2: CO, MX, PE, etc.
+      maxlength: 2,
+    },
     servicesTaken: {
       type: Number,
       default: 0,
@@ -51,6 +62,19 @@ const clientSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+  }
+);
+
+// 🔒 Índice compuesto único: previene duplicados de phone_e164 por organización
+// Solo aplica a documentos donde phone_e164 existe y es string (ignora null/undefined)
+clientSchema.index(
+  { phone_e164: 1, organizationId: 1 },
+  { 
+    unique: true,
+    partialFilterExpression: { 
+      phone_e164: { $exists: true, $type: 'string' }
+    },
+    name: 'unique_phone_per_organization'
   }
 );
 

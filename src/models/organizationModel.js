@@ -72,6 +72,13 @@ const organizationSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  // 🌍 País por defecto para nuevos registros
+  default_country: {
+    type: String,
+    required: false,
+    default: 'CO', // Colombia por defecto
+    maxlength: 2,
+  },
   instagramUrl: {
     type: String,
     required: false,

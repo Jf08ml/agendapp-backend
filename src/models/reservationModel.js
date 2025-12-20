@@ -22,6 +22,9 @@ const reservationSchema = new mongoose.Schema(
       name: { type: String, required: true },
       email: { type: String, required: false },
       phone: { type: String, required: true },
+      // 🌍 Campos internacionales
+      phone_e164: { type: String, required: false },
+      phone_country: { type: String, required: false, maxlength: 2 },
     },
     organizationId: {
       type: mongoose.Schema.Types.ObjectId,
