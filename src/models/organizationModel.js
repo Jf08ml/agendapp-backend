@@ -29,7 +29,11 @@ const BrandingSchema = new mongoose.Schema(
 
 const PaymentMethodSchema = new mongoose.Schema(
   {
-    type: { type: String, enum: ["nequi", "bancolombia", "daviplata", "otros"], required: true },
+    type: {
+      type: String,
+      enum: ["nequi", "bancolombia", "daviplata", "otros"],
+      required: true,
+    },
     accountName: { type: String },
     accountNumber: { type: String },
     phoneNumber: { type: String },
@@ -122,6 +126,7 @@ const organizationSchema = new mongoose.Schema({
       type: [OpeningBreakSchema],
       default: [],
     },
+    stepMinutes: { type: Number, default: 5, min: 1, max: 60 },
   },
   // plan: {
   //   type: mongoose.Schema.Types.ObjectId,
@@ -141,7 +146,7 @@ const organizationSchema = new mongoose.Schema({
     required: true,
     default: [],
   }, // Ej: "agenda.zybizobazar.com" o "salonmaria.com"
-  
+
   // Sistema de membresías
   currentMembershipId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -157,14 +162,14 @@ const organizationSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
-  
+
   // DEPRECATED: Mantener temporalmente para migración
   plan: {
     type: String,
     enum: ["basic", "professional", "premium"],
     default: "basic",
   },
-  
+
   reservationPolicy: {
     type: String,
     enum: ["manual", "auto_if_available"],
@@ -194,7 +199,8 @@ const organizationSchema = new mongoose.Schema({
   },
   welcomeDescription: {
     type: String,
-    default: "Estamos felices de tenerte aquí. Mereces lo mejor, ¡y aquí lo encontrarás! ✨",
+    default:
+      "Estamos felices de tenerte aquí. Mereces lo mejor, ¡y aquí lo encontrarás! ✨",
   },
   homeLayout: {
     type: String,

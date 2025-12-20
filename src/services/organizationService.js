@@ -161,8 +161,14 @@ const organizationService = {
       serviceCount !== undefined ? serviceCount : organization.serviceCount;
     organization.serviceReward =
       serviceReward !== undefined ? serviceReward : organization.serviceReward;
-    organization.openingHours =
-      openingHours !== undefined ? openingHours : organization.openingHours;
+    if (openingHours !== undefined) {
+      organization.openingHours = {
+        ...(organization.openingHours?.toObject?.() ??
+          organization.openingHours),
+        ...openingHours,
+      };
+    }
+
     organization.plan = plan !== undefined ? plan : organization.plan;
     organization.clientIdWhatsapp =
       clientIdWhatsapp !== undefined
