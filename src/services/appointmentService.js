@@ -8,6 +8,7 @@ import employeeService from "../services/employeeService.js";
 import { waIntegrationService } from "../services/waIntegrationService.js";
 import { hasUsablePhone, normalizeToCOE164 } from "../utils/timeAndPhones.js";
 import mongoose from "mongoose";
+import moment from "moment-timezone";
 
 // Utilidades mínimas (si ya las tienes, quítalas de aquí)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -649,10 +650,11 @@ const appointmentService = {
         )];
 
         // Obtener el rango del día completo para las citas encontradas
-        const dayStart = new Date(targetTimeStart);
-        dayStart.setHours(0, 0, 0, 0);
-        const dayEnd = new Date(targetTimeStart);
-        dayEnd.setHours(23, 59, 59, 999);
+        // Usar la timezone de la organización
+        const timezone = org.timezone || 'America/Bogota';
+        const targetDateStr = moment.tz(targetTimeStart, timezone).format('YYYY-MM-DD');
+        const dayStart = moment.tz(targetDateStr, timezone).startOf('day').toDate();
+        const dayEnd = moment.tz(targetDateStr, timezone).endOf('day').toDate();
 
         // Buscar TODAS las citas del día para estos clientes (no solo de esta hora)
         const appointments = await appointmentModel

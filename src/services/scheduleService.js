@@ -662,11 +662,16 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
     }
     
     if (blockValid) {
-      const blockStartDate = new Date(date);
-      blockStartDate.setHours(Math.floor(currentMin / 60), currentMin % 60, 0, 0);
+      // Construir datetimes usando moment-timezone en la zona horaria de la organización
+      const blockStartDate = moment.tz(
+        `${dateInTz.format('YYYY-MM-DD')} ${minutesToTime(currentMin)}`,
+        timezone
+      ).toDate();
       
-      const blockEndDate = new Date(date);
-      blockEndDate.setHours(Math.floor(slotMin / 60), slotMin % 60, 0, 0);
+      const blockEndDate = moment.tz(
+        `${dateInTz.format('YYYY-MM-DD')} ${minutesToTime(slotMin)}`,
+        timezone
+      ).toDate();
       
       blocks.push({
         start: blockStartDate.toISOString(),

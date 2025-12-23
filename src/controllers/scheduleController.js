@@ -297,9 +297,8 @@ const scheduleController = {
         }
       }
 
-      // Parsear la fecha usando moment-timezone con la zona horaria de la organización
+      // Usar la zona horaria de la organización
       const timezone = organization.timezone || 'America/Bogota';
-      const requestedDate = moment.tz(date, timezone).toDate();
       const duration = serviceDuration || 30;
 
       // Obtener citas del día para filtrar slots ocupados
@@ -316,7 +315,7 @@ const scheduleController = {
         : [];
 
       const slots = scheduleService.generateAvailableSlots(
-        requestedDate,
+        date, // Pasar el string de fecha
         organization,
         employee,
         duration,
@@ -326,7 +325,7 @@ const scheduleController = {
       return sendResponse(
         res,
         200,
-        { date: requestedDate, slots, totalSlots: slots.length },
+        { date, slots, totalSlots: slots.length },
         "Slots disponibles obtenidos exitosamente"
       );
     } catch (error) {
@@ -490,7 +489,6 @@ const scheduleController = {
       // Usar helper para evitar problemas de zona horaria
       const timezone = organization.timezone || 'America/Bogota';
       const dayOfWeek = scheduleService.getDayOfWeekFromDateString(date, timezone);
-      const requestDate = moment.tz(date, timezone).toDate();
       
       // Verificar que la organización esté abierta ese día
       const orgSchedule = scheduleService.getOrganizationDaySchedule(organization, dayOfWeek);
@@ -529,11 +527,8 @@ const scheduleController = {
       
       // Obtener citas existentes del día (solo de empleados disponibles)
       const availableEmployeeIds = employees.map(e => e._id);
-      const startOfDay = new Date(requestDate);
-      startOfDay.setHours(0, 0, 0, 0);
-      
-      const endOfDay = new Date(requestDate);
-      endOfDay.setHours(23, 59, 59, 999);
+      const startOfDay = moment.tz(date, timezone).startOf('day').toDate();
+      const endOfDay = moment.tz(date, timezone).endOf('day').toDate();
       
       const appointments = await appointmentModel.find({
         organizationId,
@@ -543,7 +538,7 @@ const scheduleController = {
       
       // Calcular bloques disponibles
       const blocks = scheduleService.findAvailableMultiServiceBlocks(
-        requestDate,
+        date, // Pasar el string de fecha
         organization,
         services,
         employees,
@@ -622,15 +617,17 @@ const scheduleController = {
       }
       
       // Obtener rango de fechas para consulta de citas
-      const parsedDates = requests.map(r => {
-        const [y, m, d] = r.date.split('-').map(Number);
-        return new Date(y, m - 1, d);
-      });
-      const minDate = new Date(Math.min(...parsedDates));
-      minDate.setHours(0, 0, 0, 0);
+      const timezone = organization.timezone || 'America/Bogota';
+      const parsedDates = requests.map(r => moment.tz(r.date, timezone).toDate());
+      const minDate = moment.tz(
+        moment.tz(Math.min(...parsedDates.map(d => d.getTime())), timezone).format('YYYY-MM-DD'),
+        timezone
+      ).startOf('day').toDate();
       
-      const maxDate = new Date(Math.max(...parsedDates));
-      maxDate.setHours(23, 59, 59, 999);
+      const maxDate = moment.tz(
+        moment.tz(Math.max(...parsedDates.map(d => d.getTime())), timezone).format('YYYY-MM-DD'),
+        timezone
+      ).endOf('day').toDate();
       
       // Obtener todas las citas en el rango de una sola vez
       const appointments = await appointmentModel.find({
@@ -641,7 +638,6 @@ const scheduleController = {
       
       // Procesar cada solicitud
       const results = [];
-      const timezone = organization.timezone || 'America/Bogota';
       
       for (const request of requests) {
         // Parsear la fecha usando moment-timezone con la zona horaria de la organización
