@@ -200,7 +200,9 @@ const appointmentService = {
     try {
       session.startTransaction();
 
-      let currentStart = new Date(startDate);
+      // Interpretar la fecha/hora en la zona horaria de la organización
+      const timezone = org.timezone || 'America/Bogota';
+      let currentStart = moment.tz(startDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate();
 
       for (const serviceId of services) {
         const svc = await serviceService.getServiceById(serviceId);
