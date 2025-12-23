@@ -179,8 +179,11 @@ function getEmployeeDaySchedule(employee, dayOfWeek) {
  * @returns {Object} {valid: boolean, reason: string}
  */
 function validateDateTime(datetime, organization, employee = null) {
-  const dayOfWeek = datetime.getDay();
-  const timeStr = `${String(datetime.getHours()).padStart(2, '0')}:${String(datetime.getMinutes()).padStart(2, '0')}`;
+  const timezone = organization.timezone || 'America/Bogota';
+  // Convertir la fecha a la timezone de la organización
+  const datetimeInTz = moment.tz(datetime, timezone);
+  const dayOfWeek = datetimeInTz.day();
+  const timeStr = datetimeInTz.format('HH:mm');
 
   // 1. Verificar horario de la organización
   const orgSchedule = getOrganizationDaySchedule(organization, dayOfWeek);
@@ -249,7 +252,9 @@ function validateDateTime(datetime, organization, employee = null) {
  */
 function generateAvailableSlots(date, organization, employee = null, durationMinutes = 30, appointments = []) {
   const timezone = organization.timezone || 'America/Bogota';
-  const dayOfWeek = date.getDay();
+  // Obtener día de la semana en la timezone de la organización
+  const dateInTz = moment.tz(date, timezone);
+  const dayOfWeek = dateInTz.day();
   const slots = [];
 
   // Obtener horarios
@@ -319,8 +324,12 @@ function generateAvailableSlots(date, organization, employee = null, durationMin
     
     // Verificar si el slot se solapa con alguna cita existente
     const overlapsAppointment = relevantAppointments.some(appt => {
-      const apptStart = appt.startDate.getHours() * 60 + appt.startDate.getMinutes();
-      const apptEnd = appt.endDate.getHours() * 60 + appt.endDate.getMinutes();
+      // Convertir las fechas de la cita a la timezone de la organización
+      const apptStartInTz = moment.tz(appt.startDate, timezone);
+      const apptEndInTz = moment.tz(appt.endDate, timezone);
+      
+      const apptStart = apptStartInTz.hours() * 60 + apptStartInTz.minutes();
+      const apptEnd = apptEndInTz.hours() * 60 + apptEndInTz.minutes();
       
       // Hay solapamiento si el slot empieza antes de que termine la cita
       // Y el slot termina después de que empieza la cita
@@ -331,7 +340,7 @@ function generateAvailableSlots(date, organization, employee = null, durationMin
     const hours = Math.floor(currentMin / 60);
     const minutes = currentMin % 60;
     const datetime = moment.tz(
-      `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`,
+      `${dateInTz.format('YYYY-MM-DD')} ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`,
       timezone
     ).toDate();
     
@@ -412,6 +421,7 @@ function isEmployeeAvailableOnDay(employee, dayOfWeek, organization) {
  */
 function assignBestEmployeeForSlot(opts) {
   const { candidateEmployees, date, startTime, duration, existingAppointments, dayOfWeek, organization } = opts;
+  const timezone = organization.timezone || 'America/Bogota';
   
   // Filtrar por disponibilidad de horario
   const available = candidateEmployees.filter(emp => {
@@ -476,8 +486,12 @@ function assignBestEmployeeForSlot(opts) {
     const endMin = startMin + duration;
     
     return !empAppts.some(appt => {
-      const apptStart = appt.startDate.getHours() * 60 + appt.startDate.getMinutes();
-      const apptEnd = appt.endDate.getHours() * 60 + appt.endDate.getMinutes();
+      // Convertir las fechas de la cita a la timezone de la organización
+      const apptStartInTz = moment.tz(appt.startDate, timezone);
+      const apptEndInTz = moment.tz(appt.endDate, timezone);
+      
+      const apptStart = apptStartInTz.hours() * 60 + apptStartInTz.minutes();
+      const apptEnd = apptEndInTz.hours() * 60 + apptEndInTz.minutes();
       return (startMin < apptEnd && endMin > apptStart);
     });
   });
@@ -508,7 +522,10 @@ function assignBestEmployeeForSlot(opts) {
  * @returns {Array} Array de bloques disponibles
  */
 function findAvailableMultiServiceBlocks(date, organization, services, allEmployees, appointments) {
-  const dayOfWeek = date.getDay();
+  const timezone = organization.timezone || 'America/Bogota';
+  // Obtener día de la semana en la timezone de la organización
+  const dateInTz = moment.tz(date, timezone);
+  const dayOfWeek = dateInTz.day();
   
   // Verificar que la organización esté abierta ese día
   const orgSchedule = getOrganizationDaySchedule(organization, dayOfWeek);
@@ -591,8 +608,12 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
           a.employee && a.employee.toString() === service.employeeId
         );
         const hasOverlap = empAppts.some(appt => {
-          const apptStart = appt.startDate.getHours() * 60 + appt.startDate.getMinutes();
-          const apptEnd = appt.endDate.getHours() * 60 + appt.endDate.getMinutes();
+          // Convertir las fechas de la cita a la timezone de la organización
+          const apptStartInTz = moment.tz(appt.startDate, timezone);
+          const apptEndInTz = moment.tz(appt.endDate, timezone);
+          
+          const apptStart = apptStartInTz.hours() * 60 + apptStartInTz.minutes();
+          const apptEnd = apptEndInTz.hours() * 60 + apptEndInTz.minutes();
           return (slotMin < apptEnd && (slotMin + service.duration) > apptStart);
         });
         

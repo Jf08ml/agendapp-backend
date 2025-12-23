@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import moment from 'moment-timezone';
 import serviceModel from "../models/serviceModel.js";
 import notificationService from "../services/notificationService.js";
 import organizationService from "../services/organizationService.js";
@@ -69,7 +70,8 @@ const reservationController = {
       const policy = org.reservationPolicy || "manual";
 
       // 🕒 VALIDAR HORARIO DE DISPONIBILIDAD
-      const requestedDateTime = new Date(startDate);
+      const timezone = org.timezone || 'America/Bogota';
+      const requestedDateTime = moment.tz(startDate, timezone).toDate();
       
       // Validar empleado si fue especificado
       let employee = null;
@@ -99,10 +101,9 @@ const reservationController = {
         }
 
         // Obtener citas del día
-        const startOfDay = new Date(requestedDateTime);
-        startOfDay.setHours(0, 0, 0, 0);
-        const endOfDay = new Date(requestedDateTime);
-        endOfDay.setHours(23, 59, 59, 999);
+        const dateStr = moment.tz(startDate, timezone).format('YYYY-MM-DD');
+        const startOfDay = moment.tz(dateStr, timezone).startOf('day').toDate();
+        const endOfDay = moment.tz(dateStr, timezone).endOf('day').toDate();
 
         const dayAppointments = await appointmentService.getAppointmentsByOrganizationWithDates(
           organizationId,
@@ -120,7 +121,8 @@ const reservationController = {
           dayAppointments
         );
 
-        const requestedTime = `${String(requestedDateTime.getHours()).padStart(2, '0')}:${String(requestedDateTime.getMinutes()).padStart(2, '0')}`;
+        const requestedTimeInTz = moment.tz(requestedDateTime, timezone);
+        const requestedTime = requestedTimeInTz.format('HH:mm');
         const slotAvailable = availableSlots.find(s => s.time === requestedTime && s.available);
 
         if (!slotAvailable) {
