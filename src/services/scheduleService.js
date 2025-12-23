@@ -86,16 +86,24 @@ function isTimeInBreak(time, breaks) {
  * Verifica si un slot (inicio + duración) se solapa con algún periodo de descanso
  * @param {string} slotStart - Hora inicio del slot "HH:mm"
  * @param {number} durationMinutes - Duración en minutos
- * @param {Array} breaks - Array de objetos {start, end}
+ * @param {Array} breaks - Array de objetos {start, end, day (opcional)}
+ * @param {number} dayOfWeek - Día de la semana (0=Domingo, 6=Sábado) - opcional
  * @returns {boolean}
  */
-function isSlotInBreak(slotStart, durationMinutes, breaks) {
+function isSlotInBreak(slotStart, durationMinutes, breaks, dayOfWeek = null) {
   if (!breaks || breaks.length === 0) return false;
   
   const slotStartMin = timeToMinutes(slotStart);
   const slotEndMin = slotStartMin + durationMinutes;
   
   return breaks.some(breakPeriod => {
+    // Si el break tiene campo "day", verificar que coincida con el día del slot
+    if (dayOfWeek !== null && breakPeriod.day !== undefined && breakPeriod.day !== null) {
+      if (breakPeriod.day !== dayOfWeek) {
+        return false; // Este break no aplica para este día
+      }
+    }
+    
     const breakStartMin = timeToMinutes(breakPeriod.start);
     const breakEndMin = timeToMinutes(breakPeriod.end);
     
@@ -312,6 +320,13 @@ function generateAvailableSlots(date, organization, employee = null, durationMin
   const startMin = timeToMinutes(effectiveStart);
   const endMin = timeToMinutes(effectiveEnd);
 
+  // DEBUG: Log temporal
+  console.log('  [scheduleService] effectiveStart:', effectiveStart, '(', startMin, 'min)');
+  console.log('  [scheduleService] effectiveEnd:', effectiveEnd, '(', endMin, 'min)');
+  console.log('  [scheduleService] stepMinutes:', stepMinutes);
+  console.log('  [scheduleService] durationMinutes:', durationMinutes);
+  console.log('  [scheduleService] relevantAppointments:', relevantAppointments.length);
+
   for (let currentMin = startMin; currentMin < endMin; currentMin += stepMinutes) {
     const slotTime = minutesToTime(currentMin);
     const slotEndMin = currentMin + durationMinutes;
@@ -319,14 +334,23 @@ function generateAvailableSlots(date, organization, employee = null, durationMin
     // Verificar si el slot completo está dentro del horario
     if (slotEndMin > endMin) break;
     
-    // Verificar si el slot se solapa con algún break (CORREGIDO: ahora verifica todo el slot)
-    const overlapsBreak = isSlotInBreak(slotTime, durationMinutes, effectiveBreaks);
+    // Verificar si el slot se solapa con algún break (pasamos el día para validar breaks por día)
+    const overlapsBreak = isSlotInBreak(slotTime, durationMinutes, effectiveBreaks, dayOfWeek);
     
     // Verificar si el slot se solapa con alguna cita existente
     const overlapsAppointment = relevantAppointments.some(appt => {
       // Convertir las fechas de la cita a la timezone de la organización
       const apptStartInTz = moment.tz(appt.startDate, timezone);
       const apptEndInTz = moment.tz(appt.endDate, timezone);
+      
+      // Verificar que la cita es del mismo día que estamos generando slots
+      const apptDateStr = apptStartInTz.format('YYYY-MM-DD');
+      const currentDateStr = dateInTz.format('YYYY-MM-DD');
+      
+      // Si la cita no es del día que estamos generando, ignorarla
+      if (apptDateStr !== currentDateStr) {
+        return false;
+      }
       
       const apptStart = apptStartInTz.hours() * 60 + apptStartInTz.minutes();
       const apptEnd = apptEndInTz.hours() * 60 + apptEndInTz.minutes();
@@ -490,6 +514,16 @@ function assignBestEmployeeForSlot(opts) {
       const apptStartInTz = moment.tz(appt.startDate, timezone);
       const apptEndInTz = moment.tz(appt.endDate, timezone);
       
+      // Verificar que la cita es del mismo día
+      const dateInTz = moment.tz(date, timezone);
+      const apptDateStr = apptStartInTz.format('YYYY-MM-DD');
+      const currentDateStr = dateInTz.format('YYYY-MM-DD');
+      
+      // Si la cita no es del día que estamos evaluando, ignorarla
+      if (apptDateStr !== currentDateStr) {
+        return false;
+      }
+      
       const apptStart = apptStartInTz.hours() * 60 + apptStartInTz.minutes();
       const apptEnd = apptEndInTz.hours() * 60 + apptEndInTz.minutes();
       return (startMin < apptEnd && endMin > apptStart);
@@ -499,12 +533,18 @@ function assignBestEmployeeForSlot(opts) {
   if (free.length === 0) return null;
   
   // Seleccionar el que tiene menos citas ese día
-  const dateStr = date.toISOString().split('T')[0];
+  // Convertir date a formato YYYY-MM-DD en la timezone de la organización
+  const dateInTz = moment.tz(date, timezone);
+  const dateStr = dateInTz.format('YYYY-MM-DD');
+  
   const sorted = free.map(emp => {
-    const count = existingAppointments.filter(a => 
-      a.employee && a.employee.toString() === emp._id.toString() &&
-      a.startDate.toISOString().split('T')[0] === dateStr
-    ).length;
+    const count = existingAppointments.filter(a => {
+      if (!a.employee || a.employee.toString() !== emp._id.toString()) return false;
+      
+      // Comparar fechas en la timezone de la organización
+      const apptDateStr = moment.tz(a.startDate, timezone).format('YYYY-MM-DD');
+      return apptDateStr === dateStr;
+    }).length;
     
     return { emp, count };
   }).sort((a, b) => a.count - b.count);

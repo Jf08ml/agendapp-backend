@@ -306,13 +306,18 @@ const scheduleController = {
       const startOfDay = moment.tz(date, timezone).startOf('day').toDate();
       const endOfDay = moment.tz(date, timezone).endOf('day').toDate();
 
+      // Si hay empleado específico, solo sus citas
+      // Si no, cargar todas las citas de la organización para ese día
       const appointments = employeeId 
         ? await appointmentModel.find({
             organizationId,
             employee: employeeId,
             startDate: { $gte: startOfDay, $lte: endOfDay }
           })
-        : [];
+        : await appointmentModel.find({
+            organizationId,
+            startDate: { $gte: startOfDay, $lte: endOfDay }
+          });
 
       const slots = scheduleService.generateAvailableSlots(
         date, // Pasar el string de fecha
@@ -321,6 +326,24 @@ const scheduleController = {
         duration,
         appointments
       );
+
+      // DEBUG: Log temporal para investigar
+      console.log('=== DEBUG GET AVAILABLE SLOTS ===');
+      console.log('Date:', date);
+      console.log('Organization:', organization.name);
+      console.log('Employee:', employee?.names || 'No employee');
+      console.log('Duration:', duration);
+      console.log('Appointments found:', appointments.length);
+      appointments.forEach(appt => {
+        const start = moment.tz(appt.startDate, timezone);
+        const end = moment.tz(appt.endDate, timezone);
+        console.log(`  - ${start.format('HH:mm')} - ${end.format('HH:mm')}`);
+      });
+      console.log('Total slots generated:', slots.length);
+      console.log('Available slots:', slots.filter(s => s.available).length);
+      console.log('First 5 slots:', slots.slice(0, 5).map(s => `${s.time} (${s.available ? 'available' : 'occupied'})`));
+      console.log('Last 5 slots:', slots.slice(-5).map(s => `${s.time} (${s.available ? 'available' : 'occupied'})`));
+      console.log('=================================');
 
       return sendResponse(
         res,
