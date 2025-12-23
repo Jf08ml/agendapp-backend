@@ -262,7 +262,7 @@ const membershipService = {
       employeeId: null, // null = notificación para el admin/organización
       status: "unread",
       type: "membership", // Tipo específico para notificaciones de membresía
-      frontendRoute: "/admin/membership", // Ruta donde se verá la notificación
+      frontendRoute: "/my-membership", // Ruta donde se verá la notificación
     });
   },
 
