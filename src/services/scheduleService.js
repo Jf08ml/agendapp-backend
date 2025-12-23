@@ -3,16 +3,18 @@
  * Considera tanto los horarios de la organización como los de los empleados
  */
 
+import moment from 'moment-timezone';
+
 /**
  * Obtiene el día de la semana de una fecha en formato "YYYY-MM-DD"
  * independiente de la zona horaria del servidor
  * @param {string} dateString - Fecha en formato "YYYY-MM-DD"
+ * @param {string} timezone - Zona horaria IANA (ej: 'America/Bogota', 'America/Mexico_City')
  * @returns {number} Día de la semana (0=Domingo, 6=Sábado)
  */
-function getDayOfWeekFromDateString(dateString) {
-  const [year, month, day] = dateString.split('-').map(Number);
-  const date = new Date(year, month - 1, day);
-  return date.getDay();
+function getDayOfWeekFromDateString(dateString, timezone = 'America/Bogota') {
+  // Usar moment-timezone para asegurar que la fecha se interprete en la zona horaria correcta
+  return moment.tz(dateString, timezone).day();
 }
 
 /**
@@ -246,6 +248,7 @@ function validateDateTime(datetime, organization, employee = null) {
  * @returns {Array} Array de objetos {time: "HH:mm", available: boolean}
  */
 function generateAvailableSlots(date, organization, employee = null, durationMinutes = 30, appointments = []) {
+  const timezone = organization.timezone || 'America/Bogota';
   const dayOfWeek = date.getDay();
   const slots = [];
 
@@ -324,11 +327,18 @@ function generateAvailableSlots(date, organization, employee = null, durationMin
       return currentMin < apptEnd && slotEndMin > apptStart;
     });
     
+    // Crear datetime usando moment-timezone con la zona horaria de la organización
+    const hours = Math.floor(currentMin / 60);
+    const minutes = currentMin % 60;
+    const datetime = moment.tz(
+      `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`,
+      timezone
+    ).toDate();
+    
     slots.push({
       time: slotTime,
       available: !overlapsBreak && !overlapsAppointment,
-      datetime: new Date(date.getFullYear(), date.getMonth(), date.getDate(), 
-                        Math.floor(currentMin / 60), currentMin % 60),
+      datetime,
     });
   }
 

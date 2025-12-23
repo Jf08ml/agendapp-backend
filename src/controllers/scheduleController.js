@@ -3,6 +3,7 @@
  * Maneja tanto horarios de organización como de empleados
  */
 
+import moment from 'moment-timezone';
 import organizationModel from "../models/organizationModel.js";
 import employeeModel from "../models/employeeModel.js";
 import appointmentModel from "../models/appointmentModel.js";
@@ -296,17 +297,15 @@ const scheduleController = {
         }
       }
 
-      // Parsear la fecha como fecha local (no UTC) para evitar cambios de día
-      const [year, month, day] = date.split('-').map(Number);
-      const requestedDate = new Date(year, month - 1, day);
+      // Parsear la fecha usando moment-timezone con la zona horaria de la organización
+      const timezone = organization.timezone || 'America/Bogota';
+      const requestedDate = moment.tz(date, timezone).toDate();
       const duration = serviceDuration || 30;
 
       // Obtener citas del día para filtrar slots ocupados
-      const startOfDay = new Date(requestedDate);
-      startOfDay.setHours(0, 0, 0, 0);
-      
-      const endOfDay = new Date(requestedDate);
-      endOfDay.setHours(23, 59, 59, 999);
+      // Usar moment para asegurar que los rangos de día sean correctos en la zona horaria
+      const startOfDay = moment.tz(date, timezone).startOf('day').toDate();
+      const endOfDay = moment.tz(date, timezone).endOf('day').toDate();
 
       const appointments = employeeId 
         ? await appointmentModel.find({
@@ -489,9 +488,9 @@ const scheduleController = {
       
       // Obtener día de la semana de la fecha solicitada
       // Usar helper para evitar problemas de zona horaria
-      const dayOfWeek = scheduleService.getDayOfWeekFromDateString(date);
-      const [year, month, day] = date.split('-').map(Number);
-      const requestDate = new Date(year, month - 1, day);
+      const timezone = organization.timezone || 'America/Bogota';
+      const dayOfWeek = scheduleService.getDayOfWeekFromDateString(date, timezone);
+      const requestDate = moment.tz(date, timezone).toDate();
       
       // Verificar que la organización esté abierta ese día
       const orgSchedule = scheduleService.getOrganizationDaySchedule(organization, dayOfWeek);
@@ -642,16 +641,13 @@ const scheduleController = {
       
       // Procesar cada solicitud
       const results = [];
+      const timezone = organization.timezone || 'America/Bogota';
       
       for (const request of requests) {
-        // Parsear la fecha como fecha local (no UTC)
-        const [year, month, day] = request.date.split('-').map(Number);
-        const requestDate = new Date(year, month - 1, day);
-        const startOfDay = new Date(requestDate);
-        startOfDay.setHours(0, 0, 0, 0);
-        
-        const endOfDay = new Date(requestDate);
-        endOfDay.setHours(23, 59, 59, 999);
+        // Parsear la fecha usando moment-timezone con la zona horaria de la organización
+        const requestDate = moment.tz(request.date, timezone).toDate();
+        const startOfDay = moment.tz(request.date, timezone).startOf('day').toDate();
+        const endOfDay = moment.tz(request.date, timezone).endOf('day').toDate();
         
         // Filtrar citas del día
         const dayAppointments = appointments.filter(a => 

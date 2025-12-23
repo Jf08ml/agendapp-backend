@@ -108,6 +108,13 @@ const organizationSchema = new mongoose.Schema({
     default: 'CO', // Colombia por defecto
     maxlength: 2,
   },
+  // 🕐 Zona horaria de la organización (IANA timezone)
+  timezone: {
+    type: String,
+    required: false,
+    default: 'America/Bogota',
+    // Ejemplos: 'America/Mexico_City', 'America/New_York', 'Europe/Madrid'
+  },
   instagramUrl: {
     type: String,
     required: false,
