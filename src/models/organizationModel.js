@@ -1,11 +1,40 @@
 import mongoose from "mongoose";
 
+// Schema para intervalos de descanso (breaks) dentro de un día
 const OpeningBreakSchema = new mongoose.Schema(
   {
-    day: { type: Number, min: 0, max: 6, required: true }, // 0=Dom .. 6=Sáb
     start: { type: String, required: true }, // "12:00"
     end: { type: String, required: true }, // "13:00"
     note: { type: String },
+  },
+  { _id: false }
+);
+
+// Schema para horario de un día específico
+const DayScheduleSchema = new mongoose.Schema(
+  {
+    day: { 
+      type: Number, 
+      min: 0, 
+      max: 6, 
+      required: true 
+    }, // 0=Domingo, 1=Lunes, ..., 6=Sábado
+    isOpen: { 
+      type: Boolean, 
+      default: true 
+    }, // Si está abierto ese día
+    start: { 
+      type: String, 
+      required: function() { return this.isOpen; }
+    }, // "08:00"
+    end: { 
+      type: String, 
+      required: function() { return this.isOpen; }
+    }, // "20:00"
+    breaks: {
+      type: [OpeningBreakSchema],
+      default: [],
+    },
   },
   { _id: false }
 );
@@ -120,11 +149,10 @@ const organizationSchema = new mongoose.Schema({
     type: String,
     required: false,
   },
+  // DEPRECATED: Mantener para compatibilidad
   openingHours: {
-    start: { type: String, required: true },
-    end: { type: String, required: true },
-
-    // NUEVO:
+    start: { type: String },
+    end: { type: String },
     businessDays: {
       type: [Number], // 0..6
       default: [1, 2, 3, 4, 5], // L-V
@@ -134,6 +162,27 @@ const organizationSchema = new mongoose.Schema({
       default: [],
     },
     stepMinutes: { type: Number, default: 5, min: 1, max: 60 },
+  },
+
+  // NUEVO: Sistema de horarios por día de la semana
+  weeklySchedule: {
+    enabled: { type: Boolean, default: false }, // Si está habilitado el horario semanal
+    schedule: {
+      type: [DayScheduleSchema],
+      default: function() {
+        // Horario por defecto: Lunes a Viernes 8AM-8PM, Sábado 8AM-2PM, Domingo cerrado
+        return [
+          { day: 0, isOpen: false }, // Domingo
+          { day: 1, isOpen: true, start: "08:00", end: "20:00", breaks: [] }, // Lunes
+          { day: 2, isOpen: true, start: "08:00", end: "20:00", breaks: [] }, // Martes
+          { day: 3, isOpen: true, start: "08:00", end: "20:00", breaks: [] }, // Miércoles
+          { day: 4, isOpen: true, start: "08:00", end: "20:00", breaks: [] }, // Jueves
+          { day: 5, isOpen: true, start: "08:00", end: "20:00", breaks: [] }, // Viernes
+          { day: 6, isOpen: true, start: "08:00", end: "14:00", breaks: [] }, // Sábado
+        ];
+      },
+    },
+    stepMinutes: { type: Number, default: 30, min: 5, max: 60 }, // Intervalo de tiempo para slots
   },
   // plan: {
   //   type: mongoose.Schema.Types.ObjectId,

@@ -353,7 +353,8 @@ const appointmentService = {
   getAppointmentsByOrganizationWithDates: async (
     organizationId,
     startDate,
-    endDate
+    endDate,
+    employeeIds = null
   ) => {
     try {
       const query = { organizationId };
@@ -387,6 +388,11 @@ const appointmentService = {
       // Añadir rango de fechas al query
       query.startDate = { $gte: new Date(startDate) };
       query.endDate = { $lte: new Date(endDate) };
+
+      // ✅ Filtrar por empleados específicos si se proporcionan
+      if (employeeIds && Array.isArray(employeeIds) && employeeIds.length > 0) {
+        query.employee = { $in: employeeIds };
+      }
 
       return await appointmentModel
         .find(query)

@@ -80,14 +80,23 @@ const appointmentController = {
   // Controlador para obtener citas de una organización con rango de fechas opcional
   getAppointmentsByOrganizationWithDates: async (req, res) => {
     const { organizationId } = req.params;
-    const { startDate, endDate } = req.query; // Fechas enviadas como query params
+    const { startDate, endDate, employeeIds } = req.query; // Fechas y empleados como query params
 
     try {
+      // Parsear employeeIds si viene como string (ej: "id1,id2,id3")
+      let parsedEmployeeIds = null;
+      if (employeeIds) {
+        parsedEmployeeIds = Array.isArray(employeeIds) 
+          ? employeeIds 
+          : employeeIds.split(',').filter(id => id.trim());
+      }
+
       const appointments =
         await appointmentService.getAppointmentsByOrganizationWithDates(
           organizationId,
           startDate,
-          endDate
+          endDate,
+          parsedEmployeeIds
         );
       sendResponse(
         res,

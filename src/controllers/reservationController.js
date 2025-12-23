@@ -7,6 +7,8 @@ import appointmentService from "../services/appointmentService.js";
 import subscriptionService from "../services/subscriptionService.js";
 import sendResponse from "../utils/sendResponse.js";
 import employeeService from "../services/employeeService.js";
+import scheduleService from "../services/scheduleService.js";
+import employeeModel from "../models/employeeModel.js";
 
 // ---------------------- helpers de notificación ----------------------
 async function notifyNewBooking(org, customerDetails, { isAuto, multi }) {
@@ -65,6 +67,66 @@ const reservationController = {
       if (!org)
         return sendResponse(res, 404, null, "Organización no encontrada");
       const policy = org.reservationPolicy || "manual";
+
+      // 🕒 VALIDAR HORARIO DE DISPONIBILIDAD
+      const requestedDateTime = new Date(startDate);
+      
+      // Validar empleado si fue especificado
+      let employee = null;
+      if (employeeId) {
+        employee = await employeeModel.findById(employeeId);
+        if (!employee) {
+          return sendResponse(res, 404, null, "Empleado no encontrado");
+        }
+      }
+
+      // Validar que la fecha/hora esté dentro de los horarios permitidos
+      const scheduleValidation = scheduleService.validateDateTime(
+        requestedDateTime,
+        org,
+        employee
+      );
+
+      if (!scheduleValidation.valid) {
+        return sendResponse(res, 400, null, scheduleValidation.reason);
+      }
+
+      // ✅ VALIDAR DISPONIBILIDAD DEL SLOT (evitar race conditions)
+      if (employee) {
+        const service = await serviceModel.findById(serviceId);
+        if (!service) {
+          return sendResponse(res, 404, null, "Servicio no encontrado");
+        }
+
+        // Obtener citas del día
+        const startOfDay = new Date(requestedDateTime);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(requestedDateTime);
+        endOfDay.setHours(23, 59, 59, 999);
+
+        const dayAppointments = await appointmentService.getAppointmentsByOrganizationWithDates(
+          organizationId,
+          startOfDay.toISOString(),
+          endOfDay.toISOString(),
+          [employeeId]
+        );
+
+        // Generar slots disponibles
+        const availableSlots = scheduleService.generateAvailableSlots(
+          requestedDateTime,
+          org,
+          employee,
+          service.duration,
+          dayAppointments
+        );
+
+        const requestedTime = `${String(requestedDateTime.getHours()).padStart(2, '0')}:${String(requestedDateTime.getMinutes()).padStart(2, '0')}`;
+        const slotAvailable = availableSlots.find(s => s.time === requestedTime && s.available);
+
+        if (!slotAvailable) {
+          return sendResponse(res, 409, null, "El horario seleccionado ya no está disponible");
+        }
+      }
 
       // Cliente (asegurar)
       const customer = await reservationService.ensureClientExists({

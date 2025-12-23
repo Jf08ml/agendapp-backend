@@ -20,6 +20,7 @@ import planRoutes from "./planRoutes";
 import waRoutes from "./waRoutes";
 import reminderRoutes from "./reminderRoutes";
 import membershipRoutes from "./membershipRoutes";
+import scheduleRoutes from "./scheduleRoutes.js";
 import { organizationResolver } from "../middleware/organizationResolver";
 
 const router = Router();
@@ -105,5 +106,6 @@ router.use("/plans", planRoutes);
 router.use("/memberships", membershipRoutes);
 router.use(waRoutes);
 router.use(reminderRoutes);
+router.use("/schedule", scheduleRoutes);
 
 export default router;
