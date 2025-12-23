@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 // Schema para intervalos de descanso (breaks) dentro de un día
 const OpeningBreakSchema = new mongoose.Schema(
   {
+    day: { type: Number, min: 0, max: 6 }, // 0=Domingo, 1=Lunes, ..., 6=Sábado (opcional para compatibilidad)
     start: { type: String, required: true }, // "12:00"
     end: { type: String, required: true }, // "13:00"
     note: { type: String },
