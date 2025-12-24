@@ -320,13 +320,6 @@ function generateAvailableSlots(date, organization, employee = null, durationMin
   const startMin = timeToMinutes(effectiveStart);
   const endMin = timeToMinutes(effectiveEnd);
 
-  // DEBUG: Log temporal
-  console.log('  [scheduleService] effectiveStart:', effectiveStart, '(', startMin, 'min)');
-  console.log('  [scheduleService] effectiveEnd:', effectiveEnd, '(', endMin, 'min)');
-  console.log('  [scheduleService] stepMinutes:', stepMinutes);
-  console.log('  [scheduleService] durationMinutes:', durationMinutes);
-  console.log('  [scheduleService] relevantAppointments:', relevantAppointments.length);
-
   for (let currentMin = startMin; currentMin < endMin; currentMin += stepMinutes) {
     const slotTime = minutesToTime(currentMin);
     const slotEndMin = currentMin + durationMinutes;

@@ -8,8 +8,6 @@ const authService = {
     let user = await Employee.findOne({ email, organizationId }).populate(
       "role"
     );
-    console.log(user);
-    console.log(email, password, organizationId)
     if (user && (await bcrypt.compare(password, user.password))) {
       return {
         ...user.toObject(),

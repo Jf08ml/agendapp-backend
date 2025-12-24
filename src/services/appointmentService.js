@@ -296,14 +296,11 @@ const appointmentService = {
             ? await employeeService.getEmployeeById(employee)
             : employee;
 
-            console.log(clientDoc)
 
         const rawPhone = clientDoc?.phoneNumber;
 
         // 1) validar con tu hasUsablePhone (retorna "57XXXXXXXXXX" o null)
-        console.log(rawPhone);
         const usable = hasUsablePhone(rawPhone);
-        console.log(usable);
         if (!usable) {
           console.warn(
             "Cliente sin teléfono utilizable; no se enviará WhatsApp."
