@@ -268,7 +268,7 @@ const organizationSchema = new mongoose.Schema({
   },
   homeLayout: {
     type: String,
-    enum: ["modern", "minimal", "cards"],
+    enum: ["modern", "minimal", "cards", "landing"],
     default: "modern",
   },
   reminderSettings: {
