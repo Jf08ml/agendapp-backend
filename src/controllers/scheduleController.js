@@ -553,6 +553,8 @@ const scheduleController = {
         employees,
         appointments
       );
+
+      console.log("Bloques disponibles calculados:", blocks);
       
       return sendResponse(res, 200, { blocks }, "Bloques obtenidos exitosamente");
       
