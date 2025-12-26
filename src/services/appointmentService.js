@@ -72,13 +72,27 @@ const appointmentService = {
       additionalItems = [],
     } = appointmentData;
 
+    // Obtener detalles de la organización para timezone
+    const organization = await organizationService.getOrganizationById(
+      organizationId
+    );
+    if (!organization) {
+      throw new Error("Organización no encontrada");
+    }
+
+    const timezone = organization.timezone || 'America/Bogota';
+
+    // Interpretar fechas en la zona horaria de la organización
+    const parsedStartDate = moment.tz(startDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate();
+    const parsedEndDate = moment.tz(endDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate();
+
     // Comprobar citas superpuestas
     // const overlappingAppointments = await appointmentModel.find({
     //   employee,
     //   $or: [
-    //     { startDate: { $lt: endDate, $gte: startDate } },
-    //     { endDate: { $gt: startDate, $lte: endDate } },
-    //     { startDate: { $lte: startDate }, endDate: { $gte: endDate } },
+    //     { startDate: { $lt: parsedEndDate, $gte: parsedStartDate } },
+    //     { endDate: { $gt: parsedStartDate, $lte: parsedEndDate } },
+    //     { startDate: { $lte: parsedStartDate }, endDate: { $gte: parsedEndDate } },
     //   ],
     // });
 
@@ -106,14 +120,14 @@ const appointmentService = {
     );
     const totalPrice = basePrice + additionalCost; // Calcular precio total
 
-    // Crear la cita
+    // Crear la cita con las fechas parseadas
     const newAppointment = new appointmentModel({
       service,
       employee,
       employeeRequestedByClient,
       client,
-      startDate,
-      endDate,
+      startDate: parsedStartDate,
+      endDate: parsedEndDate,
       organizationId,
       advancePayment,
       customPrice,
@@ -122,21 +136,14 @@ const appointmentService = {
     });
 
     // Formatear fecha para la confirmación
-    const dateObject = new Date(startDate);
-
     const appointmentDate = new Intl.DateTimeFormat("es-ES", {
       day: "numeric",
       month: "long",
       hour: "2-digit",
       minute: "2-digit",
       hour12: true,
-      timeZone: "America/Bogota",
-    }).format(dateObject);
-
-    // Obtener detalles de la organización
-    const organization = await organizationService.getOrganizationById(
-      organizationId
-    );
+      timeZone: timezone,
+    }).format(parsedStartDate);
 
     const appointmentDetails = {
       names: client?.name || "Estimado cliente",
@@ -439,6 +446,12 @@ const appointmentService = {
     const appt = await appointmentModel.findById(id);
     if (!appt) throw new Error("Cita no encontrada");
 
+    // Obtener organización para timezone
+    const orgId = updatedData.organizationId || appt.organizationId;
+    const org = await organizationService.getOrganizationById(orgId);
+    if (!org) throw new Error("Organización no encontrada");
+    const timezone = org.timezone || 'America/Bogota';
+
     // 1) Resolver el "nuevo servicio" a partir de:
     //    - updatedData.service (preferido), o
     //    - updatedData.services[0] (compatibilidad si el FE envía array)
@@ -450,7 +463,7 @@ const appointmentService = {
 
     // 2) Determinar startDate base para cálculos (si no llega, usamos el actual)
     const newStart = updatedData.startDate
-      ? new Date(updatedData.startDate)
+      ? moment.tz(updatedData.startDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate()
       : new Date(appt.startDate);
 
     // 3) Resolver additionalItems (dos formatos soportados)
@@ -531,7 +544,7 @@ const appointmentService = {
     } else {
       // No cambió servicio ni startDate → endDate queda igual salvo que FE lo envíe
       newEnd = updatedData.endDate
-        ? new Date(updatedData.endDate)
+        ? moment.tz(updatedData.endDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate()
         : new Date(appt.endDate);
     }
 
