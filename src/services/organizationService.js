@@ -27,6 +27,7 @@ const organizationService = {
       clientIdWhatsapp,
       reservationPolicy,
       default_country,
+      timezone,
     } = organizationData;
 
     // Encriptar la contraseña antes de guardarla
@@ -60,6 +61,7 @@ const organizationService = {
           ? "auto_if_available"
           : "manual",
       default_country: default_country || 'CO', // 🌍 País por defecto
+      timezone: timezone || undefined,
     });
 
     const savedOrganization = await newOrganization.save();
@@ -123,6 +125,7 @@ const organizationService = {
       requireReservationDeposit,
       reservationDepositPercentage,
       default_country,
+      timezone,
     } = organizationData;
 
     const organization = await Organization.findById(id);
@@ -234,6 +237,11 @@ const organizationService = {
     // 🌍 Actualizar país por defecto
     if (default_country !== undefined) {
       organization.default_country = default_country;
+    }
+
+    // 🕐 Actualizar zona horaria si se proporciona
+    if (timezone !== undefined) {
+      organization.timezone = timezone;
     }
 
     // Encriptar la contraseña solo si se proporciona una nueva
