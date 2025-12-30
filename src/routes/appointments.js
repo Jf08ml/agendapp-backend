@@ -18,6 +18,12 @@ router.get(
   appointmentController.getAppointmentsByOrganizationWithDates
 );
 
+// Obtener agregados (buckets) por organizationId (day|week|month)
+router.get(
+  "/appointments/organization/:organizationId/aggregated",
+  appointmentController.getAppointmentsAggregated
+);
+
 // Obtener una cita específica por ID
 router.get("/appointments/:id", appointmentController.getAppointmentById);
 

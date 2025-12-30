@@ -116,6 +116,13 @@ const organizationSchema = new mongoose.Schema({
     default: 'America/Bogota',
     // Ejemplos: 'America/Mexico_City', 'America/New_York', 'Europe/Madrid'
   },
+  // 💱 Moneda de la organización (ISO 4217)
+  currency: {
+    type: String,
+    required: false,
+    default: 'COP',
+    maxlength: 3,
+  },
   instagramUrl: {
     type: String,
     required: false,

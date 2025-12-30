@@ -28,6 +28,7 @@ const organizationService = {
       reservationPolicy,
       default_country,
       timezone,
+      currency,
     } = organizationData;
 
     // Encriptar la contraseña antes de guardarla
@@ -62,6 +63,7 @@ const organizationService = {
           : "manual",
       default_country: default_country || 'CO', // 🌍 País por defecto
       timezone: timezone || undefined,
+      currency: currency || undefined,
     });
 
     const savedOrganization = await newOrganization.save();
@@ -126,6 +128,7 @@ const organizationService = {
       reservationDepositPercentage,
       default_country,
       timezone,
+      currency,
     } = organizationData;
 
     const organization = await Organization.findById(id);
@@ -242,6 +245,11 @@ const organizationService = {
     // 🕐 Actualizar zona horaria si se proporciona
     if (timezone !== undefined) {
       organization.timezone = timezone;
+    }
+
+    // 💱 Actualizar moneda si se proporciona
+    if (currency !== undefined) {
+      organization.currency = currency;
     }
 
     // Encriptar la contraseña solo si se proporciona una nueva

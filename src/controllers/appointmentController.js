@@ -109,6 +109,33 @@ const appointmentController = {
     }
   },
 
+    // Controlador para obtener agregados de citas (buckets) timezone-aware
+    getAppointmentsAggregated: async (req, res) => {
+      const { organizationId } = req.params;
+      const { startDate, endDate, granularity, employeeIds } = req.query;
+
+      try {
+        let parsedEmployeeIds = null;
+        if (employeeIds) {
+          parsedEmployeeIds = Array.isArray(employeeIds)
+            ? employeeIds
+            : employeeIds.split(',').filter(id => id.trim());
+        }
+
+        const buckets = await appointmentService.getAppointmentsAggregatedByRange(
+          organizationId,
+          startDate,
+          endDate,
+          granularity || 'day',
+          parsedEmployeeIds
+        );
+
+        sendResponse(res, 200, buckets, 'Buckets de citas obtenidos exitosamente');
+      } catch (error) {
+        sendResponse(res, 500, null, error.message);
+      }
+    },
+
   // Controlador para obtener una cita por ID
   getAppointmentById: async (req, res) => {
     const { id } = req.params;

@@ -392,9 +392,17 @@ const appointmentService = {
         endDate = lastDayNextMonth;
       }
 
-      // Añadir rango de fechas al query
-      query.startDate = { $gte: new Date(startDate) };
-      query.endDate = { $lte: new Date(endDate) };
+      // Ajustar rango de fechas teniendo en cuenta la zona horaria de la organización
+      const org = await organizationService.getOrganizationById(organizationId);
+      const timezone = (org && org.timezone) || 'America/Bogota';
+
+      // Parsear startDate/endDate en timezone de la organización y convertir a UTC boundaries
+      const start = moment.tz(startDate, timezone).startOf('day').utc().toDate();
+      const end = moment.tz(endDate, timezone).endOf('day').utc().toDate();
+
+      // Añadir rango de fechas al query (en UTC)
+      query.startDate = { $gte: start };
+      query.endDate = { $lte: end };
 
       // ✅ Filtrar por empleados específicos si se proporcionan
       if (employeeIds && Array.isArray(employeeIds) && employeeIds.length > 0) {
@@ -413,6 +421,75 @@ const appointmentService = {
       );
     }
   },
+
+    // Agregación timezone-aware para generar buckets (día/semana/mes)
+    getAppointmentsAggregatedByRange: async (
+      organizationId,
+      startDate,
+      endDate,
+      granularity = "day",
+      employeeIds = null
+    ) => {
+      try {
+        const org = await organizationService.getOrganizationById(organizationId);
+        const timezone = (org && org.timezone) || 'America/Bogota';
+
+        // Convertir límites a UTC según timezone
+        const start = moment.tz(startDate, timezone).startOf('day').utc().toDate();
+        const end = moment.tz(endDate, timezone).endOf('day').utc().toDate();
+
+        const match = {
+          organizationId: new mongoose.Types.ObjectId(organizationId),
+          startDate: { $gte: start },
+          endDate: { $lte: end },
+        };
+
+        if (employeeIds && Array.isArray(employeeIds) && employeeIds.length > 0) {
+          match.employee = { $in: employeeIds.map((id) => new mongoose.Types.ObjectId(id)) };
+        }
+
+        // Formato para $dateToString según granularidad
+        let format = "%Y-%m-%d"; // day
+        if (granularity === "week") format = "%Y-%U"; // year-weeknumber
+        if (granularity === "month") format = "%Y-%m"; // year-month
+
+        const pipeline = [
+          { $match: match },
+          {
+            $group: {
+              _id: {
+                $dateToString: { format, date: "$startDate", timezone },
+              },
+              ingresos: { $sum: { $ifNull: ["$totalPrice", 0] } },
+              citas: { $sum: 1 },
+              firstDate: { $min: "$startDate" },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              key: "$_id",
+              ingresos: 1,
+              citas: 1,
+              firstDate: 1,
+            },
+          },
+          { $sort: { firstDate: 1 } },
+        ];
+
+        const result = await appointmentModel.aggregate(pipeline).exec();
+
+        // Normalizar timestamp a milisegundos y devolver
+        return result.map((r) => ({
+          key: r.key,
+          ingresos: r.ingresos || 0,
+          citas: r.citas || 0,
+          timestamp: r.firstDate ? new Date(r.firstDate).getTime() : null,
+        }));
+      } catch (error) {
+        throw new Error("Error al agregar citas: " + error.message);
+      }
+    },
 
   // Obtener una cita por ID
   getAppointmentById: async (id) => {
