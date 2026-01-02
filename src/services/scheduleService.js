@@ -705,20 +705,14 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
     }
     
     if (blockValid) {
-      // Construir datetimes usando moment-timezone en la zona horaria de la organización
-      const blockStartDate = moment.tz(
-        `${dateInTz.format('YYYY-MM-DD')} ${minutesToTime(currentMin)}`,
-        timezone
-      ).toDate();
-      
-      const blockEndDate = moment.tz(
-        `${dateInTz.format('YYYY-MM-DD')} ${minutesToTime(slotMin)}`,
-        timezone
-      ).toDate();
+      // 🔧 FIX: Construir strings ISO sin timezone para que el frontend no tenga que hacer conversiones
+      // Formato: "YYYY-MM-DDTHH:mm:ss" sin "Z" ni offset
+      const blockStart = `${dateInTz.format('YYYY-MM-DD')}T${minutesToTime(currentMin)}:00`;
+      const blockEnd = `${dateInTz.format('YYYY-MM-DD')}T${minutesToTime(slotMin)}:00`;
       
       blocks.push({
-        start: blockStartDate.toISOString(),
-        end: blockEndDate.toISOString(),
+        start: blockStart,
+        end: blockEnd,
         intervals
       });
     }
