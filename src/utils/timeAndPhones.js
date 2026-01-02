@@ -28,14 +28,24 @@ export function hasUsablePhone(input) {
     return "57" + digits;
   }
 
-  // México: +52XXXXXXXXXX -> 52XXXXXXXXXX (12 dígitos)
-  if (/^52\d{10}$/.test(digits)) {
+  // México: +521XXXXXXXXXX -> 521XXXXXXXXXX (13 dígitos - formato WhatsApp correcto)
+  if (/^521\d{10}$/.test(digits)) {
     return digits;
   }
 
-  // México: 0052XXXXXXXXXX -> 52XXXXXXXXXX
-  if (/^0052\d{10}$/.test(digits)) {
+  // México: +52XXXXXXXXXX -> 521XXXXXXXXXX (agregar el "1" para WhatsApp)
+  if (/^52\d{10}$/.test(digits)) {
+    return "521" + digits.slice(2); // Inserta "1" después del 52
+  }
+
+  // México: 00521XXXXXXXXXX -> 521XXXXXXXXXX
+  if (/^00521\d{10}$/.test(digits)) {
     return digits.slice(2);
+  }
+
+  // México: 0052XXXXXXXXXX -> 521XXXXXXXXXX (agregar el "1")
+  if (/^0052\d{10}$/.test(digits)) {
+    return "521" + digits.slice(4);
   }
 
   // Formato E.164 genérico: +[código país][número] (11-15 dígitos totales)
