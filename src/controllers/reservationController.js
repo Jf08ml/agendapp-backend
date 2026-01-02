@@ -71,9 +71,9 @@ const reservationController = {
 
       // 🕒 VALIDAR HORARIO DE DISPONIBILIDAD
       const timezone = org.timezone || 'America/Bogota';
-      // 🔧 FIX: Interpretar la fecha/hora recibida directamente en la timezone de la organización
-      // startDate viene en formato "YYYY-MM-DDTHH:mm:ss" sin zona horaria
-      const requestedDateTime = moment.tz(startDate, timezone).toDate();
+      // 🔧 FIX: Parsear con formato explícito para que moment interprete como tiempo LOCAL
+      // startDate viene en formato "YYYY-MM-DDTHH:mm:ss" y representa tiempo local en la timezone
+      const requestedDateTime = moment.tz(startDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate();
       
       // Validar empleado si fue especificado
       let employee = null;
@@ -103,7 +103,7 @@ const reservationController = {
         }
 
         // Obtener citas del día
-        const dateStr = moment.tz(startDate, timezone).format('YYYY-MM-DD');
+        const dateStr = moment.tz(startDate, 'YYYY-MM-DDTHH:mm:ss', timezone).format('YYYY-MM-DD');
         const startOfDay = moment.tz(dateStr, timezone).startOf('day').toDate();
         const endOfDay = moment.tz(dateStr, timezone).endOf('day').toDate();
 
@@ -272,8 +272,8 @@ const reservationController = {
           }
 
           // 2) Normalizar duraciones y calcular startDate encadenado por servicio
-          // 🔧 FIX: Interpretar la fecha/hora en la zona horaria de la organización
-          let cursor = moment.tz(startDate, timezone).toDate();
+          // 🔧 FIX: Parsear con formato explícito para interpretar como tiempo LOCAL
+          let cursor = moment.tz(startDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate();
           const normalized = [];
           for (const item of services) {
             let duration = item.duration;
@@ -388,8 +388,8 @@ const reservationController = {
       session.startTransaction();
 
       try {
-        // 🔧 FIX: Interpretar la fecha/hora en la zona horaria de la organización
-        let currentStart = moment.tz(startDate, timezone).toDate();
+        // 🔧 FIX: Parsear con formato explícito para interpretar como tiempo LOCAL
+        let currentStart = moment.tz(startDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate();
         const createdReservations = [];
 
         for (const serviceItem of services) {

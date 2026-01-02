@@ -83,9 +83,10 @@ const appointmentService = {
     const timezone = organization.timezone || 'America/Bogota';
 
     // 🔧 FIX: Interpretar fechas explícitamente en la zona horaria de la organización
-    // El string viene sin timezone, lo parseamos directamente en la timezone de la org
-    const parsedStartDate = moment.tz(startDate, timezone).toDate();
-    const parsedEndDate = moment.tz(endDate, timezone).toDate();
+    // El string viene formato "YYYY-MM-DDTHH:mm:ss" y representa tiempo LOCAL en la timezone de la org
+    // IMPORTANTE: Incluir el formato para que moment sepa que es tiempo LOCAL, no UTC
+    const parsedStartDate = moment.tz(startDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate();
+    const parsedEndDate = moment.tz(endDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate();
 
     // Comprobar citas superpuestas
     // const overlappingAppointments = await appointmentModel.find({
@@ -210,8 +211,8 @@ const appointmentService = {
 
       // Interpretar la fecha/hora en la zona horaria de la organización
       const timezone = org.timezone || 'America/Bogota';
-      // 🔧 FIX: Parsear string sin timezone directamente en la timezone de la org
-      let currentStart = moment.tz(startDate, timezone).toDate();
+      // 🔧 FIX: Parsear con formato explícito para que moment sepa que es tiempo LOCAL
+      let currentStart = moment.tz(startDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate();
 
       for (const serviceId of services) {
         const svc = await serviceService.getServiceById(serviceId);
