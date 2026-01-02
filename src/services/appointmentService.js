@@ -729,9 +729,10 @@ const appointmentService = {
         }
 
         // 🔧 FIX: Calcular ventana de tiempo usando la timezone de la organización
-        // Ventana de 1 hora completa para capturar citas a cualquier minuto (8:00, 8:15, 8:30, 8:45, etc.)
-        const targetTimeStart = moment.tz(timezone).add(hoursBefore, 'hours').toDate();
-        const targetTimeEnd = moment.tz(timezone).add(hoursBefore + 1, 'hours').toDate();
+        // Ventana desde el inicio de la hora actual + hoursBefore hasta el final de esa hora
+        // Esto asegura que capture todas las citas de esa hora, sin importar el minuto de ejecución
+        const targetTimeStart = moment.tz(timezone).add(hoursBefore, 'hours').startOf('hour').toDate();
+        const targetTimeEnd = moment.tz(timezone).add(hoursBefore, 'hours').endOf('hour').toDate();
 
         // Buscar citas que estén en la ventana de tiempo objetivo y no tengan recordatorio enviado
         const appointmentsInWindow = await appointmentModel
@@ -888,7 +889,7 @@ const appointmentService = {
         // Enviar campaña
         try {
           const targetDateStr = targetTimeStart.toISOString().slice(0, 10);
-          const title = `Recordatorios ${targetDateStr} ${currentHour}:00 (${org.name})`;
+          const title = `Recordatorios ${targetDateStr} ${currentHourOrg}:00 (${org.name})`;
 
           const { waBulkSend, waBulkOptIn } = await import("./waHttpService.js");
           const { messageTplReminder } = await import("../utils/bulkTemplates.js");
