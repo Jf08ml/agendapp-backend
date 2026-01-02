@@ -5,47 +5,61 @@
 export const sleep = (ms = 150) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Valida si un número es utilizable para WhatsApp en CO.
- * Acepta: 10 dígitos móviles (empieza en 3), o +57XXXXXXXXXX, o 57XXXXXXXXXX.
+ * Valida si un número es utilizable para WhatsApp.
+ * Acepta números de Colombia (+57) y México (+52) en varios formatos.
  */
 export function hasUsablePhone(input) {
   if (!input) return null;
 
   const digits = String(input).replace(/\D+/g, ""); // quita todo lo que no es dígito
 
-  // +57XXXXXXXXXX  -> 57XXXXXXXXXX
+  // Colombia: +57XXXXXXXXXX -> 57XXXXXXXXXX (12 dígitos)
   if (/^57\d{10}$/.test(digits)) {
     return digits;
   }
 
-  // 003573001234567  -> 573001234567
+  // Colombia: 0057XXXXXXXXXX -> 57XXXXXXXXXX
   if (/^0057\d{10}$/.test(digits)) {
     return digits.slice(2);
   }
 
-  // 10 dígitos colombianos (móvil inicia por 3)
+  // Colombia: 10 dígitos móviles (inicia por 3)
   if (/^\d{10}$/.test(digits) && digits.startsWith("3")) {
     return "57" + digits;
+  }
+
+  // México: +52XXXXXXXXXX -> 52XXXXXXXXXX (12 dígitos)
+  if (/^52\d{10}$/.test(digits)) {
+    return digits;
+  }
+
+  // México: 0052XXXXXXXXXX -> 52XXXXXXXXXX
+  if (/^0052\d{10}$/.test(digits)) {
+    return digits.slice(2);
+  }
+
+  // Formato E.164 genérico: +[código país][número] (11-15 dígitos totales)
+  // Esto cubre otros países sin validación específica
+  if (/^\d{11,15}$/.test(digits)) {
+    return digits;
   }
 
   return null; // inválido
 }
 
 /**
- * Normaliza a formato E.164/co-friendly para WA: +57XXXXXXXXXX
+ * Normaliza a formato E.164 para WhatsApp: +[código][número]
  * Si no se puede normalizar, devuelve null.
  */
 export function normalizeToCOE164(input) {
-  if (!hasUsablePhone(input)) return null;
-  let digits = String(input).replace(/[^\d]/g, "");
+  const usable = hasUsablePhone(input);
+  if (!usable) return null;
 
-  if (digits.length === 12 && digits.startsWith("57")) {
-    return `+${digits}`;
+  // Si ya tiene formato válido, agregar +
+  if (/^\d{11,15}$/.test(usable)) {
+    return `+${usable}`;
   }
-  if (digits.length === 10 && digits.startsWith("3")) {
-    return `+57${digits}`;
-  }
-  // (fijos regionales no se incluyen aquí a propósito)
+
   return null;
 }
 
@@ -80,4 +94,55 @@ export function getBogotaTodayWindowUTC(now = new Date()) {
 export function getBogotaDayWindowUTC(targetDate) {
   const base = targetDate ? new Date(targetDate) : new Date();
   return getBogotaTodayWindowUTC(base);
+}
+/**
+ * Ventana de un día específico en cualquier timezone, expresada en UTC [start, end).
+ * @param {string|Date} targetDate - Fecha objetivo
+ * @param {string} timezone - IANA timezone (ej: "America/Mexico_City", "America/Bogota")
+ * @returns {{dayStartUTC: Date, dayEndUTC: Date}}
+ */
+export function getDayWindowUTC(targetDate, timezone = "America/Bogota") {
+  const base = targetDate ? new Date(targetDate) : new Date();
+  
+  // Obtenemos año/mes/día "vistos" en la timezone especificada
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const [y, m, d] = fmt
+    .format(base)
+    .split("-")
+    .map((v) => parseInt(v, 10));
+
+  // Obtenemos el offset de la timezone para ese día específico
+  // Creamos una fecha a medianoche en esa timezone
+  const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}T00:00:00`;
+  const fmtWithOffset = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  
+  // Crear fecha en UTC que representa medianoche en la timezone objetivo
+  const parts = fmtWithOffset.formatToParts(new Date(dateStr));
+  const hour = parseInt(parts.find(p => p.type === 'hour')?.value || '0');
+  
+  // Calcular offset en horas (aproximado, funciona para zonas fijas sin DST)
+  const testDate = new Date(`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}T12:00:00Z`);
+  const tzDate = new Date(testDate.toLocaleString('en-US', { timeZone: timezone }));
+  const offsetMs = testDate.getTime() - tzDate.getTime();
+  const offsetHours = Math.round(offsetMs / (1000 * 60 * 60));
+  
+  // Medianoche en la timezone objetivo, expresada en UTC
+  const dayStartUTC = new Date(Date.UTC(y, m - 1, d, offsetHours, 0, 0, 0));
+  const dayEndUTC = new Date(dayStartUTC.getTime() + 24 * 60 * 60 * 1000);
+
+  return { dayStartUTC, dayEndUTC };
 }

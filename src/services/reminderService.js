@@ -1,9 +1,11 @@
 // services/reminderService.js (agenda-backend)
 import { waBulkSend, waBulkOptIn } from "./waHttpService.js";
 import appointmentModel from "../models/appointmentModel.js";
+import organizationModel from "../models/organizationModel.js";
 import {
   hasUsablePhone,
-  getBogotaDayWindowUTC, // 👈 usamos la nueva
+  getBogotaDayWindowUTC,
+  getDayWindowUTC,
   sleep,
 } from "../utils/timeAndPhones.js";
 import { messageTplReminder } from "../utils/bulkTemplates.js";
@@ -23,8 +25,21 @@ export const reminderService = {
     dryRun = false,
     targetDate,
   } = {}) => {
-    // 👇 ahora la ventana es para la fecha elegida
-    const { dayStartUTC, dayEndUTC } = getBogotaDayWindowUTC(targetDate);
+    // 🔧 FIX: Si se pasa orgId, obtener la organización primero para usar su timezone
+    let dayStartUTC, dayEndUTC;
+    
+    if (orgId) {
+      const org = await organizationModel.findById(orgId);
+      if (!org) {
+        console.error(`[RemindersBulk] Organización ${orgId} no encontrada`);
+        return { ok: false, created: 0, results: [] };
+      }
+      const timezone = org.timezone || "America/Bogota";
+      ({ dayStartUTC, dayEndUTC } = getDayWindowUTC(targetDate, timezone));
+    } else {
+      // Si no se pasa orgId, usar ventana de Bogotá (compatibilidad)
+      ({ dayStartUTC, dayEndUTC } = getBogotaDayWindowUTC(targetDate));
+    }
 
     // 1) Traer citas de ese día aún no notificadas
     const appointments = await appointmentModel
