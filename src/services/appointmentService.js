@@ -37,23 +37,23 @@ function getBogotaTodayWindowUTC(baseDate = new Date()) {
 }
 
 // Helpers de formato (añádelos arriba, cerca de getBogotaTodayWindowUTC)
-const TZ = "America/Bogota";
-const fmt = (d) =>
+// 🔧 FIX: Helpers de formato que aceptan timezone dinámico
+const fmt = (d, tz = "America/Bogota") =>
   new Intl.DateTimeFormat("es-ES", {
     day: "numeric",
     month: "long",
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
-    timeZone: TZ,
+    timeZone: tz,
   }).format(new Date(d));
 
-const fmtTime = (d) =>
+const fmtTime = (d, tz = "America/Bogota") =>
   new Intl.DateTimeFormat("es-ES", {
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
-    timeZone: TZ,
+    timeZone: tz,
   }).format(new Date(d));
 
 const appointmentService = {
@@ -84,7 +84,13 @@ const appointmentService = {
 
     // 🔧 FIX: Interpretar fechas explícitamente en la zona horaria de la organización
     // El string viene formato "YYYY-MM-DDTHH:mm:ss" y representa tiempo LOCAL en la timezone de la org
-    // IMPORTANTE: Incluir el formato para que moment sepa que es tiempo LOCAL, no UTC
+    // IMPORTANTE: Usar moment.tz() con 3 parámetros para que interprete el string como tiempo LOCAL
+    console.log('🔍 DEBUG TIMEZONE:', {
+      startDate,
+      timezone,
+      momentParsed: moment.tz(startDate, 'YYYY-MM-DDTHH:mm:ss', timezone).format(),
+      toDate: moment.tz(startDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate()
+    });
     const parsedStartDate = moment.tz(startDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate();
     const parsedEndDate = moment.tz(endDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate();
 
@@ -200,6 +206,9 @@ const appointmentService = {
     const org = await organizationService.getOrganizationById(organizationId);
     if (!org) throw new Error("Organización no encontrada.");
 
+    // 🔧 Definir timezone ANTES del try para que esté disponible en efectos externos
+    const timezone = org.timezone || 'America/Bogota';
+
     const session = await mongoose.startSession();
     let committed = false;
 
@@ -209,10 +218,16 @@ const appointmentService = {
     try {
       session.startTransaction();
 
-      // Interpretar la fecha/hora en la zona horaria de la organización
-      const timezone = org.timezone || 'America/Bogota';
-      // 🔧 FIX: Parsear con formato explícito para que moment sepa que es tiempo LOCAL
-      let currentStart = moment.tz(startDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate();
+      // 🔧 FIX: Parsear el string ISO sin timezone directamente en la timezone de la org
+      let currentStart;
+      if (typeof startDate === 'string') {
+        const parsed = moment.tz(startDate, 'YYYY-MM-DDTHH:mm:ss', timezone);
+        currentStart = parsed.toDate();
+      } else if (startDate instanceof Date) {
+        currentStart = startDate;
+      } else {
+        throw new Error('startDate debe ser un Date o string');
+      }
 
       for (const serviceId of services) {
         const svc = await serviceService.getServiceById(serviceId);
@@ -287,13 +302,13 @@ const appointmentService = {
 
         const dateRange =
           created.length === 1
-            ? fmt(first.start)
-            : `${fmt(first.start)} – ${fmtTime(last.end)}`;
+            ? fmt(first.start, timezone)
+            : `${fmt(first.start, timezone)} – ${fmtTime(last.end, timezone)}`;
 
         const servicesForMsg = created.map((c) => ({
           name: c.svc.name,
-          start: fmtTime(c.start),
-          end: fmtTime(c.end),
+          start: fmtTime(c.start, timezone),
+          end: fmtTime(c.end, timezone),
         }));
 
         // Cargar cliente/empleado si vinieron como IDs

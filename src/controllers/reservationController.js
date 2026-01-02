@@ -272,8 +272,9 @@ const reservationController = {
           }
 
           // 2) Normalizar duraciones y calcular startDate encadenado por servicio
-          // 🔧 FIX: Parsear con formato explícito para interpretar como tiempo LOCAL
-          let cursor = moment.tz(startDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate();
+          // 🔧 FIX: Mantener como STRING ISO sin timezone para evitar conversiones
+          let cursorMoment = moment.tz(startDate, 'YYYY-MM-DDTHH:mm:ss', timezone);
+          
           const normalized = [];
           for (const item of services) {
             let duration = item.duration;
@@ -282,8 +283,9 @@ const reservationController = {
               if (!svcObj) throw new Error("Servicio no encontrado");
               duration = Number(svcObj.duration || 0);
             }
-            const itemStart = new Date(cursor);
-            cursor.setMinutes(cursor.getMinutes() + duration);
+            // Generar string ISO sin timezone
+            const itemStart = cursorMoment.format('YYYY-MM-DDTHH:mm:ss');
+            cursorMoment = cursorMoment.clone().add(duration, 'minutes');
 
             normalized.push({
               serviceId: item.serviceId,
