@@ -51,19 +51,6 @@ export const reminderService = {
 
     const results = [];
 
-    // Formatters reutilizables
-    const fmtHour = new Intl.DateTimeFormat("es-ES", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: true,
-      timeZone: "America/Bogota",
-    });
-    const fmtDay = new Intl.DateTimeFormat("es-ES", {
-      day: "numeric",
-      month: "long",
-      timeZone: "America/Bogota",
-    });
-
     // 3) Por cada organización, construir campañas con items unificados por teléfono
     for (const [_orgId, appts] of byOrg.entries()) {
       const org = appts[0]?.organizationId;
@@ -74,6 +61,22 @@ export const reminderService = {
         );
         continue;
       }
+
+      // 🔧 FIX: Usar la timezone de la organización para los formatos de fecha
+      const timezone = org?.timezone || "America/Bogota";
+      
+      // Formatters con la timezone correcta de la organización
+      const fmtHour = new Intl.DateTimeFormat("es-ES", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+        timeZone: timezone,
+      });
+      const fmtDay = new Intl.DateTimeFormat("es-ES", {
+        day: "numeric",
+        month: "long",
+        timeZone: timezone,
+      });
 
       // --- Unificar por teléfono ---
       const byPhone = new Map();

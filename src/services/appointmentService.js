@@ -777,16 +777,17 @@ const appointmentService = {
         // Agrupar por teléfono (cliente) - el servicio de campaña ya lo hace, 
         // pero necesitamos preparar los items
         const byPhone = new Map();
+        // 🔧 FIX: Usar la timezone de la organización en los formatos de fecha
         const fmtHour = new Intl.DateTimeFormat("es-ES", {
           hour: "2-digit",
           minute: "2-digit",
           hour12: true,
-          timeZone: "America/Bogota",
+          timeZone: timezone,
         });
         const fmtDay = new Intl.DateTimeFormat("es-ES", {
           day: "numeric",
           month: "long",
-          timeZone: "America/Bogota",
+          timeZone: timezone,
         });
 
         for (const appt of appointments) {
