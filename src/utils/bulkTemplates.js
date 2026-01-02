@@ -5,7 +5,7 @@ export const messageTplReminder = `
 
 Recuerda que tienes {{count}} {{cita_pal}} {{agendada_pal}}.
 
-🗓️ Franja: {{date_range}}
+🗓️ Fecha: {{date_range}}
 📍 Lugar: {{organization}}
 
 ✨ Servicios:

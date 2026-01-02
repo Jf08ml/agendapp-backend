@@ -29,7 +29,7 @@ Si tienes alguna pregunta o necesitas modificar tu cita, *puedes responder direc
 
 ¡Tus citas han sido agendadas exitosamente!
 
-🗓️ Franja: ${dateRange}
+🗓️ Fecha: ${dateRange}
 📍 Lugar: ${organization}
 ✨ Servicios:
 ${list}
