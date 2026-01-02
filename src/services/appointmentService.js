@@ -680,12 +680,6 @@ const appointmentService = {
         return;
       }
 
-      // Obtener hora actual en Colombia
-      const now = new Date();
-      const nowColombia = new Date(now.toLocaleString("en-US", { timeZone: "America/Bogota" }));
-      const currentHour = nowColombia.getHours();
-      const currentMinute = nowColombia.getMinutes();
-
       let totalOk = 0;
       let totalSkipped = 0;
 
@@ -695,13 +689,19 @@ const appointmentService = {
         const hoursBefore = org.reminderSettings?.hoursBefore || 24;
         const sendTimeStart = org.reminderSettings?.sendTimeStart || "07:00";
         const sendTimeEnd = org.reminderSettings?.sendTimeEnd || "20:00";
+        
+        // 🔧 FIX: Usar la timezone de la organización para todos los cálculos
+        const timezone = org.timezone || 'America/Bogota';
+        const nowInOrgTz = moment.tz(timezone);
+        const currentHourOrg = nowInOrgTz.hour();
+        const currentMinuteOrg = nowInOrgTz.minute();
 
         // Parsear horas del rango permitido
         const [startHour, startMinute] = sendTimeStart.split(":").map(Number);
         const [endHour, endMinute] = sendTimeEnd.split(":").map(Number);
 
         // Verificar si estamos dentro del rango horario permitido
-        const currentTimeMinutes = currentHour * 60 + currentMinute;
+        const currentTimeMinutes = currentHourOrg * 60 + currentMinuteOrg;
         const startTimeMinutes = startHour * 60 + startMinute;
         const endTimeMinutes = endHour * 60 + endMinute;
 
@@ -710,10 +710,10 @@ const appointmentService = {
           continue;
         }
 
-        // Calcular ventana de tiempo: buscar citas que necesitan recordatorio en esta hora
+        // 🔧 FIX: Calcular ventana de tiempo usando la timezone de la organización
         // Ventana de 1 hora completa para capturar citas a cualquier minuto (8:00, 8:15, 8:30, 8:45, etc.)
-        const targetTimeStart = new Date(now.getTime() + hoursBefore * 60 * 60 * 1000);
-        const targetTimeEnd = new Date(now.getTime() + (hoursBefore + 1) * 60 * 60 * 1000);
+        const targetTimeStart = moment.tz(timezone).add(hoursBefore, 'hours').toDate();
+        const targetTimeEnd = moment.tz(timezone).add(hoursBefore + 1, 'hours').toDate();
 
         // Buscar citas que estén en la ventana de tiempo objetivo y no tengan recordatorio enviado
         const appointmentsInWindow = await appointmentModel
@@ -739,8 +739,7 @@ const appointmentService = {
         )];
 
         // Obtener el rango del día completo para las citas encontradas
-        // Usar la timezone de la organización
-        const timezone = org.timezone || 'America/Bogota';
+        // La timezone ya está definida arriba
         const targetDateStr = moment.tz(targetTimeStart, timezone).format('YYYY-MM-DD');
         const dayStart = moment.tz(targetDateStr, timezone).startOf('day').toDate();
         const dayEnd = moment.tz(targetDateStr, timezone).endOf('day').toDate();
