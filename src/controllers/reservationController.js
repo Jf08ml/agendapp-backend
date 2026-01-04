@@ -187,7 +187,7 @@ const reservationController = {
       // 🔗 Generar link de cancelación si hay token
       let cancellationLink = null;
       if (newReservation._cancelToken) {
-        cancellationLink = generateCancellationLink(newReservation._cancelToken);
+        cancellationLink = generateCancellationLink(newReservation._cancelToken, org);
       }
 
       await notifyNewBooking(org, customerDetails, {
@@ -435,7 +435,7 @@ const reservationController = {
 
             // Usar el token compartido que ya se generó arriba
             const { generateCancellationLink } = await import('../utils/cancellationUtils.js');
-            const cancellationLink = generateCancellationLink(sharedToken, organizationId);
+            const cancellationLink = generateCancellationLink(sharedToken, org);
 
             const msg = whatsappTemplates.scheduleAppointmentBatch({
               names: customerDetails.name || "Estimado cliente",

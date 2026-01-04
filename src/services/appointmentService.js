@@ -174,7 +174,7 @@ const appointmentService = {
     };
 
     // 🔗 Generar enlace de cancelación
-    const cancellationLink = generateCancellationLink(cancelToken, organizationId);
+    const cancellationLink = generateCancellationLink(cancelToken, organization);
 
     // Enviar confirmación por WhatsApp
     try {
@@ -408,7 +408,7 @@ const appointmentService = {
           return created.map(c => c.saved);
         } else {
           // Tenemos el token en texto plano generado en este batch
-          groupCancellationLink = generateCancellationLink(groupCancelToken, organizationId);
+          groupCancellationLink = generateCancellationLink(groupCancelToken, organization);
         }
 
         // Cargar cliente/empleado si vinieron como IDs
