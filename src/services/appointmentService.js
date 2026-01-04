@@ -7,6 +7,8 @@ import clientService from "../services/clientService.js";
 import employeeService from "../services/employeeService.js";
 import { waIntegrationService } from "../services/waIntegrationService.js";
 import { hasUsablePhone, normalizeToCOE164 } from "../utils/timeAndPhones.js";
+import cancellationService from "./cancellationService.js";
+import { generateCancellationLink } from "../utils/cancellationUtils.js";
 import mongoose from "mongoose";
 import moment from "moment-timezone";
 
@@ -128,6 +130,14 @@ const appointmentService = {
     );
     const totalPrice = basePrice + additionalCost; // Calcular precio total
 
+    // 🔗 Generar token de cancelación
+    const { token: cancelToken, hash: cancelTokenHash } = cancellationService.generateCancelToken();
+    
+    console.log('🔑 Token generado para appointment:', {
+      token: cancelToken,
+      hash: cancelTokenHash.substring(0, 20) + '...',
+    });
+
     // Crear la cita con las fechas parseadas
     const newAppointment = new appointmentModel({
       service,
@@ -141,6 +151,7 @@ const appointmentService = {
       customPrice,
       additionalItems,
       totalPrice, // Asignar precio total calculado
+      cancelTokenHash, // 🔗 Guardar hash del token
     });
 
     // Formatear fecha para la confirmación
@@ -162,9 +173,12 @@ const appointmentService = {
       phoneNumber: organization.phoneNumber,
     };
 
+    // 🔗 Generar enlace de cancelación
+    const cancellationLink = generateCancellationLink(cancelToken, organizationId);
+
     // Enviar confirmación por WhatsApp
     try {
-      const msg = whatsappTemplates.scheduleAppointment(appointmentDetails);
+      const msg = whatsappTemplates.scheduleAppointment(appointmentDetails, cancellationLink);
 
       await whatsappService.sendMessage(
         organizationId,
@@ -179,14 +193,30 @@ const appointmentService = {
     }
 
     // Guardar la cita en la base de datos
-    return await newAppointment.save();
+    const savedAppointment = await newAppointment.save();
+    
+    console.log('💾 Appointment guardado:', {
+      id: savedAppointment._id,
+      hasTokenHash: !!savedAppointment.cancelTokenHash,
+      tokenHashPreview: savedAppointment.cancelTokenHash ? savedAppointment.cancelTokenHash.substring(0, 20) + '...' : 'N/A',
+    });
+    
+    return savedAppointment;
   },
 
   // Crear múltiples citas (batch)
   createAppointmentsBatch: async (payload) => {
+    console.log('🎯 [createAppointmentsBatch] Iniciando con payload:', {
+      services: payload.services,
+      client: payload.client,
+      startDate: payload.startDate,
+      skipNotification: payload.skipNotification,
+    });
+    
     const {
       services,
-      employee,
+      employee, // Puede ser string (un empleado para todas) o array (uno por servicio)
+      employees, // Array de empleados (nuevo parámetro, tiene prioridad sobre employee)
       employeeRequestedByClient,
       client,
       startDate,
@@ -194,12 +224,31 @@ const appointmentService = {
       advancePayment,
       customPrices = {},
       additionalItemsByService = {},
+      skipNotification = false, // 🔇 Nueva opción para no enviar WhatsApp
+      sharedGroupId = null, // 🔗 GroupId compartido (opcional)
+      sharedTokenHash = null, // 🔗 Token hash compartido (opcional)
     } = payload;
     
     if (!Array.isArray(services) || services.length === 0) {
       throw new Error("Debe enviar al menos un servicio.");
     }
-    if (!employee || !client || !startDate || !organizationId) {
+    
+    // Normalizar empleados: puede venir como 'employees' (array) o 'employee' (string)
+    let employeeList;
+    if (employees && Array.isArray(employees)) {
+      // Si viene employees, validar que tenga el mismo length que services
+      if (employees.length !== services.length) {
+        throw new Error("El array de empleados debe tener la misma longitud que el de servicios.");
+      }
+      employeeList = employees;
+    } else if (employee) {
+      // Si viene employee (string), replicarlo para todos los servicios
+      employeeList = Array(services.length).fill(employee);
+    } else {
+      throw new Error("Debe proporcionar al menos un empleado (employee o employees).");
+    }
+    
+    if (!client || !startDate || !organizationId) {
       throw new Error("Faltan datos requeridos para crear las citas.");
     }
 
@@ -213,7 +262,19 @@ const appointmentService = {
     let committed = false;
 
     const created = [];
-    const groupId = new mongoose.Types.ObjectId();
+    const groupId = sharedGroupId || new mongoose.Types.ObjectId();
+    
+    // 🔗 Usar token compartido si se provee, sino generar uno nuevo
+    let groupCancelToken, groupCancelTokenHash;
+    if (sharedTokenHash) {
+      groupCancelTokenHash = sharedTokenHash;
+      console.log('🔗 Usando token compartido para grupo:', groupId);
+    } else {
+      const generated = cancellationService.generateCancelToken();
+      groupCancelToken = generated.token;
+      groupCancelTokenHash = generated.hash;
+      console.log('🔑 Token nuevo generado para grupo:', groupId);
+    }
 
     try {
       session.startTransaction();
@@ -229,7 +290,10 @@ const appointmentService = {
         throw new Error('startDate debe ser un Date o string');
       }
 
-      for (const serviceId of services) {
+      for (let i = 0; i < services.length; i++) {
+        const serviceId = services[i];
+        const employeeForThisService = employeeList[i]; // 👤 Empleado específico para este servicio
+        
         const svc = await serviceService.getServiceById(serviceId);
         if (!svc) throw new Error(`Servicio no encontrado: ${serviceId}`);
 
@@ -255,10 +319,11 @@ const appointmentService = {
         );
         const totalPrice = basePrice + additionalCost;
 
+        // 🔗 Usar el mismo token hash para TODAS las citas del grupo
         const doc = new appointmentModel({
           groupId,
           service: serviceId,
-          employee,
+          employee: employeeForThisService, // 👤 Empleado específico
           employeeRequestedByClient: !!employeeRequestedByClient,
           client,
           startDate: currentStart,
@@ -269,6 +334,7 @@ const appointmentService = {
           additionalItems,
           totalPrice,
           status: "pending",
+          cancelTokenHash: groupCancelTokenHash, // 🔗 Mismo hash para todo el grupo
         });
 
         const saved = await doc.save({ session });
@@ -296,20 +362,54 @@ const appointmentService = {
 
     // ---------- EFECTOS EXTERNOS (fuera de la transacción) ----------
     try {
-      if (created.length > 0) {
-        const first = created[0];
-        const last = created[created.length - 1];
+      if (created.length > 0 && !skipNotification) { // 🔇 Solo enviar si no se pidió omitir
+        
+        // 🔍 Si hay groupId, buscar TODAS las citas del grupo para el mensaje
+        let allGroupAppointments = created;
+        if (groupId) {
+          console.log('🔍 Buscando todas las citas del grupo:', groupId);
+          const groupAppts = await appointmentModel
+            .find({ groupId })
+            .populate('service')
+            .sort({ startDate: 1 });
+          
+          if (groupAppts && groupAppts.length > 0) {
+            console.log(`✅ Encontradas ${groupAppts.length} citas del grupo`);
+            allGroupAppointments = groupAppts.map(appt => ({
+              start: appt.startDate,
+              end: appt.endDate,
+              svc: appt.service,
+              saved: appt,
+            }));
+          }
+        }
+        
+        const first = allGroupAppointments[0];
+        const last = allGroupAppointments[allGroupAppointments.length - 1];
 
         const dateRange =
-          created.length === 1
+          allGroupAppointments.length === 1
             ? fmt(first.start, timezone)
             : `${fmt(first.start, timezone)} – ${fmtTime(last.end, timezone)}`;
 
-        const servicesForMsg = created.map((c) => ({
+        const servicesForMsg = allGroupAppointments.map((c) => ({
           name: c.svc.name,
           start: fmtTime(c.start, timezone),
           end: fmtTime(c.end, timezone),
         }));
+
+        // 🔗 Generar enlace de cancelación
+        // Si usamos sharedTokenHash (viene de reservas), NO podemos generar el link
+        // porque no tenemos el token en texto plano. En ese caso, retornamos sin enviar.
+        let groupCancellationLink;
+        if (sharedTokenHash) {
+          console.warn('⚠️ Usando token compartido de reservas. No se puede generar link sin token en texto plano.');
+          console.warn('⚠️ El mensaje debe enviarse desde donde se tiene el token original.');
+          return created.map(c => c.saved);
+        } else {
+          // Tenemos el token en texto plano generado en este batch
+          groupCancellationLink = generateCancellationLink(groupCancelToken, organizationId);
+        }
 
         // Cargar cliente/empleado si vinieron como IDs
         const clientDoc =
@@ -344,6 +444,7 @@ const appointmentService = {
           organization: org.name,
           services: servicesForMsg, // [{ name, start, end }]
           employee: employeeDoc?.names || "Nuestro equipo",
+          cancellationLink: groupCancellationLink, // 🔗 Un solo enlace para todo el grupo
         });
 
         // Envío 1-a-1 (mensaje ya renderizado)
@@ -426,6 +527,9 @@ const appointmentService = {
       if (employeeIds && Array.isArray(employeeIds) && employeeIds.length > 0) {
         query.employee = { $in: employeeIds };
       }
+
+      // 🔍 NO filtrar por status - incluir TODAS las citas (incluso canceladas)
+      // Esto permite que DayModal muestre las citas canceladas en su sección
 
       return await appointmentModel
         .find(query)

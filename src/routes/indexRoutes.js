@@ -22,6 +22,7 @@ import reminderRoutes from "./reminderRoutes";
 import membershipRoutes from "./membershipRoutes";
 import scheduleRoutes from "./scheduleRoutes.js";
 import debugRoutes from "./debugRoutes.js";
+import publicRoutes from "./publicRoutes.js";
 import { organizationResolver } from "../middleware/organizationResolver";
 
 const router = Router();
@@ -109,5 +110,6 @@ router.use(waRoutes);
 router.use(reminderRoutes);
 router.use("/schedule", scheduleRoutes);
 router.use("/debug", debugRoutes);
+router.use("/public", publicRoutes);
 
 export default router;

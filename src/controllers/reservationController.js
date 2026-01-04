@@ -10,6 +10,7 @@ import sendResponse from "../utils/sendResponse.js";
 import employeeService from "../services/employeeService.js";
 import scheduleService from "../services/scheduleService.js";
 import employeeModel from "../models/employeeModel.js";
+import { generateCancellationLink } from "../utils/cancellationUtils.js";
 
 // ---------------------- helpers de notificación ----------------------
 async function notifyNewBooking(org, customerDetails, { isAuto, multi }) {
@@ -183,6 +184,12 @@ const reservationController = {
         status: "pending",
       });
 
+      // 🔗 Generar link de cancelación si hay token
+      let cancellationLink = null;
+      if (newReservation._cancelToken) {
+        cancellationLink = generateCancellationLink(newReservation._cancelToken);
+      }
+
       await notifyNewBooking(org, customerDetails, {
         isAuto: false,
         multi: false,
@@ -191,7 +198,12 @@ const reservationController = {
       return sendResponse(
         res,
         201,
-        { policy, outcome: "pending", reservation: newReservation },
+        { 
+          policy, 
+          outcome: "pending", 
+          reservation: newReservation,
+          cancellationLink, // Incluir link en respuesta
+        },
         "Reserva creada exitosamente"
       );
     } catch (error) {
@@ -295,56 +307,57 @@ const reservationController = {
             });
           }
 
-          // 3) Agrupar por empleado **respetando segmentos contiguos**
-          //    createAppointmentsBatch usa un solo employee por llamada
-          const groups = []; // [{ employeeId, services: [serviceId...], startDate, indices: [i...] }]
-          let currentGroup = null;
-
-          for (let i = 0; i < normalized.length; i++) {
-            const n = normalized[i];
-            if (!currentGroup || currentGroup.employeeId !== n.employeeId) {
-              // abrir grupo nuevo
-              currentGroup = {
-                employeeId: n.employeeId,
-                services: [],
-                startDate: n.startDate, // el primer startDate del grupo
-                indices: [], // para mapear luego
-              };
-              groups.push(currentGroup);
+          // 3) Generar UN groupId y token compartido para TODAS las citas
+          const mongoose = (await import('mongoose')).default;
+          const cancellationService = (await import('../services/cancellationService.js')).default;
+          
+          const sharedGroupId = new mongoose.Types.ObjectId();
+          const { token: sharedToken, hash: sharedTokenHash } = cancellationService.generateCancelToken();
+          console.log('🔑 Token compartido generado para reserva múltiple:', sharedGroupId);
+          
+          const allServiceIds = normalized.map(n => n.serviceId);
+          const allAppointments = [];
+          
+          // Agrupar por empleado para crear en batches (pero sin enviar mensaje aún)
+          const employeeGroups = new Map();
+          normalized.forEach((n, idx) => {
+            if (!employeeGroups.has(n.employeeId)) {
+              employeeGroups.set(n.employeeId, []);
             }
-            currentGroup.services.push(n.serviceId);
-            currentGroup.indices.push(i);
-          }
+            employeeGroups.get(n.employeeId).push({ ...n, originalIndex: idx });
+          });
 
-          // 4) Crear citas por grupo (una llamada por empleado/segmento)
-          const allAppointments = new Array(normalized.length); // mapear por índice original
-          for (const g of groups) {
+          // Crear citas por grupo de empleado, pasando el groupId y token compartido
+          for (const [employeeId, group] of employeeGroups.entries()) {
             const batch = await appointmentService.createAppointmentsBatch({
-              services: g.services,
-              employee: g.employeeId,
+              services: group.map(g => g.serviceId),
+              employee: employeeId,
               employeeRequestedByClient: true,
               client: normalizeId(customer),
-              startDate: g.startDate, // la función encadena internamente
+              startDate: group[0].startDate,
               organizationId: normalizeId(organizationId),
-              // Si manejas precios/adicionales por servicio:
-              // customPrices: {...},
-              // additionalItemsByService: {...},
+              skipNotification: true, // 🔇 No enviar mensaje aún
+              sharedGroupId, // 🔗 Mismo groupId para todas las citas
+              sharedTokenHash, // 🔗 Mismo token hash para todas las citas
             });
 
-            // Mapear las citas del batch a los índices originales de 'normalized'
-            // createAppointmentsBatch devuelve en el mismo orden de 'services'
-            for (let k = 0; k < g.indices.length; k++) {
-              const idx = g.indices[k]; // índice original en 'normalized'
-              const appt = batch[k] || null; // cita creada para ese servicio
-              allAppointments[idx] = appt;
-            }
+            // Mapear las citas creadas a sus índices originales
+            group.forEach((item, idx) => {
+              allAppointments[item.originalIndex] = batch[idx];
+            });
           }
 
           // 5) Crear Reservations auto-aprobadas y (opcional) enlazar appointmentId
+          // 👥 Generar UN groupId para todas las reservas de esta solicitud múltiple
+          const reservationGroupId = new mongoose.Types.ObjectId();
+          console.log(`👥 GroupId para reservas múltiples: ${reservationGroupId}`);
+          
           const createdReservations = [];
           for (let i = 0; i < normalized.length; i++) {
             const n = normalized[i];
             const appt = allAppointments[i];
+
+            console.log(`📋 Creando reserva ${i + 1}/${normalized.length}, appointmentId: ${appt?._id}`);
 
             const reservationData = {
               serviceId: n.serviceId,
@@ -355,13 +368,97 @@ const reservationController = {
               organizationId: normalizeId(organizationId),
               status: "auto_approved",
               auto: true,
-              appointmentId: appt?._id || null, // ⬅️ si NO quieres vínculo aún, quita esta línea
+              appointmentId: appt?._id || null,
+              groupId: reservationGroupId, // 👥 Asignar el mismo groupId a todas
             };
 
             const newReservation = await reservationService.createReservation(
               reservationData
             );
+            console.log(`✅ Reserva creada: ${newReservation._id}, appointmentId: ${newReservation.appointmentId}, groupId: ${newReservation.groupId}`);
             createdReservations.push(newReservation);
+          }
+
+          // 6) Enviar UN SOLO mensaje de WhatsApp con todas las citas
+          try {
+            const serviceModel = (await import('../models/serviceModel.js')).default;
+            const employeeModel = (await import('../models/employeeModel.js')).default;
+            const whatsappTemplates = (await import('../utils/whatsappTemplates.js')).default;
+            const { waIntegrationService } = await import('../services/waIntegrationService.js');
+            const { hasUsablePhone } = await import('../utils/timeAndPhones.js');
+            
+            // Obtener detalles de servicios y empleados
+            const servicesDetails = await Promise.all(
+              allAppointments.map(apt => serviceModel.findById(apt.service))
+            );
+            
+            const employeesMap = new Map();
+            for (const apt of allAppointments) {
+              if (!employeesMap.has(apt.employee.toString())) {
+                const emp = await employeeModel.findById(apt.employee);
+                employeesMap.set(apt.employee.toString(), emp);
+              }
+            }
+
+            // Formatear servicios para el mensaje
+            const fmtTime = (d, tz = timezone) =>
+              new Intl.DateTimeFormat("es-ES", {
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: true,
+                timeZone: tz,
+              }).format(new Date(d));
+
+            const servicesForMsg = allAppointments.map((apt, idx) => ({
+              name: servicesDetails[idx]?.name || 'Servicio',
+              start: fmtTime(apt.startDate, timezone),
+              end: fmtTime(apt.endDate, timezone),
+              employee: employeesMap.get(apt.employee.toString())?.names || 'Empleado',
+            }));
+
+            const firstStart = allAppointments[0].startDate;
+            const lastEnd = allAppointments[allAppointments.length - 1].endDate;
+            
+            const fmt = (d, tz = timezone) =>
+              new Intl.DateTimeFormat("es-ES", {
+                day: "numeric",
+                month: "long",
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: true,
+                timeZone: tz,
+              }).format(new Date(d));
+
+            const dateRange = allAppointments.length === 1
+              ? fmt(firstStart, timezone)
+              : `${fmt(firstStart, timezone)} – ${fmtTime(lastEnd, timezone)}`;
+
+            // Usar el token compartido que ya se generó arriba
+            const { generateCancellationLink } = await import('../utils/cancellationUtils.js');
+            const cancellationLink = generateCancellationLink(sharedToken, organizationId);
+
+            const msg = whatsappTemplates.scheduleAppointmentBatch({
+              names: customerDetails.name || "Estimado cliente",
+              dateRange,
+              organization: org.name,
+              services: servicesForMsg,
+              employee: servicesForMsg.length === 1 
+                ? servicesForMsg[0].employee 
+                : "Nuestro equipo",
+              cancellationLink,
+            });
+
+            const usablePhone = hasUsablePhone(customerDetails.phone);
+            if (usablePhone) {
+              await waIntegrationService.sendMessage({
+                orgId: organizationId,
+                phone: `+${usablePhone}`,
+                message: msg,
+                image: null,
+              });
+            }
+          } catch (error) {
+            console.error('[createMultipleReservations] Error enviando WhatsApp:', error);
           }
 
           await notifyNewBooking(org, customerDetails, {
@@ -390,6 +487,10 @@ const reservationController = {
       session.startTransaction();
 
       try {
+        // � Generar UN groupId para todas las reservas de esta solicitud múltiple
+        const reservationGroupId = new mongoose.Types.ObjectId();
+        console.log(`👥 GroupId para reservas múltiples (manual): ${reservationGroupId}`);
+        
         // 🔧 FIX: Parsear con formato explícito para interpretar como tiempo LOCAL
         let currentStart = moment.tz(startDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate();
         const createdReservations = [];
@@ -413,6 +514,7 @@ const reservationController = {
             customerDetails,
             organizationId,
             status: "pending",
+            groupId: reservationGroupId, // 👥 Asignar el mismo groupId a todas
           };
 
           const newReservation = await reservationService.createReservation(

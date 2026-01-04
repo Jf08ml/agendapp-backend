@@ -33,17 +33,37 @@ const reservationSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "approved", "rejected", "auto_approved"],
+      enum: ["pending", "approved", "rejected", "auto_approved", "cancelled_by_customer", "cancelled_by_admin"],
       default: "pending",
     },
     auto: {
       type: Boolean,
       default: false,
     },
+    // 🔐 Token de cancelación (hash)
+    cancelTokenHash: {
+      type: String,
+      required: false,
+    },
+    cancelledAt: {
+      type: Date,
+      required: false,
+    },
+    cancelledBy: {
+      type: String,
+      enum: ["customer", "admin"],
+      required: false,
+    },
     appointmentId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Appointment",
       default: null,
+    },
+    // 👥 ID de grupo para reservas múltiples (mismo cliente, misma solicitud)
+    groupId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: false,
+      index: true,
     },
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now },

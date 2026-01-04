@@ -3,14 +3,27 @@ import Reservation from "../models/reservationModel.js";
 import Client from "../models/clientModel.js";
 import appointmentService from "./appointmentService.js";
 import whatsappService from "./sendWhatsappService.js";
+import cancellationService from "./cancellationService.js";
 import { RES_STATUS } from "../constants/reservationStatus.js";
 
 const reservationService = {
   // Crear una nueva reserva
   createReservation: async (reservationData, session = null) => {
+    // 🔐 Generar token de cancelación
+    const { token, hash } = cancellationService.generateCancelToken();
+    reservationData.cancelTokenHash = hash;
+    
     const reservation = new Reservation(reservationData);
-    if (session) return await reservation.save({ session });
-    return await reservation.save();
+    if (session) {
+      await reservation.save({ session });
+    } else {
+      await reservation.save();
+    }
+    
+    // Retornar la reservación con el token (solo en memoria, no guardado en DB)
+    reservation._cancelToken = token; // Campo temporal para usar en notificaciones
+    
+    return reservation;
   },
 
   // Obtener todas las reservas de una organización (con orden por fecha)
@@ -43,16 +56,79 @@ const reservationService = {
       if (!reservation) throw new Error("Reserva no encontrada");
 
       const nextStatus = updateData.status;
+      const skipNotification = updateData.skipNotification || false;
 
       // Solo crear cita vía batch si pasa a "approved" y no hay appointment aún
       const mustCreateAppointment =
         nextStatus === RES_STATUS.APPROVED && !reservation.appointmentId;
 
-      if (mustCreateAppointment) {
+      // 🔇 Si skipNotification es true, NO crear citas aún (esperar a la última)
+      if (mustCreateAppointment && !skipNotification && reservation.groupId) {
+        // 🎯 Es la última del grupo (skipNotification=false)
+        // crear TODAS las citas del grupo juntas
+        const groupReservations = await Reservation.find({
+          groupId: reservation.groupId
+        }).populate("serviceId employeeId customer organizationId");
+
+        // Filtrar solo las que necesitan cita (no tienen appointmentId)
+        const needAppointment = groupReservations.filter(r => !r.appointmentId);
+
+        if (needAppointment.length > 0) {
+          console.log(`📦 Creando ${needAppointment.length} citas del grupo juntas`);
+          
+          // Usar la misma lógica que createMultipleReservations
+          const services = needAppointment.map(r => {
+            const sObj = typeof r.serviceId === "object" ? r.serviceId : null;
+            return sObj?._id || r.serviceId;
+          });
+          
+          // 👤 Extraer array de empleados (uno por cada reserva)
+          const employees = needAppointment.map(r => {
+            return r.employeeId?._id || r.employeeId || null;
+          });
+          console.log('👥 Empleados por servicio:', employees);
+
+          const firstRes = needAppointment[0];
+          const orgId = firstRes.organizationId._id || firstRes.organizationId;
+          
+          // 🔗 Usar el groupId de las reservas
+          const sharedGroupId = reservation.groupId;
+          console.log('🔗 Usando groupId de reservas:', sharedGroupId);
+          
+          // Crear todas las citas en un solo batch
+          const createdAppts = await appointmentService.createAppointmentsBatch({
+            services,
+            employees, // 👤 Array de empleados (uno por servicio)
+            employeeRequestedByClient: !!firstRes.employeeId,
+            client: typeof firstRes.customer === "object" 
+              ? firstRes.customer._id.toString() 
+              : firstRes.customer,
+            startDate: firstRes.startDate,
+            organizationId: orgId,
+            skipNotification: false, // La última SÍ envía mensaje
+            sharedGroupId, // 🔗 Pasar el groupId de las reservas
+          });
+
+          // Asignar las citas creadas a sus respectivas reservas
+          for (let i = 0; i < needAppointment.length; i++) {
+            if (createdAppts[i]?._id) {
+              needAppointment[i].appointmentId = createdAppts[i]._id;
+              needAppointment[i].status = RES_STATUS.APPROVED;
+              await needAppointment[i].save();
+            }
+          }
+
+          console.log(`✅ ${createdAppts.length} citas creadas para el grupo`);
+          
+          // Recargar la reserva actual
+          const updated = await Reservation.findById(id);
+          return updated;
+        }
+      } else if (mustCreateAppointment && !skipNotification && !reservation.groupId) {
+        // Aprobación individual (sin grupo)
         const { serviceId, employeeId, startDate, customer, organizationId } =
           reservation;
 
-        // Validaciones mínimas
         const serviceObj = typeof serviceId === "object" ? serviceId : null;
         if (!serviceObj || !serviceObj.duration) {
           throw new Error(
@@ -63,21 +139,16 @@ const reservationService = {
           throw new Error("La reserva no tiene una fecha de inicio válida");
         }
 
-        // Usa el batch incluso para un solo servicio (reutiliza notificación y lógica)
         const createdAppts = await appointmentService.createAppointmentsBatch({
-          services: [serviceObj._id || serviceId], // arreglo obligatorio
-          employee: employeeId?._id || employeeId || null, // puede ser null
+          services: [serviceObj._id || serviceId],
+          employee: employeeId?._id || employeeId || null,
           employeeRequestedByClient: !!employeeId,
           client: typeof customer === "object" ? customer._id.toString() : customer,
-          startDate, // la función encadena si hubiera más servicios
+          startDate,
           organizationId: organizationId._id || organizationId,
-          // Opcionales si los manejas en tu flujo:
-          // advancePayment,
-          // customPrices: { [serviceId]: precioCustom },
-          // additionalItemsByService: { [serviceId]: [...] },
+          skipNotification,
         });
 
-        // Guarda referencia de la cita creada (primer y único elemento)
         const createdFirst = Array.isArray(createdAppts)
           ? createdAppts[0]
           : null;
@@ -86,8 +157,9 @@ const reservationService = {
         }
       }
 
-      // Si el estado es auto_approved, aquí NO creamos cita (decisión actual)
-      Object.assign(reservation, updateData);
+      // Eliminar skipNotification antes de asignar a la reserva
+      const { skipNotification: _skip, ...dataToSave } = updateData;
+      Object.assign(reservation, dataToSave);
 
       const updatedReservation = await reservation.save();
 
@@ -110,7 +182,30 @@ const reservationService = {
 
   // Eliminar una reserva
   deleteReservation: async (id) => {
-    return await Reservation.findByIdAndDelete(id);
+    // Primero buscar la reserva para verificar si tiene groupId
+    const reservation = await Reservation.findById(id);
+    if (!reservation) {
+      throw new Error("Reserva no encontrada");
+    }
+
+    // Si la reserva pertenece a un grupo, eliminar todas las reservas del grupo
+    if (reservation.groupId) {
+      const result = await Reservation.deleteMany({ 
+        groupId: reservation.groupId 
+      });
+      return {
+        deletedCount: result.deletedCount,
+        wasGroup: true,
+        groupId: reservation.groupId
+      };
+    }
+
+    // Si es individual, eliminar solo esa reserva
+    const deleted = await Reservation.findByIdAndDelete(id);
+    return {
+      deletedCount: deleted ? 1 : 0,
+      wasGroup: false
+    };
   },
 
   // Validar y crear cliente si no existe

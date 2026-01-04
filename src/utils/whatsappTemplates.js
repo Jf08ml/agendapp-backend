@@ -1,17 +1,22 @@
 const whatsappTemplates = {
-  scheduleAppointment: ({ names, date, organization, service, employee }) =>
-    `📅 ¡Hola, ${names}! 
+  scheduleAppointment: ({ names, date, organization, service, employee, cancellationLink }) => {
+    let message = `📅 ¡Hola, ${names}! 
 
 ¡Tu cita ha sido agendada exitosamente!
 
 🗓️ Fecha: ${date}
 📍 Lugar: ${organization}
 ✨ Servicio: ${service}
-👩‍💼 Te atenderá: ${employee}
+👩‍💼 Te atenderá: ${employee}`;
 
-Si tienes alguna pregunta o necesitas modificar tu cita, *puedes responder directamente a este chat de WhatsApp*. Estamos atentos a ayudarte.
+    if (cancellationLink) {
+      message += `\n\n❌ Si necesitas cancelar tu cita, puedes hacerlo desde este enlace:\n${cancellationLink}`;
+    }
 
-¡Te esperamos pronto!`,
+    message += `\n\nSi tienes alguna pregunta o necesitas modificar tu cita, *puedes responder directamente a este chat de WhatsApp*. Estamos atentos a ayudarte.\n\n¡Te esperamos pronto!`;
+
+    return message;
+  },
 
   scheduleAppointmentBatch: ({
     names,
@@ -19,13 +24,14 @@ Si tienes alguna pregunta o necesitas modificar tu cita, *puedes responder direc
     organization,
     services,
     employee,
+    cancellationLink,
   }) => {
     // services: [{ name, start, end }]
     const list = services
       .map((s, i) => `  ${i + 1}. ${s.name} (${s.start} – ${s.end})`)
       .join("\n");
 
-    return `📅 ¡Hola, ${names}!
+    let message = `📅 ¡Hola, ${names}!
 
 ¡Tus citas han sido agendadas exitosamente!
 
@@ -33,11 +39,15 @@ Si tienes alguna pregunta o necesitas modificar tu cita, *puedes responder direc
 📍 Lugar: ${organization}
 ✨ Servicios:
 ${list}
-👩‍💼 Te atenderá: ${employee}
+👩‍💼 Te atenderá: ${employee}`;
 
-Si necesitas ajustar horarios o cambiar algún servicio, *responde a este chat* y con gusto te ayudamos.
+    if (cancellationLink) {
+      message += `\n\n❌ Si necesitas cancelar tus citas, puedes hacerlo desde este enlace:\n${cancellationLink}`;
+    }
 
-¡Te esperamos!`;
+    message += `\n\nSi necesitas ajustar horarios o cambiar algún servicio, *responde a este chat* y con gusto te ayudamos.\n\n¡Te esperamos!`;
+
+    return message;
   },
 
   reminder: ({ names, date, organization, service, employee }) =>
@@ -55,16 +65,21 @@ Si no confirmas, podríamos asignar tu turno a otra persona en lista de espera.
 
 ¡Nos vemos pronto!`,
 
-  statusReservationApproved: ({ names, date, organization, service }) =>
-    `¡Hola, ${names}! 🎉
+  statusReservationApproved: ({ names, date, organization, service, cancellationLink }) => {
+    let message = `¡Hola, ${names}! 🎉
 
 Tu reserva para el ${date} en ${organization} ha sido *aprobada*.
 
-✨ Servicio: ${service}
+✨ Servicio: ${service}`;
 
-Si tienes dudas o necesitas reprogramar, *responde a este chat de WhatsApp*. ¡Estamos para ayudarte!
+    if (cancellationLink) {
+      message += `\n\n❌ Si necesitas cancelar tu reserva, puedes hacerlo desde este enlace:\n${cancellationLink}`;
+    }
 
-¡Te esperamos!`,
+    message += `\n\nSi tienes dudas o necesitas reprogramar, *responde a este chat de WhatsApp*. ¡Estamos para ayudarte!\n\n¡Te esperamos!`;
+
+    return message;
+  },
 
   statusReservationRejected: ({ names, date, organization }) =>
     `¡Hola, ${names}! 👋

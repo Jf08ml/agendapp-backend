@@ -36,13 +36,28 @@ const appointmentModelSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "confirmed", "cancelled"],
+      enum: ["pending", "confirmed", "cancelled", "cancelled_by_customer", "cancelled_by_admin"],
       default: "pending",
     },
     organizationId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Organization",
       required: true,
+    },
+    // 🔐 Campos de cancelación
+    cancelTokenHash: {
+      type: String,
+      required: false,
+      select: false, // No incluir en queries por defecto (seguridad)
+    },
+    cancelledAt: {
+      type: Date,
+      required: false,
+    },
+    cancelledBy: {
+      type: String,
+      enum: ["customer", "admin"],
+      required: false,
     },
     reminderSent: { type: Boolean, default: false },
     advancePayment: {

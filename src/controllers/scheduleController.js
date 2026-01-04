@@ -308,16 +308,18 @@ const scheduleController = {
 
       // Si hay empleado específico, solo sus citas
       // Si no, cargar todas las citas de la organización para ese día
-      const appointments = employeeId 
-        ? await appointmentModel.find({
-            organizationId,
-            employee: employeeId,
-            startDate: { $gte: startOfDay, $lte: endOfDay }
-          })
-        : await appointmentModel.find({
-            organizationId,
-            startDate: { $gte: startOfDay, $lte: endOfDay }
-          });
+      // ✅ EXCLUIR citas canceladas para que sus slots estén disponibles
+      const appointmentQuery = {
+        organizationId,
+        startDate: { $gte: startOfDay, $lte: endOfDay },
+        status: { $nin: ['cancelled_by_customer', 'cancelled_by_admin'] } // ✅ Excluir canceladas
+      };
+
+      if (employeeId) {
+        appointmentQuery.employee = employeeId;
+      }
+
+      const appointments = await appointmentModel.find(appointmentQuery);
 
       const slots = scheduleService.generateAvailableSlots(
         date, // Pasar el string de fecha
@@ -539,10 +541,12 @@ const scheduleController = {
       const startOfDay = moment.tz(date, timezone).startOf('day').toDate();
       const endOfDay = moment.tz(date, timezone).endOf('day').toDate();
       
+      // ✅ EXCLUIR citas canceladas para que sus slots estén disponibles
       const appointments = await appointmentModel.find({
         organizationId,
         employee: { $in: availableEmployeeIds },
-        startDate: { $gte: startOfDay, $lte: endOfDay }
+        startDate: { $gte: startOfDay, $lte: endOfDay },
+        status: { $nin: ['cancelled_by_customer', 'cancelled_by_admin'] } // ✅ Excluir canceladas
       });
       
       // Calcular bloques disponibles
@@ -641,10 +645,12 @@ const scheduleController = {
       ).endOf('day').toDate();
       
       // Obtener todas las citas en el rango de una sola vez
+      // ✅ EXCLUIR citas canceladas para que sus slots estén disponibles
       const appointments = await appointmentModel.find({
         organizationId,
         employee: { $in: Array.from(allEmployeeIds) },
-        startDate: { $gte: minDate, $lte: maxDate }
+        startDate: { $gte: minDate, $lte: maxDate },
+        status: { $nin: ['cancelled_by_customer', 'cancelled_by_admin'] } // ✅ Excluir canceladas
       });
       
       // Procesar cada solicitud

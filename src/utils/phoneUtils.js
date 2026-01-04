@@ -16,6 +16,40 @@ export function normalizePhoneNumber(phone, defaultCountry = 'CO') {
     // Limpiar caracteres no numéricos excepto + al inicio
     let cleanPhone = phone.replace(/[^\d+]/g, '');
     
+    // 🇸🇻 VALIDACIÓN TEMPRANA para El Salvador (7-8 dígitos)
+    if (defaultCountry === 'SV') {
+      const digitsOnly = cleanPhone.replace(/[^\d]/g, '');
+      // Si tiene exactamente 7 u 8 dígitos (sin código de país)
+      if (digitsOnly.length === 7 || digitsOnly.length === 8) {
+        const phoneE164 = `+503${digitsOnly}`;
+        console.log('[normalizePhoneNumber] Número SV de 7-8 dígitos aceptado:', phoneE164);
+        return {
+          phone_e164: phoneE164,
+          phone_country: 'SV',
+          phone_national: digitsOnly,
+          calling_code: '503',
+          isValid: true,
+          error: null
+        };
+      }
+      // Si tiene +503 seguido de 7-8 dígitos
+      if (digitsOnly.length >= 10 && digitsOnly.length <= 11 && digitsOnly.startsWith('503')) {
+        const nationalNumber = digitsOnly.slice(3);
+        if (nationalNumber.length === 7 || nationalNumber.length === 8) {
+          const phoneE164 = `+${digitsOnly}`;
+          console.log('[normalizePhoneNumber] Número SV con código aceptado:', phoneE164);
+          return {
+            phone_e164: phoneE164,
+            phone_country: 'SV',
+            phone_national: nationalNumber,
+            calling_code: '503',
+            isValid: true,
+            error: null
+          };
+        }
+      }
+    }
+    
     // Si empieza con 00, reemplazar por +
     if (cleanPhone.startsWith('00')) {
       cleanPhone = '+' + cleanPhone.slice(2);
@@ -51,6 +85,37 @@ export function normalizePhoneNumber(phone, defaultCountry = 'CO') {
 
   } catch (error) {
     console.error('[normalizePhoneNumber] Error:', error.message, 'Input:', phone);
+    
+    // 🇸🇻 FALLBACK para El Salvador
+    if (defaultCountry === 'SV') {
+      const digitsOnly = phone.replace(/\D/g, '');
+      if (digitsOnly.length === 7 || digitsOnly.length === 8) {
+        const phoneE164 = `+503${digitsOnly}`;
+        console.log('[normalizePhoneNumber] Usando fallback SV:', phoneE164);
+        return {
+          phone_e164: phoneE164,
+          phone_country: 'SV',
+          phone_national: digitsOnly,
+          calling_code: '503',
+          isValid: true,
+          error: null
+        };
+      }
+      if (digitsOnly.length >= 10 && digitsOnly.length <= 11 && digitsOnly.startsWith('503')) {
+        const nationalNumber = digitsOnly.slice(3);
+        const phoneE164 = `+${digitsOnly}`;
+        console.log('[normalizePhoneNumber] Usando fallback SV con código:', phoneE164);
+        return {
+          phone_e164: phoneE164,
+          phone_country: 'SV',
+          phone_national: nationalNumber,
+          calling_code: '503',
+          isValid: true,
+          error: null
+        };
+      }
+    }
+    
     return { 
       phone_e164: null, 
       phone_country: null, 
