@@ -408,7 +408,7 @@ const appointmentService = {
           return created.map(c => c.saved);
         } else {
           // Tenemos el token en texto plano generado en este batch
-          groupCancellationLink = generateCancellationLink(groupCancelToken, organization);
+          groupCancellationLink = generateCancellationLink(groupCancelToken, org);
         }
 
         // Cargar cliente/empleado si vinieron como IDs
