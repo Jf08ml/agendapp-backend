@@ -60,6 +60,7 @@ const employeeModelSchema = new mongoose.Schema({
   },
   color: { type: String },
   order: { type: Number, default: 0 },
+  commissionPercentage: { type: Number, default: 0, min: 0, max: 100 },
   
   // NUEVO: Sistema de horarios de disponibilidad por día de la semana
   weeklySchedule: {

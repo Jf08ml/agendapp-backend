@@ -15,6 +15,7 @@ const employeeService = {
       password,
       isActive,
       profileImage,
+      commissionPercentage,
     } = employeeData;
 
     // Encriptar la contraseña antes de guardarla
@@ -30,6 +31,7 @@ const employeeService = {
       password: hashedPassword,
       isActive,
       profileImage,
+      commissionPercentage,
     });
 
     const savedEmployee = await newEmployee.save();
@@ -92,6 +94,7 @@ const employeeService = {
       profileImage,
       color,
       order,
+      commissionPercentage,
     } = employeeData;
     const employee = await Employee.findById(id);
 
@@ -112,6 +115,10 @@ const employeeService = {
       profileImage !== undefined ? profileImage : employee.profileImage;
     employee.color = color !== undefined ? color : employee.color;
     employee.order = order !== undefined ? order : employee.order;
+    employee.commissionPercentage =
+      commissionPercentage !== undefined
+        ? commissionPercentage
+        : employee.commissionPercentage;
 
     // Encriptar la contraseña solo si se ha proporcionado una nueva
     if (password) {
