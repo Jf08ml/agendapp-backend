@@ -27,6 +27,7 @@ const whatsappTemplateController = {
       const defaultTemplates = {
         scheduleAppointment: whatsappTemplates.getDefaultTemplate('scheduleAppointment'),
         scheduleAppointmentBatch: whatsappTemplates.getDefaultTemplate('scheduleAppointmentBatch'),
+        recurringAppointmentSeries: whatsappTemplates.getDefaultTemplate('recurringAppointmentSeries'),
         reminder: whatsappTemplates.getDefaultTemplate('reminder'),
         statusReservationApproved: whatsappTemplates.getDefaultTemplate('statusReservationApproved'),
         statusReservationRejected: whatsappTemplates.getDefaultTemplate('statusReservationRejected'),
@@ -46,6 +47,11 @@ const whatsappTemplateController = {
           content: customTemplates.scheduleAppointmentBatch || defaultTemplates.scheduleAppointmentBatch,
           isCustom: !!customTemplates.scheduleAppointmentBatch,
           variables: ['{{names}}', '{{dateRange}}', '{{organization}}', '{{address}}', '{{servicesList}}', '{{employee}}', '{{cancellationLink}}'],
+        },
+        recurringAppointmentSeries: {
+          content: customTemplates.recurringAppointmentSeries || defaultTemplates.recurringAppointmentSeries,
+          isCustom: !!customTemplates.recurringAppointmentSeries,
+          variables: ['{{names}}', '{{organization}}', '{{address}}', '{{employee}}', '{{appointmentsList}}', '{{cancellationLink}}'],
         },
         reminder: {
           content: customTemplates.reminder || defaultTemplates.reminder,
@@ -87,6 +93,7 @@ const whatsappTemplateController = {
       const validTypes = [
         'scheduleAppointment',
         'scheduleAppointmentBatch',
+        'recurringAppointmentSeries',
         'reminder',
         'statusReservationApproved',
         'statusReservationRejected',
@@ -147,6 +154,7 @@ const whatsappTemplateController = {
       const validTypes = [
         'scheduleAppointment',
         'scheduleAppointmentBatch',
+        'recurringAppointmentSeries',
         'reminder',
         'statusReservationApproved',
         'statusReservationRejected',
@@ -259,6 +267,18 @@ const whatsappTemplateController = {
   2. Tinte completo (2:45 PM – 4:30 PM)`,
         services_list: `  1. Corte de cabello (2:00 PM – 2:45 PM)
   2. Tinte completo (2:45 PM – 4:30 PM)`,
+        appointmentsList: `
+1. *lunes, 13 de enero*
+     • Corte de cabello (10:00 a. m. - 10:30 a. m.)
+     • Tinte (10:30 a. m. - 11:30 a. m.)
+
+2. *lunes, 20 de enero*
+     • Corte de cabello (10:00 a. m. - 10:30 a. m.)
+     • Tinte (10:30 a. m. - 11:30 a. m.)
+
+3. *lunes, 27 de enero*
+     • Corte de cabello (10:00 a. m. - 10:30 a. m.)
+     • Tinte (10:30 a. m. - 11:30 a. m.)`,
         count: "2",
         cita_pal: "citas",
         agendada_pal: "agendadas",

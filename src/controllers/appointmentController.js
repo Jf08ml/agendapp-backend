@@ -1,4 +1,5 @@
 import appointmentService from "../services/appointmentService.js";
+import appointmentSeriesService from "../services/appointmentSeriesService.js";
 import organizationService from "../services/organizationService.js";
 import subscriptionService from "../services/subscriptionService.js";
 import sendResponse from "../utils/sendResponse.js";
@@ -241,6 +242,136 @@ const appointmentController = {
       sendResponse(res, 200, null, result.message);
     } catch (error) {
       sendResponse(res, 404, null, error.message);
+    }
+  },
+
+  // 🔁 Controlador para crear/previsualizar series de citas recurrentes
+  createAppointmentSeries: async (req, res) => {
+    try {
+      // Extraer todos los campos del body
+      const {
+        employee,
+        client,
+        services,
+        startDate,
+        endDate,
+        organizationId,
+        advancePayment,
+        employeeRequestedByClient,
+        customPrices,
+        additionalItemsByService,
+        recurrencePattern,
+        previewOnly,
+        notifyAllAppointments // 📨 Nueva opción para controlar tipo de notificación
+      } = req.body;
+
+      // Validar recurrencePattern
+      if (!recurrencePattern || typeof recurrencePattern !== 'object' || recurrencePattern.type === 'none') {
+        return sendResponse(res, 400, null, "recurrencePattern válido es requerido");
+      }
+
+      // Construir baseAppointment
+      const baseAppointment = {
+        employee,
+        client,
+        services,
+        startDate,
+        endDate,
+        organizationId,
+        advancePayment: advancePayment || 0,
+        employeeRequestedByClient: employeeRequestedByClient || false,
+        customPrices,
+        additionalItemsByService
+      };
+
+      const options = { 
+        previewOnly: previewOnly === true,
+        allowOverbooking: false,
+        omitIfNoWork: true,
+        omitIfConflict: true,
+        skipNotification: false,
+        notifyAllAppointments: notifyAllAppointments ?? true // 📨 Por defecto notificar todas
+      };
+
+      console.log('📥 Payload recibido:', { 
+        baseAppointment, 
+        recurrencePattern, 
+        options,
+        servicesCount: services?.length 
+      });
+
+      // Si solo se solicita preview, no crear las citas
+      if (options.previewOnly) {
+        const preview = await appointmentSeriesService.previewSeriesAppointments(
+          baseAppointment,
+          recurrencePattern,
+          options
+        );
+
+        return sendResponse(
+          res,
+          200,
+          {
+            totalOccurrences: preview.summary.total,
+            availableCount: preview.summary.available,
+            occurrences: preview.occurrences.map(occ => ({
+              startDate: occ.date,
+              endDate: occ.endDate,
+              status: occ.status,
+              reason: occ.reason
+            }))
+          },
+          "Preview de serie generado exitosamente"
+        );
+      }
+
+      // Crear la serie completa de citas
+      const result = await appointmentSeriesService.createSeriesAppointments(
+        baseAppointment,
+        recurrencePattern,
+        options
+      );
+
+      // Enviar notificación al empleado (opcional)
+      if (result.created.length > 0 && !options.skipNotification) {
+        try {
+          const org = await organizationService.getOrganizationById(
+            baseAppointment.organizationId
+          );
+
+          const notify = {
+            title: "Serie de citas creada",
+            message: `Se te asignaron ${result.created.length} citas recurrentes`,
+            icon: org.branding?.pwaIcon || "",
+          };
+
+          await subscriptionService.sendNotificationToUser(
+            baseAppointment.employee,
+            JSON.stringify(notify)
+          );
+        } catch (notifError) {
+          console.error('Error enviando notificación:', notifError);
+          // No fallar la request por error de notificación
+        }
+      }
+
+      sendResponse(
+        res,
+        201,
+        {
+          seriesId: result.seriesId,
+          totalOccurrences: result.created.length,
+          createdCount: result.created.length,
+          availableCount: result.created.length,
+          created: result.created,
+          skipped: result.skipped
+        },
+        `Serie creada exitosamente: ${result.created.length} citas`
+      );
+
+    } catch (error) {
+      console.error('Error en createAppointmentSeries:', error);
+      sendResponse(res, 500, null, error.message);
     }
   },
 };

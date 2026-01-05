@@ -74,6 +74,47 @@ const appointmentModelSchema = new mongoose.Schema(
       required: true,
     },
     groupId: { type: mongoose.Schema.Types.ObjectId, index: true },
+    // 🔁 Campos para citas recurrentes
+    seriesId: { 
+      type: mongoose.Schema.Types.ObjectId, 
+      index: true
+    },
+    occurrenceNumber: { 
+      type: Number
+    },
+    recurrencePattern: {
+      type: {
+        type: String,
+        enum: ['weekly', 'none'],
+        default: 'none'
+      },
+      intervalWeeks: { 
+        type: Number,
+        min: 1,
+        max: 52
+      },
+      weekdays: { 
+        type: [Number],
+        validate: {
+          validator: function(arr) {
+            return arr.every(day => day >= 0 && day <= 6);
+          },
+          message: 'Weekdays debe contener números entre 0 (Domingo) y 6 (Sábado)'
+        }
+      },
+      endType: {
+        type: String,
+        enum: ['date', 'count']
+      },
+      endDate: { 
+        type: Date
+      },
+      count: { 
+        type: Number,
+        min: 1,
+        max: 100
+      }
+    }
   },
   {
     timestamps: true,

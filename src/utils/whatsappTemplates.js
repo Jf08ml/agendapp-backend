@@ -46,6 +46,25 @@ Si necesitas ajustar horarios o cambiar algún servicio, *responde a este chat* 
 
 ¡Te esperamos!`,
 
+      recurringAppointmentSeries: `🔁 ¡Hola, {{names}}!
+
+¡Tu serie de citas recurrentes ha sido creada exitosamente!
+
+📍 Lugar: {{organization}}
+📍 Dirección: {{address}}
+👩‍💼 Te atenderá: {{employee}}
+
+📅 *Tus citas programadas:*
+{{appointmentsList}}
+
+❌ *Cancelación flexible:*
+Puedes cancelar todas tus citas o solo algunas desde este enlace:
+{{cancellationLink}}
+
+Si necesitas ajustar horarios o cambiar algún servicio, *responde a este chat* y con gusto te ayudamos.
+
+¡Te esperamos en cada sesión!`,
+
       reminder: `📅 ¡Hola, {{names}}!
 
 Recuerda que tienes {{count}} {{cita_pal}} {{agendada_pal}}.

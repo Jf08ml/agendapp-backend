@@ -5,6 +5,7 @@ import Reservation from '../models/reservationModel.js';
 import Appointment from '../models/appointmentModel.js';
 import organizationService from './organizationService.js';
 import whatsappService from './sendWhatsappService.js';
+import notificationService from './notificationService.js';
 
 const cancellationService = {
   /**
@@ -34,30 +35,37 @@ const cancellationService = {
       console.log('🔍 [getCancellationInfo] Buscando token:', token);
       
       // 1️⃣ Buscar en Appointments primero
+      // OPTIMIZACIÓN: Solo traer appointments con token que sean futuras o recientes (últimos 30 días)
+      const thirtyDaysAgo = moment().subtract(30, 'days').toDate();
+      
       const appointments = await Appointment.find({ 
-        cancelTokenHash: { $exists: true, $ne: null } 
+        cancelTokenHash: { $exists: true, $ne: null },
+        startDate: { $gte: thirtyDaysAgo } // Solo citas recientes/futuras
       })
-        .select('+cancelTokenHash') // Incluir el campo oculto
+        .select('+cancelTokenHash service client organizationId startDate endDate status groupId') // Solo campos necesarios
         .populate('service', 'name duration')
         .populate('client', 'name')
         .populate('organizationId', 'name timezone')
         .lean();
 
-      console.log(`📋 Encontrados ${appointments.length} appointments con token`);
+      console.log(`📋 Encontrados ${appointments.length} appointments con token (filtrados por fecha)`);
 
       for (const appointment of appointments) {
         const isValid = await this.verifyToken(token, appointment.cancelTokenHash);
-        console.log(`🔑 Verificando appointment ${appointment._id}: ${isValid}`);
         
         if (isValid) {
-          // Si tiene groupId, buscar TODAS las citas del grupo
+          console.log(`✅ Token válido encontrado para appointment ${appointment._id}`);
+          
+          // Si tiene groupId, buscar TODAS las citas del grupo en una sola query
           let groupAppointments = [appointment];
           
           if (appointment.groupId) {
             console.log(`👥 Buscando citas del grupo: ${appointment.groupId}`);
+            // OPTIMIZACIÓN: Una sola query con todos los populates
             groupAppointments = await Appointment.find({ 
               groupId: appointment.groupId 
             })
+              .select('service client organizationId startDate endDate status groupId')
               .populate('service', 'name duration')
               .populate('client', 'name')
               .populate('organizationId', 'name timezone')
@@ -119,9 +127,12 @@ const cancellationService = {
       }
 
       // 2️⃣ Si no se encontró en Appointments, buscar en Reservations
+      // OPTIMIZACIÓN: Solo traer reservations futuras o recientes
       const reservations = await Reservation.find({ 
-        cancelTokenHash: { $exists: true, $ne: null } 
+        cancelTokenHash: { $exists: true, $ne: null },
+        startDate: { $gte: thirtyDaysAgo } // Solo reservas recientes/futuras
       })
+        .select('cancelTokenHash serviceId organizationId startDate status customerDetails appointmentId')
         .populate('serviceId', 'name duration')
         .populate('organizationId', 'name timezone')
         .lean();
@@ -243,7 +254,10 @@ const cancellationService = {
    */
   async cancelReservation(reservationId, reason = null) {
     try {
-      const reservation = await Reservation.findById(reservationId);
+      const reservation = await Reservation.findById(reservationId)
+        .populate('serviceId', 'name')
+        .populate('organizationId', 'name timezone');
+        
       if (!reservation) {
         return {
           success: false,
@@ -266,6 +280,28 @@ const cancellationService = {
           appointment.cancelledBy = 'customer';
           await appointment.save();
         }
+      }
+
+      // 🔔 Crear notificación para el administrador
+      try {
+        const timezone = reservation.organizationId?.timezone || 'America/Bogota';
+        const customerName = reservation.customerDetails?.name || 'Un cliente';
+        const serviceName = reservation.serviceId?.name || 'Servicio';
+        const formattedDate = moment(reservation.startDate).tz(timezone).format('DD/MM/YYYY [a las] hh:mm A');
+
+        await notificationService.createNotification({
+          title: '❌ Reserva cancelada',
+          message: `${customerName} canceló su reserva de ${serviceName} programada para el ${formattedDate}`,
+          organizationId: reservation.organizationId._id || reservation.organizationId,
+          employeeId: null,
+          type: 'cancellation',
+          status: 'unread',
+          frontendRoute: '/manage-agenda'
+        });
+        
+        console.log('🔔 Notificación de cancelación de reserva creada');
+      } catch (notificationError) {
+        console.error('❌ Error al crear notificación:', notificationError);
       }
 
       return {
@@ -322,84 +358,101 @@ const cancellationService = {
 
   /**
    * Cancela múltiples appointments (usado para grupos)
+   * OPTIMIZADO: Usa operaciones en batch para mejor rendimiento
    */
   async cancelAppointmentsInGroup(appointmentIds, reason = null) {
     try {
-      const results = [];
-      const cancelledAppointments = []; // Para recopilar info de las citas canceladas
-      let organizationId = null;
-      let clientPhone = null;
-      let clientName = null;
+      console.log(`🚀 Cancelando ${appointmentIds.length} citas en batch...`);
       
-      for (const appointmentId of appointmentIds) {
-        const appointment = await Appointment.findById(appointmentId)
-          .populate('service')
-          .populate('client')
-          .populate('employee')
-          .populate('organizationId');
-        
-        if (!appointment) {
-          results.push({ id: appointmentId, success: false, reason: 'No encontrada' });
-          continue;
-        }
+      // 1️⃣ OPTIMIZACIÓN: Traer todas las citas en UNA SOLA query
+      const appointments = await Appointment.find({ 
+        _id: { $in: appointmentIds } 
+      })
+        .populate('service', 'name')
+        .populate('client', 'name phoneNumber')
+        .populate('employee', 'name')
+        .populate('organizationId', 'name timezone')
+        .lean();
 
-        // No cancelar si ya está cancelada o es pasada
-        if (appointment.status.includes('cancelled')) {
-          results.push({ id: appointmentId, success: false, reason: 'Ya cancelada' });
-          continue;
-        }
+      console.log(`📋 Encontradas ${appointments.length} citas`);
 
-        // Guardar info de la organización y cliente para la notificación
-        if (!organizationId) {
-          organizationId = appointment.organizationId._id || appointment.organizationId;
-          const client = appointment.client;
-          clientPhone = client?.phoneNumber;
-          clientName = client?.name || 'Cliente';
-        }
-
-        // 1️⃣ Cancelar la cita
-        appointment.status = 'cancelled_by_customer';
-        appointment.cancelledAt = new Date();
-        appointment.cancelledBy = 'customer';
-        await appointment.save();
-        
-        // Guardar info para el mensaje
-        cancelledAppointments.push({
-          service: appointment.service?.name || 'Servicio',
-          employee: appointment.employee?.name || 'Sin asignar',
-          date: appointment.startDate,
-          organizationTimezone: appointment.organizationId?.timezone || 'America/Bogota'
-        });
-        
-        // 2️⃣ Buscar y cancelar la reserva asociada (si existe)
-        console.log(`🔍 Buscando reserva para appointment ${appointment._id}`);
-        const reservation = await Reservation.findOne({ 
-          appointmentId: appointment._id,
-          status: { $nin: ['cancelled_by_customer', 'cancelled_by_admin'] }
-        });
-        
-        if (reservation) {
-          console.log(`📝 Reserva encontrada: ${reservation._id}, status actual: ${reservation.status}`);
-          reservation.status = 'cancelled_by_customer';
-          reservation.cancelledAt = new Date();
-          reservation.cancelledBy = 'customer';
-          await reservation.save();
-          console.log(`✅ Reserva ${reservation._id} cancelada junto con appointment ${appointmentId}`);
-        } else {
-          console.log(`⚠️ No se encontró reserva para appointment ${appointment._id}`);
-          // Buscar sin el filtro de status para ver si existe
-          const anyReservation = await Reservation.findOne({ appointmentId: appointment._id });
-          if (anyReservation) {
-            console.log(`⚠️ Existe reserva pero con status: ${anyReservation.status}`);
-          } else {
-            console.log(`⚠️ No existe ninguna reserva con appointmentId: ${appointment._id}`);
-          }
-        }
-        
-        results.push({ id: appointmentId, success: true });
+      if (appointments.length === 0) {
+        return {
+          success: false,
+          message: 'No se encontraron citas para cancelar',
+        };
       }
 
-      const successCount = results.filter(r => r.success).length;
+      // Separar citas que se pueden cancelar
+      const cancellableIds = [];
+      const results = [];
+      
+      for (const appointment of appointments) {
+        if (appointment.status.includes('cancelled')) {
+          results.push({ id: appointment._id, success: false, reason: 'Ya cancelada' });
+        } else {
+          cancellableIds.push(appointment._id);
+          results.push({ id: appointment._id, success: true });
+        }
+      }
+
+      if (cancellableIds.length === 0) {
+        return {
+          success: false,
+          message: 'Todas las citas ya estaban canceladas',
+          results,
+        };
+      }
+
+      // Info para notificación (usar la primera cita)
+      const firstAppointment = appointments[0];
+      const organizationId = firstAppointment.organizationId?._id || firstAppointment.organizationId;
+      const clientPhone = firstAppointment.client?.phoneNumber;
+      const clientName = firstAppointment.client?.name || 'Cliente';
+      const timezone = firstAppointment.organizationId?.timezone || 'America/Bogota';
+
+      // Preparar datos para el mensaje
+      const cancelledAppointments = appointments
+        .filter(apt => cancellableIds.some(id => id.toString() === apt._id.toString()))
+        .map(apt => ({
+          service: apt.service?.name || 'Servicio',
+          employee: apt.employee?.name || 'Sin asignar',
+          date: apt.startDate,
+          organizationTimezone: timezone
+        }));
+
+      // 2️⃣ OPTIMIZACIÓN: Actualizar TODAS las citas en UNA SOLA operación
+      console.log(`💾 Actualizando ${cancellableIds.length} citas en batch...`);
+      await Appointment.updateMany(
+        { _id: { $in: cancellableIds } },
+        { 
+          $set: {
+            status: 'cancelled_by_customer',
+            cancelledAt: new Date(),
+            cancelledBy: 'customer'
+          }
+        }
+      );
+      console.log(`✅ Citas actualizadas exitosamente`);
+
+      // 3️⃣ OPTIMIZACIÓN: Actualizar TODAS las reservas asociadas en UNA SOLA operación
+      console.log(`🔍 Actualizando reservas asociadas...`);
+      const reservationUpdateResult = await Reservation.updateMany(
+        { 
+          appointmentId: { $in: cancellableIds },
+          status: { $nin: ['cancelled_by_customer', 'cancelled_by_admin'] }
+        },
+        { 
+          $set: {
+            status: 'cancelled_by_customer',
+            cancelledAt: new Date(),
+            cancelledBy: 'customer'
+          }
+        }
+      );
+      console.log(`✅ ${reservationUpdateResult.modifiedCount} reservas actualizadas`);
+
+      const successCount = cancellableIds.length;
       const failedCount = results.length - successCount;
 
       // 📱 Enviar mensaje de WhatsApp al cliente si hubo cancelaciones exitosas
@@ -452,6 +505,42 @@ const cancellationService = {
           noOrg: !organizationId,
           noPhone: !clientPhone
         });
+      }
+
+      // 🔔 Crear notificación para el administrador
+      if (successCount > 0 && organizationId) {
+        try {
+          const timezone = cancelledAppointments[0]?.organizationTimezone || 'America/Bogota';
+          
+          // Construir mensaje de la notificación
+          let notificationMessage = '';
+          if (cancelledAppointments.length === 1) {
+            const apt = cancelledAppointments[0];
+            const formattedDate = moment(apt.date).tz(timezone).format('DD/MM/YYYY [a las] hh:mm A');
+            notificationMessage = `${clientName} canceló su cita de ${apt.service} programada para el ${formattedDate}`;
+          } else {
+            notificationMessage = `${clientName} canceló ${cancelledAppointments.length} citas:\n`;
+            cancelledAppointments.forEach((apt, index) => {
+              const formattedDate = moment(apt.date).tz(timezone).format('DD/MM/YYYY');
+              notificationMessage += `${index + 1}. ${apt.service} - ${formattedDate}\n`;
+            });
+          }
+
+          await notificationService.createNotification({
+            title: cancelledAppointments.length === 1 ? '❌ Cita cancelada' : `❌ ${cancelledAppointments.length} citas canceladas`,
+            message: notificationMessage,
+            organizationId: organizationId,
+            employeeId: null, // Notificación para el admin
+            type: 'cancellation',
+            status: 'unread',
+            frontendRoute: '/manage-agenda'
+          });
+          
+          console.log('🔔 Notificación creada para el administrador');
+        } catch (notificationError) {
+          console.error('❌ Error al crear notificación:', notificationError);
+          // No fallar la cancelación si falla la notificación
+        }
       }
 
       return {
