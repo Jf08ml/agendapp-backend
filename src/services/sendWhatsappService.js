@@ -221,10 +221,17 @@ const whatsappService = {
         "La organización no tiene sesión de WhatsApp configurada"
       );
     }
-    const msg =
-      status === "approved"
-        ? whatsappTemplates.statusReservationApproved(reservationDetails)
-        : whatsappTemplates.statusReservationRejected(reservationDetails);
+
+    // Usar template personalizado si existe, o el por defecto
+    const templateType = status === "approved" 
+      ? 'statusReservationApproved' 
+      : 'statusReservationRejected';
+    
+    const msg = await whatsappTemplates.getRenderedTemplate(
+      org,
+      templateType,
+      reservationDetails
+    );
 
     const payload = {
       clientId: org.clientIdWhatsapp,

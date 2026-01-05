@@ -437,16 +437,23 @@ const reservationController = {
             const { generateCancellationLink } = await import('../utils/cancellationUtils.js');
             const cancellationLink = generateCancellationLink(sharedToken, org);
 
-            const msg = whatsappTemplates.scheduleAppointmentBatch({
+            const templateData = {
               names: customerDetails.name || "Estimado cliente",
               dateRange,
               organization: org.name,
-              services: servicesForMsg,
+              address: org.address || "",
+              servicesList: servicesForMsg.map((s, i) => `  ${i + 1}. ${s.name} (${s.start} – ${s.end})`).join('\n'),
               employee: servicesForMsg.length === 1 
                 ? servicesForMsg[0].employee 
                 : "Nuestro equipo",
               cancellationLink,
-            });
+            };
+
+            const msg = await whatsappTemplates.getRenderedTemplate(
+              organizationId,
+              'scheduleAppointmentBatch',
+              templateData
+            );
 
             const usablePhone = hasUsablePhone(customerDetails.phone);
             if (usablePhone) {

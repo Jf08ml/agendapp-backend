@@ -1,4 +1,172 @@
+import WhatsappTemplate from "../models/whatsappTemplateModel.js";
+
 const whatsappTemplates = {
+  // ========================================
+  // TEMPLATES POR DEFECTO DEL SISTEMA
+  // ========================================
+  
+  /**
+   * Obtiene el template por defecto sin renderizar (con placeholders)
+   * Usado para mostrar en el editor y como fallback
+   */
+  getDefaultTemplate: (templateType) => {
+    const templates = {
+      scheduleAppointment: `📅 ¡Hola, {{names}}! 
+
+¡Tu cita ha sido agendada exitosamente!
+
+🗓️ Fecha: {{date}}
+📍 Lugar: {{organization}}
+📍 Dirección: {{address}}
+✨ Servicio: {{service}}
+👩‍💼 Te atenderá: {{employee}}
+
+❌ Si necesitas cancelar tu cita, puedes hacerlo desde este enlace:
+{{cancellationLink}}
+
+Si tienes alguna pregunta o necesitas modificar tu cita, *puedes responder directamente a este chat de WhatsApp*. Estamos atentos a ayudarte.
+
+¡Te esperamos pronto!`,
+
+      scheduleAppointmentBatch: `📅 ¡Hola, {{names}}!
+
+¡Tus citas han sido agendadas exitosamente!
+
+🗓️ Fecha: {{dateRange}}
+📍 Lugar: {{organization}}
+📍 Dirección: {{address}}
+✨ Servicios:
+{{servicesList}}
+👩‍💼 Te atenderá: {{employee}}
+
+❌ Si necesitas cancelar tus citas, puedes hacerlo desde este enlace:
+{{cancellationLink}}
+
+Si necesitas ajustar horarios o cambiar algún servicio, *responde a este chat* y con gusto te ayudamos.
+
+¡Te esperamos!`,
+
+      reminder: `📅 ¡Hola, {{names}}!
+
+Recuerda que tienes {{count}} {{cita_pal}} {{agendada_pal}}.
+
+🗓️ Fecha: {{date_range}}
+📍 Lugar: {{organization}}
+📍 Dirección: {{address}}
+
+✨ Servicios:
+{{services_list}}
+
+👩‍💼 Te atenderá: {{employee}}
+
+Por favor confirma tu asistencia *respondiendo a este chat de WhatsApp*.
+Si no puedes asistir, avísanos con anticipación para reprogramar tu turno.
+
+¡Te esperamos!`,
+
+      statusReservationApproved: `¡Hola, {{names}}! 🎉
+
+Tu reserva para el {{date}} en {{organization}} ha sido *aprobada*.
+
+📍 Dirección: {{address}}
+✨ Servicio: {{service}}
+
+❌ Si necesitas cancelar tu reserva, puedes hacerlo desde este enlace:
+{{cancellationLink}}
+
+Si tienes dudas o necesitas reprogramar, *responde a este chat de WhatsApp*. ¡Estamos para ayudarte!
+
+¡Te esperamos!`,
+
+      statusReservationRejected: `¡Hola, {{names}}! 👋
+
+Lamentamos informarte que tu reserva para el *{{date}}* en *{{organization}}* no pudo ser confirmada, ya que el horario seleccionado no está disponible.
+
+Si deseas reprogramar o tienes alguna pregunta, simplemente responde a este mensaje de WhatsApp y con gusto te ayudaremos.
+
+Gracias por tu comprensión. ¡Esperamos atenderte pronto! 😊`,
+    };
+
+    return templates[templateType] || '';
+  },
+
+  // ========================================
+  // FUNCIONES DE RENDERIZADO
+  // ========================================
+
+  /**
+   * Renderiza un template reemplazando placeholders con datos reales
+   */
+  renderTemplate: (template, data) => {
+    let rendered = template;
+    
+    // Reemplazar cada variable en el template
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined && value !== null) {
+        const regex = new RegExp(`{{${key}}}`, 'g');
+        rendered = rendered.replace(regex, value);
+      }
+    }
+    
+    // Limpiar placeholders que no fueron reemplazados (opcional)
+    // rendered = rendered.replace(/{{[^}]+}}/g, '');
+    
+    return rendered;
+  },
+
+  /**
+   * Obtiene el template a usar (personalizado o por defecto) y lo renderiza
+   * @param {String|Object} organizationIdOrDoc - ID de organización o documento de organización
+   * @param {String} templateType - Tipo de template a usar
+   * @param {Object} data - Datos para renderizar el template
+   */
+  getRenderedTemplate: async (organizationIdOrDoc, templateType, data) => {
+    try {
+      // Obtener organizationId
+      const organizationId = typeof organizationIdOrDoc === 'string' 
+        ? organizationIdOrDoc 
+        : organizationIdOrDoc?._id;
+
+      console.log('🔍 [getRenderedTemplate] Buscando template:', {
+        organizationId: organizationId?.toString(),
+        templateType,
+      });
+
+      if (!organizationId) {
+        console.warn('⚠️ No se proporcionó organizationId, usando template por defecto');
+        const template = whatsappTemplates.getDefaultTemplate(templateType);
+        return whatsappTemplates.renderTemplate(template, data);
+      }
+
+      // Buscar template personalizado en la colección
+      const templateDoc = await WhatsappTemplate.findOne({ organizationId });
+      console.log('📄 Template doc encontrado:', {
+        found: !!templateDoc,
+        hasCustomTemplate: !!templateDoc?.[templateType],
+        templatePreview: templateDoc?.[templateType]?.substring(0, 50),
+      });
+
+      const customTemplate = templateDoc?.[templateType];
+      
+      // Usar personalizado si existe, sino el por defecto
+      const template = customTemplate || whatsappTemplates.getDefaultTemplate(templateType);
+      
+      console.log('✅ Usando template:', customTemplate ? 'PERSONALIZADO' : 'POR DEFECTO');
+      
+      // Renderizar el template con los datos
+      return whatsappTemplates.renderTemplate(template, data);
+    } catch (error) {
+      console.error('Error obteniendo template renderizado:', error);
+      // En caso de error, usar template por defecto
+      const template = whatsappTemplates.getDefaultTemplate(templateType);
+      return whatsappTemplates.renderTemplate(template, data);
+    }
+  },
+
+  // ========================================
+  // FUNCIONES LEGACY (mantener compatibilidad)
+  // ========================================
+
   scheduleAppointment: ({ names, date, organization, service, employee, cancellationLink }) => {
     let message = `📅 ¡Hola, ${names}! 
 

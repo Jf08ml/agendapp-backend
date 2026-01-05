@@ -3,6 +3,7 @@ import organizationService from "./organizationService.js";
 import serviceService from "./serviceService.js";
 import whatsappService from "./sendWhatsappService.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
+import WhatsappTemplate from "../models/whatsappTemplateModel.js";
 import clientService from "../services/clientService.js";
 import employeeService from "../services/employeeService.js";
 import { waIntegrationService } from "../services/waIntegrationService.js";
@@ -168,6 +169,7 @@ const appointmentService = {
       names: client?.name || "Estimado cliente",
       date: appointmentDate,
       organization: organization.name,
+      address: organization.address || "",
       service: serviceDetails.name,
       employee: employee.names,
       phoneNumber: organization.phoneNumber,
@@ -178,7 +180,14 @@ const appointmentService = {
 
     // Enviar confirmación por WhatsApp
     try {
-      const msg = whatsappTemplates.scheduleAppointment(appointmentDetails, cancellationLink);
+      const msg = await whatsappTemplates.getRenderedTemplate(
+        organizationId,
+        'scheduleAppointment',
+        {
+          ...appointmentDetails,
+          cancellationLink,
+        }
+      );
 
       await whatsappService.sendMessage(
         organizationId,
@@ -437,15 +446,23 @@ const appointmentService = {
         //    Si tu wa-backend acepta también "57XXXXXXXXXX", podrías usar `usable` directo.
         const phoneE164 = hasUsablePhone(rawPhone) || `+${usable}`;
 
-        // Armar mensaje final con tu template existente
-        const msg = whatsappTemplates.scheduleAppointmentBatch({
+        // Armar datos para el template
+        const templateData = {
           names: clientDoc?.name || "Estimado cliente",
           dateRange,
           organization: org.name,
-          services: servicesForMsg, // [{ name, start, end }]
+          address: org.address || "",
+          servicesList: servicesForMsg.map((s, i) => `  ${i + 1}. ${s.name} (${s.start} – ${s.end})`).join('\n'),
           employee: employeeDoc?.names || "Nuestro equipo",
           cancellationLink: groupCancellationLink, // 🔗 Un solo enlace para todo el grupo
-        });
+        };
+
+        // Usar template personalizado de la organización
+        const msg = await whatsappTemplates.getRenderedTemplate(
+          organizationId,
+          'scheduleAppointmentBatch',
+          templateData
+        );
 
         // Envío 1-a-1 (mensaje ya renderizado)
         await waIntegrationService.sendMessage({
@@ -913,8 +930,13 @@ const appointmentService = {
         });
 
         for (const appt of appointments) {
-          const phone = hasUsablePhone(appt?.client?.phoneNumber);
-          if (!phone) continue;
+          // 🔧 FIX: Normalizar teléfono correctamente para campañas bulk
+          const rawPhone = appt?.client?.phoneNumber;
+          const phoneE164 = normalizeToCOE164(rawPhone); // Devuelve +57XXXXXXXXXX
+          if (!phoneE164) continue;
+          
+          // Baileys (WhatsApp Web) requiere el número SIN el símbolo +
+          const phone = phoneE164.replace('+', ''); // -> 57XXXXXXXXXX
 
           const start = new Date(appt.startDate);
           const end = appt.endDate ? new Date(appt.endDate) : null;
@@ -947,7 +969,7 @@ const appointmentService = {
           bucket.apptIds.add(String(appt._id));
         }
 
-        // Construir items para la campaña
+        // Agregar address a las variables
         const items = [];
         const includedIds = [];
 
@@ -974,6 +996,7 @@ const appointmentService = {
             names: bucket.names,
             date_range: dateRange,
             organization: org.name || "",
+            address: org.address || "",
             services_list: servicesList,
             employee: Array.from(bucket.employees).join(", "),
             count: String(countNum),
@@ -981,6 +1004,12 @@ const appointmentService = {
             agendada_pal: isSingle ? "agendada" : "agendadas",
           };
 
+          console.log(`[${org.name}] 📱 Item para campaña:`, {
+            phone: bucket.phone,
+            names: bucket.names,
+            servicesCount: countNum,
+          });
+          
           items.push({ phone: bucket.phone, vars });
           includedIds.push(...Array.from(bucket.apptIds));
         }
@@ -996,7 +1025,19 @@ const appointmentService = {
           const title = `Recordatorios ${targetDateStr} ${currentHourOrg}:00 (${org.name})`;
 
           const { waBulkSend, waBulkOptIn } = await import("./waHttpService.js");
-          const { messageTplReminder } = await import("../utils/bulkTemplates.js");
+          
+          // Obtener template personalizado (sin renderizar, con placeholders)
+          const templateDoc = await WhatsappTemplate.findOne({ organizationId: org._id });
+          const messageTpl = templateDoc?.reminder || whatsappTemplates.getDefaultTemplate('reminder');
+          
+          console.log(`[${org.name}] 📤 Usando template:`, templateDoc?.reminder ? 'PERSONALIZADO' : 'POR DEFECTO');
+
+          console.log(`[${org.name}] 📤 Enviando campaña:`, {
+            clientId: orgClientId,
+            itemCount: items.length,
+            items: items.map(it => ({ phone: it.phone, names: it.vars.names })),
+            title,
+          });
 
           // Opcional: sincronizar opt-in
           try {
@@ -1009,7 +1050,7 @@ const appointmentService = {
             clientId: orgClientId,
             title,
             items,
-            messageTpl: messageTplReminder,
+            messageTpl: messageTpl,
             dryRun: false,
           });
 
