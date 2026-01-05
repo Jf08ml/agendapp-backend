@@ -65,6 +65,11 @@ const reservationSchema = new mongoose.Schema(
       required: false,
       index: true,
     },
+    // ⚠️ Mensaje de error cuando falla la creación automática
+    errorMessage: {
+      type: String,
+      required: false,
+    },
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now },
   },

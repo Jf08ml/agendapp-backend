@@ -76,53 +76,71 @@ const reservationService = {
         if (needAppointment.length > 0) {
           console.log(`📦 Creando ${needAppointment.length} citas del grupo juntas`);
           
-          // Usar la misma lógica que createMultipleReservations
-          const services = needAppointment.map(r => {
-            const sObj = typeof r.serviceId === "object" ? r.serviceId : null;
-            return sObj?._id || r.serviceId;
-          });
-          
-          // 👤 Extraer array de empleados (uno por cada reserva)
-          const employees = needAppointment.map(r => {
-            return r.employeeId?._id || r.employeeId || null;
-          });
-          console.log('👥 Empleados por servicio:', employees);
+          try {
+            // Usar la misma lógica que createMultipleReservations
+            const services = needAppointment.map(r => {
+              const sObj = typeof r.serviceId === "object" ? r.serviceId : null;
+              return sObj?._id || r.serviceId;
+            });
+            
+            // 👤 Extraer array de empleados (uno por cada reserva)
+            const employees = needAppointment.map(r => {
+              return r.employeeId?._id || r.employeeId || null;
+            });
+            console.log('👥 Empleados por servicio:', employees);
 
-          const firstRes = needAppointment[0];
-          const orgId = firstRes.organizationId._id || firstRes.organizationId;
-          
-          // 🔗 Usar el groupId de las reservas
-          const sharedGroupId = reservation.groupId;
-          console.log('🔗 Usando groupId de reservas:', sharedGroupId);
-          
-          // Crear todas las citas en un solo batch
-          const createdAppts = await appointmentService.createAppointmentsBatch({
-            services,
-            employees, // 👤 Array de empleados (uno por servicio)
-            employeeRequestedByClient: !!firstRes.employeeId,
-            client: typeof firstRes.customer === "object" 
-              ? firstRes.customer._id.toString() 
-              : firstRes.customer,
-            startDate: firstRes.startDate,
-            organizationId: orgId,
-            skipNotification: false, // La última SÍ envía mensaje
-            sharedGroupId, // 🔗 Pasar el groupId de las reservas
-          });
+            const firstRes = needAppointment[0];
+            const orgId = firstRes.organizationId._id || firstRes.organizationId;
+            
+            // 🔗 Usar el groupId de las reservas
+            const sharedGroupId = reservation.groupId;
+            console.log('🔗 Usando groupId de reservas:', sharedGroupId);
+            
+            // Crear todas las citas en un solo batch
+            const createdAppts = await appointmentService.createAppointmentsBatch({
+              services,
+              employees, // 👤 Array de empleados (uno por servicio)
+              employeeRequestedByClient: !!firstRes.employeeId,
+              client: typeof firstRes.customer === "object" 
+                ? firstRes.customer._id.toString() 
+                : firstRes.customer,
+              startDate: firstRes.startDate,
+              organizationId: orgId,
+              skipNotification: false, // La última SÍ envía mensaje
+              sharedGroupId, // 🔗 Pasar el groupId de las reservas
+            });
 
-          // Asignar las citas creadas a sus respectivas reservas
-          for (let i = 0; i < needAppointment.length; i++) {
-            if (createdAppts[i]?._id) {
-              needAppointment[i].appointmentId = createdAppts[i]._id;
-              needAppointment[i].status = RES_STATUS.APPROVED;
-              await needAppointment[i].save();
+            // Asignar las citas creadas a sus respectivas reservas
+            for (let i = 0; i < needAppointment.length; i++) {
+              if (createdAppts[i]?._id) {
+                needAppointment[i].appointmentId = createdAppts[i]._id;
+                needAppointment[i].status = RES_STATUS.APPROVED;
+                await needAppointment[i].save();
+              }
             }
-          }
 
-          console.log(`✅ ${createdAppts.length} citas creadas para el grupo`);
-          
-          // Recargar la reserva actual
-          const updated = await Reservation.findById(id);
-          return updated;
+            console.log(`✅ ${createdAppts.length} citas creadas para el grupo`);
+            
+            // Recargar la reserva actual
+            const updated = await Reservation.findById(id);
+            return updated;
+          } catch (error) {
+            // ❌ Si hay error al crear las citas, revertir TODAS las reservas del grupo a pending
+            console.error('❌ Error al crear citas del grupo, revirtiendo estados:', error.message);
+            
+            await Reservation.updateMany(
+              { groupId: reservation.groupId },
+              { 
+                $set: { status: RES_STATUS.PENDING },
+                $unset: { appointmentId: "" }
+              }
+            );
+            
+            // Lanzar error con mensaje específico
+            throw new Error(
+              `No se pudieron crear las citas del grupo: ${error.message}. Todas las reservas del grupo se revirtieron a "pendiente".`
+            );
+          }
         }
       } else if (mustCreateAppointment && !skipNotification && !reservation.groupId) {
         // Aprobación individual (sin grupo)
@@ -160,6 +178,11 @@ const reservationService = {
       // Eliminar skipNotification antes de asignar a la reserva
       const { skipNotification: _skip, ...dataToSave } = updateData;
       Object.assign(reservation, dataToSave);
+
+      // Si se aprobó exitosamente, limpiar el errorMessage
+      if (nextStatus === RES_STATUS.APPROVED && reservation.appointmentId) {
+        reservation.errorMessage = undefined;
+      }
 
       const updatedReservation = await reservation.save();
 

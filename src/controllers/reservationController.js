@@ -485,7 +485,11 @@ const reservationController = {
             "Citas y reservas auto-aprobadas creadas correctamente"
           );
         } catch (err) {
-          // Si algo falla, dejas caer al flujo MANUAL (pending) como tenías
+          // Si algo falla, guardar el error y caer al flujo MANUAL (pending)
+          console.error('[auto_if_available] Error al crear citas automáticamente:', err.message);
+          
+          // Guardar el error para mostrarlo en el frontend
+          var autoErrorMessage = err.message || 'Error al crear cita automáticamente';
         }
       }
 
@@ -497,8 +501,9 @@ const reservationController = {
         // � Generar UN groupId para todas las reservas de esta solicitud múltiple
         const reservationGroupId = new mongoose.Types.ObjectId();
         console.log(`👥 GroupId para reservas múltiples (manual): ${reservationGroupId}`);
-        
-        // 🔧 FIX: Parsear con formato explícito para interpretar como tiempo LOCAL
+                // Si venimos del catch de auto_if_available, autoErrorMessage estará definido
+        const errorToSave = typeof autoErrorMessage !== 'undefined' ? autoErrorMessage : null;
+                // 🔧 FIX: Parsear con formato explícito para interpretar como tiempo LOCAL
         let currentStart = moment.tz(startDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate();
         const createdReservations = [];
 
@@ -522,6 +527,7 @@ const reservationController = {
             organizationId,
             status: "pending",
             groupId: reservationGroupId, // 👥 Asignar el mismo groupId a todas
+            errorMessage: errorToSave, // ⚠️ Guardar el error si vino del flujo auto
           };
 
           const newReservation = await reservationService.createReservation(

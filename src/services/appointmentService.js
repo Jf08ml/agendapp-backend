@@ -309,6 +309,27 @@ const appointmentService = {
         const duration = svc.duration ?? 0; // en minutos
         const serviceEnd = new Date(currentStart.getTime() + duration * 60000);
 
+        // 🔍 VALIDACIÓN DE DISPONIBILIDAD para auto_if_available
+        // Verificar si hay conflictos con otras citas del empleado
+        const hasConflict = await appointmentModel.findOne({
+          employee: employeeForThisService,
+          organizationId,
+          status: { $nin: ['cancelled_by_admin', 'cancelled_by_customer', 'cancelled', 'rejected'] },
+          $or: [
+            // La nueva cita empieza durante una cita existente
+            { startDate: { $lte: currentStart }, endDate: { $gt: currentStart } },
+            // La nueva cita termina durante una cita existente
+            { startDate: { $lt: serviceEnd }, endDate: { $gte: serviceEnd } },
+            // La nueva cita contiene completamente una cita existente
+            { startDate: { $gte: currentStart }, endDate: { $lte: serviceEnd } }
+          ]
+        });
+
+        if (hasConflict) {
+          console.log(`⚠️ Conflicto de horario detectado para empleado ${employeeForThisService} en ${currentStart}`);
+          throw new Error(`No hay disponibilidad para el servicio ${svc.name} en el horario solicitado`);
+        }
+
         const additionalItems = additionalItemsByService[serviceId] || [];
         for (const item of additionalItems) {
           if (
