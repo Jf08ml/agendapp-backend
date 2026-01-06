@@ -10,183 +10,257 @@ import notificationService from './notificationService.js';
 const cancellationService = {
   /**
    * Genera un token único de cancelación y su hash
+   * Usa SHA-256 (rápido y determinístico) en lugar de bcrypt
    */
   generateCancelToken() {
-    // Genera un token único de 32 caracteres
+    // Genera un token único de 32 bytes = 64 caracteres hex
     const token = crypto.randomBytes(32).toString('hex');
-    // Hash del token para almacenar en DB
-    const hash = bcrypt.hashSync(token, 10);
+    // Hash SHA-256 del token para almacenar en DB
+    const hash = crypto.createHash('sha256').update(token).digest('hex');
     return { token, hash };
   },
 
   /**
-   * Verifica si un token es válido comparando con el hash
+   * Verifica si un token es válido comparando con el hash (bcrypt)
+   * SOLO para tokens antiguos - retrocompatibilidad
    */
   async verifyToken(token, hash) {
     return bcrypt.compare(token, hash);
   },
 
   /**
+   * Verifica token con SHA-256 (nuevo sistema)
+   */
+  verifyTokenSHA256(token, hash) {
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    return tokenHash === hash;
+  },
+
+  /**
    * Obtiene información de una reserva/cita usando el token
-   * No expone datos sensibles
+   * Sistema optimizado con SHA-256 y fallback a bcrypt para tokens antiguos
    */
   async getCancellationInfo(token) {
     try {
-      console.log('🔍 [getCancellationInfo] Buscando token:', token);
+      console.log('🔍 [getCancellationInfo] Buscando token');
       
-      // 1️⃣ Buscar en Appointments primero
-      // OPTIMIZACIÓN: Solo traer appointments con token que sean futuras o recientes (últimos 30 días)
       const thirtyDaysAgo = moment().subtract(30, 'days').toDate();
       
-      const appointments = await Appointment.find({ 
-        cancelTokenHash: { $exists: true, $ne: null },
-        startDate: { $gte: thirtyDaysAgo } // Solo citas recientes/futuras
+      // ⚡ PASO 1: Buscar con SHA-256 (tokens nuevos - búsqueda directa)
+      const tokenHashSHA256 = crypto.createHash('sha256').update(token).digest('hex');
+      
+      let appointment = await Appointment.findOne({ 
+        cancelTokenHash: tokenHashSHA256,
+        startDate: { $gte: thirtyDaysAgo }
       })
-        .select('+cancelTokenHash service client organizationId startDate endDate status groupId') // Solo campos necesarios
+        .select('service client organizationId startDate endDate status groupId cancelTokenHash')
         .populate('service', 'name duration')
         .populate('client', 'name')
         .populate('organizationId', 'name timezone')
         .lean();
 
-      console.log(`📋 Encontrados ${appointments.length} appointments con token (filtrados por fecha)`);
-
-      for (const appointment of appointments) {
-        const isValid = await this.verifyToken(token, appointment.cancelTokenHash);
+      if (appointment) {
+        console.log(`⚡ Token SHA-256 encontrado para appointment ${appointment._id}`);
+      } else {
+        // 🔄 PASO 2: Fallback - Buscar con bcrypt (tokens antiguos)
+        console.log('🔄 Token SHA-256 no encontrado, buscando con bcrypt (token antiguo)...');
         
-        if (isValid) {
-          console.log(`✅ Token válido encontrado para appointment ${appointment._id}`);
+        const appointments = await Appointment.find({ 
+          cancelTokenHash: { $exists: true, $ne: null },
+          startDate: { $gte: thirtyDaysAgo }
+        })
+          .select('+cancelTokenHash service client organizationId startDate endDate status groupId')
+          .populate('service', 'name duration')
+          .populate('client', 'name')
+          .populate('organizationId', 'name timezone')
+          .lean();
+
+        console.log(`📋 Buscando en ${appointments.length} appointments con bcrypt...`);
+
+        for (const apt of appointments) {
+          const isValid = await this.verifyToken(token, apt.cancelTokenHash);
           
-          // Si tiene groupId, buscar TODAS las citas del grupo en una sola query
-          let groupAppointments = [appointment];
-          
-          if (appointment.groupId) {
-            console.log(`👥 Buscando citas del grupo: ${appointment.groupId}`);
-            // OPTIMIZACIÓN: Una sola query con todos los populates
-            groupAppointments = await Appointment.find({ 
-              groupId: appointment.groupId 
-            })
-              .select('service client organizationId startDate endDate status groupId')
-              .populate('service', 'name duration')
-              .populate('client', 'name')
-              .populate('organizationId', 'name timezone')
-              .lean();
+          if (isValid) {
+            console.log(`✅ Token bcrypt válido encontrado para appointment ${apt._id}`);
+            appointment = apt;
             
-            console.log(`👥 Encontradas ${groupAppointments.length} citas en el grupo`);
+            // 🔄 Migrar automáticamente a SHA-256
+            console.log('🔄 Migrando token a SHA-256...');
+            try {
+              await Appointment.findByIdAndUpdate(apt._id, {
+                cancelTokenHash: tokenHashSHA256
+              });
+              console.log('✅ Token migrado exitosamente a SHA-256');
+            } catch (migrationError) {
+              console.warn('⚠️  No se pudo migrar token (posible duplicado):', migrationError.message);
+              // Continuar de todas formas - el token sigue siendo válido
+            }
+            break;
           }
-
-          // Verificar si TODAS ya están canceladas
-          const allCancelled = groupAppointments.every(apt => apt.status.includes('cancelled'));
-          if (allCancelled) {
-            return {
-              valid: false,
-              reason: groupAppointments.length > 1 
-                ? 'Todas las citas de este grupo ya han sido canceladas'
-                : 'Esta cita ya ha sido cancelada',
-              alreadyCancelled: true,
-            };
-          }
-
-          // Verificar que sean futuras
-          const org = appointment.organizationId;
-          const timezone = org.timezone || 'America/Bogota';
-          const now = moment.tz(timezone);
-          
-          // Verificar que al menos una cita sea futura
-          const hasFutureAppointments = groupAppointments.some(apt => 
-            moment.tz(apt.startDate, timezone).isAfter(now)
-          );
-
-          if (!hasFutureAppointments) {
-            return {
-              valid: false,
-              reason: 'No se pueden cancelar citas pasadas',
-            };
-          }
-
-          return {
-            valid: true,
-            type: 'appointment',
-            isGroup: !!appointment.groupId,
-            groupId: appointment.groupId,
-            appointments: groupAppointments.map(apt => ({
-              id: apt._id,
-              serviceName: apt.service?.name,
-              startDate: apt.startDate,
-              endDate: apt.endDate,
-              status: apt.status,
-              isCancelled: apt.status.includes('cancelled'),
-              isPast: moment.tz(apt.startDate, timezone).isBefore(now),
-            })),
-            data: {
-              customerName: appointment.client?.name,
-              organizationName: org.name,
-              timezone,
-            },
-          };
         }
       }
 
+      if (appointment) {
+        // Si tiene groupId, buscar TODAS las citas del grupo en una sola query
+        let groupAppointments = [appointment];
+        
+        if (appointment.groupId) {
+          console.log(`👥 Buscando citas del grupo: ${appointment.groupId}`);
+          groupAppointments = await Appointment.find({ 
+            groupId: appointment.groupId 
+          })
+            .select('service client organizationId startDate endDate status groupId')
+            .populate('service', 'name duration')
+            .populate('client', 'name')
+            .populate('organizationId', 'name timezone')
+            .lean();
+          
+          console.log(`👥 Encontradas ${groupAppointments.length} citas en el grupo`);
+        }
+
+        // Verificar si TODAS ya están canceladas
+        const allCancelled = groupAppointments.every(apt => apt.status.includes('cancelled'));
+        if (allCancelled) {
+          return {
+            valid: false,
+            reason: groupAppointments.length > 1 
+              ? 'Todas las citas de este grupo ya han sido canceladas'
+              : 'Esta cita ya ha sido cancelada',
+            alreadyCancelled: true,
+          };
+        }
+
+        // Verificar que sean futuras
+        const org = appointment.organizationId;
+        const timezone = org.timezone || 'America/Bogota';
+        const now = moment.tz(timezone);
+        
+        // Verificar que al menos una cita sea futura
+        const hasFutureAppointments = groupAppointments.some(apt => 
+          moment.tz(apt.startDate, timezone).isAfter(now)
+        );
+
+        if (!hasFutureAppointments) {
+          return {
+            valid: false,
+            reason: 'No se pueden cancelar citas pasadas',
+          };
+        }
+
+        return {
+          valid: true,
+          type: 'appointment',
+          isGroup: !!appointment.groupId,
+          groupId: appointment.groupId,
+          appointments: groupAppointments.map(apt => ({
+            id: apt._id,
+            serviceName: apt.service?.name,
+            startDate: apt.startDate,
+            endDate: apt.endDate,
+            status: apt.status,
+            isCancelled: apt.status.includes('cancelled'),
+            isPast: moment.tz(apt.startDate, timezone).isBefore(now),
+          })),
+          data: {
+            customerName: appointment.client?.name,
+            organizationName: org.name,
+            timezone,
+          },
+        };
+      }
+
       // 2️⃣ Si no se encontró en Appointments, buscar en Reservations
-      // OPTIMIZACIÓN: Solo traer reservations futuras o recientes
-      const reservations = await Reservation.find({ 
-        cancelTokenHash: { $exists: true, $ne: null },
-        startDate: { $gte: thirtyDaysAgo } // Solo reservas recientes/futuras
+      // Primero intentar con SHA-256
+      let reservation = await Reservation.findOne({ 
+        cancelTokenHash: tokenHashSHA256,
+        startDate: { $gte: thirtyDaysAgo }
       })
-        .select('cancelTokenHash serviceId organizationId startDate status customerDetails appointmentId')
+        .select('serviceId organizationId startDate status customerDetails appointmentId cancelTokenHash')
         .populate('serviceId', 'name duration')
         .populate('organizationId', 'name timezone')
         .lean();
 
-      for (const reservation of reservations) {
-        const isValid = await this.verifyToken(token, reservation.cancelTokenHash);
-        if (isValid) {
-          // Verificar si ya está cancelada
-          if (reservation.status.includes('cancelled')) {
+      if (reservation) {
+        console.log(`⚡ Token SHA-256 encontrado para reservation ${reservation._id}`);
+      } else {
+        // Fallback a bcrypt
+        console.log('🔄 Buscando reservations con bcrypt...');
+        const reservations = await Reservation.find({ 
+          cancelTokenHash: { $exists: true, $ne: null },
+          startDate: { $gte: thirtyDaysAgo }
+        })
+          .select('+cancelTokenHash serviceId organizationId startDate status customerDetails appointmentId')
+          .populate('serviceId', 'name duration')
+          .populate('organizationId', 'name timezone')
+          .lean();
+
+        for (const res of reservations) {
+          const isValid = await this.verifyToken(token, res.cancelTokenHash);
+          if (isValid) {
+            console.log(`✅ Token bcrypt válido encontrado para reservation ${res._id}`);
+            reservation = res;
+            
+            // Migrar a SHA-256
+            try {
+              await Reservation.findByIdAndUpdate(res._id, {
+                cancelTokenHash: tokenHashSHA256
+              });
+              console.log('✅ Reservation token migrado a SHA-256');
+            } catch (migrationError) {
+              console.warn('⚠️  No se pudo migrar reservation token:', migrationError.message);
+            }
+            break;
+          }
+        }
+      }
+
+      if (reservation) {
+        // Verificar si ya está cancelada
+        if (reservation.status.includes('cancelled')) {
+          return {
+            valid: false,
+            reason: 'Esta reserva ya ha sido cancelada',
+            alreadyCancelled: true,
+          };
+        }
+
+        // Si hay appointment asociado, verificarlo
+        if (reservation.appointmentId) {
+          const appointment = await Appointment.findById(reservation.appointmentId);
+          if (appointment && appointment.status.includes('cancelled')) {
             return {
               valid: false,
-              reason: 'Esta reserva ya ha sido cancelada',
+              reason: 'Esta cita ya ha sido cancelada',
               alreadyCancelled: true,
             };
           }
+        }
 
-          // Si hay appointment asociado, verificarlo
-          if (reservation.appointmentId) {
-            const appointment = await Appointment.findById(reservation.appointmentId);
-            if (appointment && appointment.status.includes('cancelled')) {
-              return {
-                valid: false,
-                reason: 'Esta cita ya ha sido cancelada',
-                alreadyCancelled: true,
-              };
-            }
-          }
+        // Verificar que sea futura
+        const org = reservation.organizationId;
+        const timezone = org.timezone || 'America/Bogota';
+        const now = moment.tz(timezone);
+        const appointmentTime = moment.tz(reservation.startDate, timezone);
 
-          // Verificar que sea futura
-          const org = reservation.organizationId;
-          const timezone = org.timezone || 'America/Bogota';
-          const now = moment.tz(timezone);
-          const appointmentTime = moment.tz(reservation.startDate, timezone);
-
-          if (appointmentTime.isBefore(now)) {
-            return {
-              valid: false,
-              reason: 'No se pueden cancelar reservas pasadas',
-            };
-          }
-
+        if (appointmentTime.isBefore(now)) {
           return {
-            valid: true,
-            type: 'reservation',
-            id: reservation._id,
-            data: {
-              serviceName: reservation.serviceId?.name,
-              startDate: reservation.startDate,
-              customerName: reservation.customerDetails?.name,
-              organizationName: org.name,
-              hasAppointment: !!reservation.appointmentId,
-            },
+            valid: false,
+            reason: 'No se pueden cancelar reservas pasadas',
           };
         }
+
+        return {
+          valid: true,
+          type: 'reservation',
+          id: reservation._id,
+          data: {
+            serviceName: reservation.serviceId?.name,
+            startDate: reservation.startDate,
+            customerName: reservation.customerDetails?.name,
+            organizationName: org.name,
+            hasAppointment: !!reservation.appointmentId,
+          },
+        };
       }
 
       return {

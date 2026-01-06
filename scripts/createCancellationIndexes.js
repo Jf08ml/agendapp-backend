@@ -13,7 +13,8 @@ async function createCancellationIndexes() {
 
     const db = mongoose.connection.db;
 
-    // 1. Índice compuesto para búsqueda de appointments con token de cancelación
+    // 1. Índice para búsqueda rápida de cancelTokenHash en appointments
+    // NO ÚNICO porque durante la migración pueden coexistir bcrypt y SHA-256
     console.log('\n📊 Creando índice para cancelTokenHash + startDate en appointments...');
     await db.collection('appointments').createIndex(
       { 
@@ -27,7 +28,7 @@ async function createCancellationIndexes() {
         }
       }
     );
-    console.log('✅ Índice creado: cancelTokenHash_startDate_idx');
+    console.log('✅ Índice creado: cancelTokenHash_startDate_idx (permite SHA-256 y bcrypt)');
 
     // 2. Índice para groupId (búsqueda de citas recurrentes)
     console.log('\n📊 Creando índice para groupId en appointments...');
@@ -42,7 +43,7 @@ async function createCancellationIndexes() {
     );
     console.log('✅ Índice creado: groupId_idx');
 
-    // 3. Índice compuesto para reservations con token de cancelación
+    // 3. Índice para cancelTokenHash + startDate en reservations
     console.log('\n📊 Creando índice para cancelTokenHash + startDate en reservations...');
     await db.collection('reservations').createIndex(
       { 
@@ -85,10 +86,11 @@ async function createCancellationIndexes() {
     });
 
     console.log('\n✅ Todos los índices de cancelación creados exitosamente');
-    console.log('\n💡 Beneficios:');
-    console.log('  • Búsqueda de tokens hasta 10x más rápida');
-    console.log('  • Filtrado por fecha optimizado');
-    console.log('  • Búsqueda de grupos de citas instantánea');
+    console.log('\n💡 Sistema de tokens optimizado:');
+    console.log('  • Nuevas reservas usan SHA-256 (búsqueda directa, ~100ms)');
+    console.log('  • Tokens antiguos (bcrypt) siguen funcionando (fallback automático)');
+    console.log('  • Migración automática cuando se use un token antiguo');
+    console.log('  • Índices optimizados para ambos sistemas');
 
   } catch (error) {
     console.error('❌ Error:', error);
