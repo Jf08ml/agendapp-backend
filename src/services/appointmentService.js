@@ -288,12 +288,15 @@ const appointmentService = {
     try {
       session.startTransaction();
 
-      // 🔧 FIX: Parsear el string ISO sin timezone directamente en la timezone de la org
+      // 🔧 FIX: Parsear correctamente según el tipo de startDate
       let currentStart;
       if (typeof startDate === 'string') {
+        // Si viene como string sin timezone, parsearlo en la timezone de la org
         const parsed = moment.tz(startDate, 'YYYY-MM-DDTHH:mm:ss', timezone);
         currentStart = parsed.toDate();
       } else if (startDate instanceof Date) {
+        // Si viene como Date, ya está en UTC - usarlo directamente
+        // (las fechas de MongoDB siempre están en UTC)
         currentStart = startDate;
       } else {
         throw new Error('startDate debe ser un Date o string');

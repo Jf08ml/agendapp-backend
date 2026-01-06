@@ -80,6 +80,9 @@ const reservationController = {
       // startDate viene en formato "YYYY-MM-DDTHH:mm:ss" y representa tiempo local en la timezone
       const requestedDateTime = moment.tz(startDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate();
       
+      // 🔧 Convertir el startDate string a Date object en UTC para guardar correctamente
+      const startDateAsDate = requestedDateTime;
+      
       // Validar empleado si fue especificado
       let employee = null;
       if (employeeId) {
@@ -156,7 +159,7 @@ const reservationController = {
                 employee: employeeId,
                 employeeRequestedByClient: true,
                 client: customer._id,
-                startDate,
+                startDate: startDateAsDate,
                 organizationId,
               });
 
@@ -181,7 +184,7 @@ const reservationController = {
       const newReservation = await reservationService.createReservation({
         serviceId,
         employeeId: employeeId || null,
-        startDate,
+        startDate: startDateAsDate,
         customer: customer._id,
         customerDetails,
         organizationId,
@@ -360,10 +363,13 @@ const reservationController = {
 
             console.log(`📋 Creando reserva ${i + 1}/${normalized.length}, appointmentId: ${appt?._id}`);
 
+            // 🔧 Convertir startDate string a Date object en UTC
+            const startDateAsDate = moment.tz(n.startDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate();
+
             const reservationData = {
               serviceId: n.serviceId,
               employeeId: n.employeeId,
-              startDate: n.startDate,
+              startDate: startDateAsDate,
               customer: normalizeId(customer),
               customerDetails,
               organizationId: normalizeId(organizationId),
