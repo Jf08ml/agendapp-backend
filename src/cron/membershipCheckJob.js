@@ -1,6 +1,8 @@
 // cron/membershipCheckJob.js
 import cron from "node-cron";
 import membershipService from "../services/membershipService.js";
+import appointmentService from "../services/appointmentService.js";
+import Organization from "../models/organizationModel.js";
 
 /**
  * Job que corre diariamente para verificar el estado de las membresías
@@ -9,6 +11,7 @@ import membershipService from "../services/membershipService.js";
  * - Envía notificación el día del vencimiento (inicia período de gracia)
  * - Envía recordatorios durante los 2 días de gracia
  * - Suspende acceso después de 2 días de gracia sin pago
+ * - Auto-confirma citas del día y registra servicios a clientes
  */
 const membershipCheckJob = cron.schedule(
   "0 9 * * *", // Todos los días a las 9:00 AM (hora Colombia)
@@ -125,6 +128,46 @@ const membershipCheckJob = cron.schedule(
       console.log(`Recordatorios período gracia: ${results.gracePeriod.length}`);
       console.log(`Membresías suspendidas: ${results.toSuspend.length}`);
       console.log("=== Verificación completada ===\n");
+      // 8. Auto-confirmar citas del día para todas las organizaciones activas
+      console.log("\n=== Iniciando auto-confirmación de citas del día ===");
+      try {
+        const activeOrgs = await Organization.find({
+          membershipStatus: { $ne: 'suspended' }
+        }).select('_id name timezone');
+
+        let totalConfirmed = 0;
+        let totalFailed = 0;
+        let orgsProcessed = 0;
+
+        for (const org of activeOrgs) {
+          try {
+            const result = await appointmentService.autoConfirmTodayAppointments(org._id);
+            
+            if (result.confirmed.length > 0) {
+              console.log(`  ✓ ${org.name}: ${result.confirmed.length} citas confirmadas`);
+              totalConfirmed += result.confirmed.length;
+            }
+            
+            if (result.failed.length > 0) {
+              console.log(`  ✗ ${org.name}: ${result.failed.length} citas fallidas`);
+              totalFailed += result.failed.length;
+            }
+            
+            orgsProcessed++;
+          } catch (err) {
+            console.error(`  ✗ Error procesando ${org.name}:`, err.message);
+          }
+        }
+
+        console.log("\n=== Resumen de auto-confirmación ===");
+        console.log(`Organizaciones procesadas: ${orgsProcessed}`);
+        console.log(`Total citas confirmadas: ${totalConfirmed}`);
+        console.log(`Total citas fallidas: ${totalFailed}`);
+        console.log("=== Auto-confirmación completada ===\n");
+      } catch (error) {
+        console.error("❌ Error en auto-confirmación de citas:", error);
+      }
+
 
     } catch (error) {
       console.error("❌ Error en verificación de membresías:", error);
@@ -146,6 +189,7 @@ export const runMembershipCheck = async () => {
     
     // Procesar resultados (mismo código que el cron)
     let totalNotifications = 0;
+      let totalAppointmentsConfirmed = 0;
     
     for (const membership of results.threeDays) {
       await membershipService.createMembershipNotification({
@@ -155,6 +199,20 @@ export const runMembershipCheck = async () => {
         membership,
       });
       totalNotifications++;
+
+        // Auto-confirmar citas del día
+        try {
+          const activeOrgs = await Organization.find({
+            membershipStatus: { $ne: 'suspended' }
+          }).select('_id name');
+
+          for (const org of activeOrgs) {
+            const result = await appointmentService.autoConfirmTodayAppointments(org._id);
+            totalAppointmentsConfirmed += result.confirmed.length;
+          }
+        } catch (error) {
+          console.error("Error confirmando citas:", error);
+        }
     }
     
     for (const membership of results.oneDay) {
@@ -205,6 +263,7 @@ export const runMembershipCheck = async () => {
       success: true,
       notifications: totalNotifications,
       suspended: results.toSuspend.length,
+        appointmentsConfirmed: totalAppointmentsConfirmed,
       results,
     };
   } catch (error) {

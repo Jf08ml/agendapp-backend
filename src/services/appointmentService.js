@@ -614,17 +614,17 @@ const appointmentService = {
         endDate = lastDayNextMonth;
       }
 
-      // Ajustar rango de fechas teniendo en cuenta la zona horaria de la organización
-      const org = await organizationService.getOrganizationById(organizationId);
-      const timezone = (org && org.timezone) || 'America/Bogota';
-
-      // Parsear startDate/endDate en timezone de la organización y convertir a UTC boundaries
-      const start = moment.tz(startDate, timezone).startOf('day').utc().toDate();
-      const end = moment.tz(endDate, timezone).endOf('day').utc().toDate();
+      // Las fechas vienen del frontend ya en UTC representando el inicio/fin del día
+      // en el timezone local del navegador. Las usamos directamente.
+      const start = new Date(startDate);
+      const end = new Date(endDate);
 
       // Añadir rango de fechas al query (en UTC)
-      query.startDate = { $gte: start };
-      query.endDate = { $lte: end };
+      // Buscar citas cuya fecha de inicio esté dentro del rango
+      query.startDate = { 
+        $gte: start,
+        $lte: end
+      };
 
       // ✅ Filtrar por empleados específicos si se proporcionan
       if (employeeIds && Array.isArray(employeeIds) && employeeIds.length > 0) {
@@ -1174,6 +1174,173 @@ const appointmentService = {
       console.error("Error en sendDailyReminders:", e.message);
     }
   },
+
+  // Confirmar múltiples citas en batch
+  batchConfirmAppointments: async (appointmentIds, organizationId) => {
+    if (!Array.isArray(appointmentIds) || appointmentIds.length === 0) {
+      throw new Error("Se requiere un array de IDs de citas");
+    }
+
+    const results = {
+      confirmed: [],
+      failed: [],
+      alreadyConfirmed: [],
+    };
+
+    // Cargar clientes service
+    const { default: clientService } = await import("./clientService.js");
+
+    for (const appointmentId of appointmentIds) {
+      try {
+        // Obtener la cita
+        const appointment = await appointmentModel.findById(appointmentId);
+        
+        if (!appointment) {
+          results.failed.push({
+            appointmentId,
+            reason: "Cita no encontrada",
+          });
+          continue;
+        }
+
+        // Verificar que pertenezca a la organización (seguridad)
+        if (String(appointment.organizationId) !== String(organizationId)) {
+          results.failed.push({
+            appointmentId,
+            reason: "La cita no pertenece a la organización",
+          });
+          continue;
+        }
+
+        // Verificar si ya está confirmada
+        if (appointment.status === "confirmed") {
+          results.alreadyConfirmed.push({
+            appointmentId,
+            clientId: appointment.client,
+          });
+          continue;
+        }
+
+        // Verificar que no esté cancelada
+        if (
+          appointment.status === "cancelled" ||
+          appointment.status === "cancelled_by_customer" ||
+          appointment.status === "cancelled_by_admin"
+        ) {
+          results.failed.push({
+            appointmentId,
+            reason: "No se puede confirmar una cita cancelada",
+          });
+          continue;
+        }
+
+        // Actualizar estado a confirmed
+        appointment.status = "confirmed";
+        await appointment.save();
+
+        // Registrar servicio en el cliente
+        if (appointment.client) {
+          try {
+            await clientService.registerService(appointment.client);
+          } catch (clientError) {
+            console.warn(
+              `Error al registrar servicio para cliente ${appointment.client}:`,
+              clientError.message
+            );
+            // No fallar la confirmación si falla el registro del servicio
+          }
+        }
+
+        results.confirmed.push({
+          appointmentId,
+          clientId: appointment.client,
+        });
+      } catch (error) {
+        results.failed.push({
+          appointmentId,
+          reason: error.message,
+        });
+      }
+    }
+
+    return results;
+  },
+
+  /**
+   * Auto-confirmar citas del día actual para una organización
+   * Cambia estado de pending a confirmed y registra servicio al cliente
+   * @param {string} organizationId - ID de la organización
+   * @returns {Object} Resultado con citas confirmadas
+   */
+  autoConfirmTodayAppointments: async (organizationId) => {
+    try {
+      // Obtener organización para timezone
+      const organization = await organizationService.getOrganizationById(organizationId);
+      if (!organization) {
+        throw new Error('Organización no encontrada');
+      }
+
+      const timezone = organization.timezone || 'America/Bogota';
+      
+      // Obtener inicio y fin del día actual en timezone de la organización
+      const startOfDay = moment.tz(timezone).startOf('day').toDate();
+      const endOfDay = moment.tz(timezone).endOf('day').toDate();
+
+      // Buscar todas las citas pending del día actual
+      const pendingAppointments = await appointmentModel.find({
+        organizationId,
+        status: 'pending',
+        startDate: {
+          $gte: startOfDay,
+          $lte: endOfDay
+        }
+      }).populate('client', 'name phoneNumber');
+
+      const results = {
+        total: pendingAppointments.length,
+        confirmed: [],
+        failed: []
+      };
+
+      // Confirmar cada cita
+      for (const appointment of pendingAppointments) {
+        try {
+          // Actualizar estado a confirmed
+          appointment.status = 'confirmed';
+          await appointment.save();
+
+          // Registrar servicio en el cliente
+          if (appointment.client && appointment.client._id) {
+            try {
+              await clientService.registerService(appointment.client._id);
+            } catch (clientError) {
+              console.warn(
+                `Error al registrar servicio para cliente ${appointment.client._id}:`,
+                clientError.message
+              );
+              // No fallar la confirmación si falla el registro del servicio
+            }
+          }
+
+          results.confirmed.push({
+            appointmentId: appointment._id,
+            clientName: appointment.client?.name,
+            startDate: appointment.startDate
+          });
+        } catch (error) {
+          results.failed.push({
+            appointmentId: appointment._id,
+            reason: error.message
+          });
+        }
+      }
+
+      return results;
+    } catch (error) {
+      console.error('Error en autoConfirmTodayAppointments:', error);
+      throw error;
+    }
+  }
 };
 
 export default appointmentService;

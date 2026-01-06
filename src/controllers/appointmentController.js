@@ -374,6 +374,63 @@ const appointmentController = {
       sendResponse(res, 500, null, error.message);
     }
   },
+
+  // Confirmar múltiples citas en batch
+  batchConfirmAppointments: async (req, res) => {
+    try {
+      const { appointmentIds, organizationId } = req.body;
+
+      if (!organizationId) {
+        return sendResponse(res, 400, null, "organizationId es requerido");
+      }
+
+      if (!Array.isArray(appointmentIds) || appointmentIds.length === 0) {
+        return sendResponse(
+          res,
+          400,
+          null,
+          "Se requiere un array de IDs de citas"
+        );
+      }
+
+      const results = await appointmentService.batchConfirmAppointments(
+        appointmentIds,
+        organizationId
+      );
+
+      // Enviar notificación al empleado si hay citas confirmadas
+      if (results.confirmed.length > 0) {
+        try {
+          const org = await organizationService.getOrganizationById(
+            organizationId
+          );
+
+          // Agrupar por empleado si tienes esa info
+          // Por ahora una notificación genérica
+          const notify = {
+            title: "Citas confirmadas",
+            message: `Se confirmaron ${results.confirmed.length} citas`,
+            icon: org.branding?.pwaIcon || "",
+          };
+
+          // Esto asume que todas las citas son del mismo empleado
+          // Si necesitas notificar a múltiples empleados, necesitarás ajustarlo
+          // Para simplificar, omitimos la notificación o la envías al admin
+          
+          console.log("Citas confirmadas exitosamente:", notify);
+        } catch (notifError) {
+          console.error("Error enviando notificación:", notifError);
+        }
+      }
+
+      const message = `Confirmadas: ${results.confirmed.length}, Ya confirmadas: ${results.alreadyConfirmed.length}, Fallidas: ${results.failed.length}`;
+
+      sendResponse(res, 200, results, message);
+    } catch (error) {
+      console.error("Error en batchConfirmAppointments:", error);
+      sendResponse(res, 500, null, error.message);
+    }
+  },
 };
 
 export default appointmentController;
