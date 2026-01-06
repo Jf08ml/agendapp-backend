@@ -356,13 +356,14 @@ const cancellationService = {
         }
       }
 
-      // 🔔 Crear notificación para el administrador
+      // 🔔 Crear notificaciones para el administrador y empleado
       try {
         const timezone = reservation.organizationId?.timezone || 'America/Bogota';
         const customerName = reservation.customerDetails?.name || 'Un cliente';
         const serviceName = reservation.serviceId?.name || 'Servicio';
         const formattedDate = moment(reservation.startDate).tz(timezone).format('DD/MM/YYYY [a las] hh:mm A');
 
+        // Notificación para el administrador
         await notificationService.createNotification({
           title: '❌ Reserva cancelada',
           message: `${customerName} canceló su reserva de ${serviceName} programada para el ${formattedDate}`,
@@ -372,8 +373,21 @@ const cancellationService = {
           status: 'unread',
           frontendRoute: '/manage-agenda'
         });
-        
-        console.log('🔔 Notificación de cancelación de reserva creada');
+        console.log('🔔 Notificación de cancelación creada para administrador');
+
+        // Notificación para el empleado (si existe)
+        if (reservation.employeeId) {
+          await notificationService.createNotification({
+            title: '❌ Reserva cancelada',
+            message: `${customerName} canceló su reserva de ${serviceName} programada para el ${formattedDate}`,
+            organizationId: reservation.organizationId._id || reservation.organizationId,
+            employeeId: reservation.employeeId._id || reservation.employeeId,
+            type: 'cancellation',
+            status: 'unread',
+            frontendRoute: '/manage-agenda'
+          });
+          console.log('🔔 Notificación de cancelación creada para empleado');
+        }
       } catch (notificationError) {
         console.error('❌ Error al crear notificación:', notificationError);
       }
@@ -444,7 +458,7 @@ const cancellationService = {
       })
         .populate('service', 'name')
         .populate('client', 'name phoneNumber')
-        .populate('employee', 'name')
+        .populate('employee', 'names') // ⚠️ El campo es 'names' no 'name'
         .populate('organizationId', 'name timezone')
         .lean();
 
@@ -490,7 +504,8 @@ const cancellationService = {
         .filter(apt => cancellableIds.some(id => id.toString() === apt._id.toString()))
         .map(apt => ({
           service: apt.service?.name || 'Servicio',
-          employee: apt.employee?.name || 'Sin asignar',
+          employeeName: apt.employee?.names || 'Sin asignar', // ⚠️ Campo 'names' no 'name'
+          employeeId: apt.employee?._id || null, // Guardar el ID del empleado
           date: apt.startDate,
           organizationTimezone: timezone
         }));
@@ -600,17 +615,56 @@ const cancellationService = {
             });
           }
 
+          // Notificación para el administrador
           await notificationService.createNotification({
             title: cancelledAppointments.length === 1 ? '❌ Cita cancelada' : `❌ ${cancelledAppointments.length} citas canceladas`,
             message: notificationMessage,
             organizationId: organizationId,
-            employeeId: null, // Notificación para el admin
+            employeeId: null,
             type: 'cancellation',
             status: 'unread',
             frontendRoute: '/manage-agenda'
           });
-          
           console.log('🔔 Notificación creada para el administrador');
+
+          // Notificaciones para los empleados afectados
+          console.log('👤 Verificando empleados para notificar...');
+          console.log('📋 Appointments cancelados:', cancelledAppointments.map(a => ({ service: a.service, employeeName: a.employeeName, employeeId: a.employeeId })));
+          
+          // Obtener empleados únicos (solo los que tienen employeeId)
+          const uniqueEmployeeIds = [...new Set(cancelledAppointments.map(apt => apt.employeeId).filter(Boolean))];
+          console.log('👥 Empleados únicos a notificar (IDs):', uniqueEmployeeIds);
+          
+          for (const employeeId of uniqueEmployeeIds) {
+            const employeeAppointments = cancelledAppointments.filter(apt => apt.employeeId?.toString() === employeeId.toString());
+            const employeeName = employeeAppointments[0]?.employeeName || 'Empleado';
+            
+            console.log(`📧 Creando notificación para ${employeeName} (ID: ${employeeId}, ${employeeAppointments.length} citas)`);
+            
+            let employeeMessage = '';
+            if (employeeAppointments.length === 1) {
+              const apt = employeeAppointments[0];
+              const formattedDate = moment(apt.date).tz(timezone).format('DD/MM/YYYY [a las] hh:mm A');
+              employeeMessage = `${clientName} canceló su cita de ${apt.service} programada para el ${formattedDate}`;
+            } else {
+              employeeMessage = `${clientName} canceló ${employeeAppointments.length} citas tuyas:\n`;
+              employeeAppointments.forEach((apt, index) => {
+                const formattedDate = moment(apt.date).tz(timezone).format('DD/MM/YYYY');
+                employeeMessage += `${index + 1}. ${apt.service} - ${formattedDate}\n`;
+              });
+            }
+
+            await notificationService.createNotification({
+              title: employeeAppointments.length === 1 ? '❌ Cita cancelada' : `❌ ${employeeAppointments.length} citas canceladas`,
+              message: employeeMessage,
+              organizationId: organizationId,
+              employeeId: employeeId,
+              type: 'cancellation',
+              status: 'unread',
+              frontendRoute: '/manage-agenda'
+            });
+            console.log(`🔔 Notificación creada para empleado: ${employeeName} (ID: ${employeeId})`);
+          }
         } catch (notificationError) {
           console.error('❌ Error al crear notificación:', notificationError);
           // No fallar la cancelación si falla la notificación

@@ -10,6 +10,7 @@ import { waIntegrationService } from "../services/waIntegrationService.js";
 import { hasUsablePhone, normalizeToCOE164 } from "../utils/timeAndPhones.js";
 import cancellationService from "./cancellationService.js";
 import { generateCancellationLink } from "../utils/cancellationUtils.js";
+import notificationService from "./notificationService.js";
 import mongoose from "mongoose";
 import moment from "moment-timezone";
 
@@ -209,6 +210,28 @@ const appointmentService = {
       hasTokenHash: !!savedAppointment.cancelTokenHash,
       tokenHashPreview: savedAppointment.cancelTokenHash ? savedAppointment.cancelTokenHash.substring(0, 20) + '...' : 'N/A',
     });
+
+    // 🔔 Notificar al empleado asignado
+    if (employee) {
+      try {
+        const clientName = client?.name || 'Un cliente';
+        const formattedDate = moment.tz(parsedStartDate, timezone).format('DD/MM/YYYY [a las] hh:mm A');
+        
+        await notificationService.createNotification({
+          title: '📅 Nueva cita asignada',
+          message: `${clientName} tiene una cita de ${serviceDetails.name} programada para el ${formattedDate}`,
+          organizationId: organizationId,
+          employeeId: employee,
+          type: 'reservation',
+          status: 'unread',
+          frontendRoute: '/manage-agenda'
+        });
+        console.log('🔔 Notificación enviada al empleado:', employee);
+      } catch (notificationError) {
+        console.error('❌ Error al notificar empleado:', notificationError);
+        // No fallar la creación si falla la notificación
+      }
+    }
     
     return savedAppointment;
   },
@@ -395,6 +418,45 @@ const appointmentService = {
 
     // ---------- EFECTOS EXTERNOS (fuera de la transacción) ----------
     try {
+      // 🔔 Notificar a los empleados asignados
+      if (created.length > 0) {
+        const uniqueEmployees = [...new Set(created.map(c => c.saved.employee?.toString()).filter(Boolean))];
+        
+        for (const employeeId of uniqueEmployees) {
+          try {
+            const employeeName = await employeeService.getEmployeeById(employeeId);
+            const employeeAppointments = created.filter(c => c.saved.employee?.toString() === employeeId);
+            const clientName = client?.name || 'Un cliente';
+            
+            let notificationMessage = '';
+            if (employeeAppointments.length === 1) {
+              const apt = employeeAppointments[0];
+              const formattedDate = moment.tz(apt.start, timezone).format('DD/MM/YYYY [a las] hh:mm A');
+              notificationMessage = `${clientName} tiene una cita de ${apt.svc.name} programada para el ${formattedDate}`;
+            } else {
+              notificationMessage = `${clientName} tiene ${employeeAppointments.length} citas programadas:\n`;
+              employeeAppointments.forEach((apt, index) => {
+                const formattedDate = moment.tz(apt.start, timezone).format('DD/MM/YYYY [a las] hh:mm A');
+                notificationMessage += `${index + 1}. ${apt.svc.name} - ${formattedDate}\n`;
+              });
+            }
+
+            await notificationService.createNotification({
+              title: employeeAppointments.length === 1 ? '📅 Nueva cita asignada' : `📅 ${employeeAppointments.length} nuevas citas`,
+              message: notificationMessage,
+              organizationId: organizationId,
+              employeeId: employeeId,
+              type: 'reservation',
+              status: 'unread',
+              frontendRoute: '/manage-agenda'
+            });
+            console.log(`🔔 Notificación enviada al empleado: ${employeeName?.names || employeeId}`);
+          } catch (notificationError) {
+            console.error('❌ Error al notificar empleado:', notificationError);
+          }
+        }
+      }
+
       if (created.length > 0 && !skipNotification) { // 🔇 Solo enviar si no se pidió omitir
         
         // 🔍 Si hay groupId, buscar TODAS las citas del grupo para el mensaje
