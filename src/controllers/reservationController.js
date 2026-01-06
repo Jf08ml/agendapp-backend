@@ -10,6 +10,10 @@ import sendResponse from "../utils/sendResponse.js";
 import employeeService from "../services/employeeService.js";
 import scheduleService from "../services/scheduleService.js";
 import employeeModel from "../models/employeeModel.js";
+import cancellationService from "../services/cancellationService.js";
+import whatsappTemplates from "../utils/whatsappTemplates.js";
+import { waIntegrationService } from "../services/waIntegrationService.js";
+import { hasUsablePhone } from "../utils/timeAndPhones.js";
 import { generateCancellationLink } from "../utils/cancellationUtils.js";
 
 // ---------------------- helpers de notificación ----------------------
@@ -308,9 +312,6 @@ const reservationController = {
           }
 
           // 3) Generar UN groupId y token compartido para TODAS las citas
-          const mongoose = (await import('mongoose')).default;
-          const cancellationService = (await import('../services/cancellationService.js')).default;
-          
           const sharedGroupId = new mongoose.Types.ObjectId();
           const { token: sharedToken, hash: sharedTokenHash } = cancellationService.generateCancelToken();
           console.log('🔑 Token compartido generado para reserva múltiple:', sharedGroupId);
@@ -381,12 +382,6 @@ const reservationController = {
 
           // 6) Enviar UN SOLO mensaje de WhatsApp con todas las citas
           try {
-            const serviceModel = (await import('../models/serviceModel.js')).default;
-            const employeeModel = (await import('../models/employeeModel.js')).default;
-            const whatsappTemplates = (await import('../utils/whatsappTemplates.js')).default;
-            const { waIntegrationService } = await import('../services/waIntegrationService.js');
-            const { hasUsablePhone } = await import('../utils/timeAndPhones.js');
-            
             // Obtener detalles de servicios y empleados
             const servicesDetails = await Promise.all(
               allAppointments.map(apt => serviceModel.findById(apt.service))
@@ -434,7 +429,6 @@ const reservationController = {
               : `${fmt(firstStart, timezone)} – ${fmtTime(lastEnd, timezone)}`;
 
             // Usar el token compartido que ya se generó arriba
-            const { generateCancellationLink } = await import('../utils/cancellationUtils.js');
             const cancellationLink = generateCancellationLink(sharedToken, org);
 
             const templateData = {
