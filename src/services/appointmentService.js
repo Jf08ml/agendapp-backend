@@ -947,6 +947,7 @@ const appointmentService = {
             organizationId: orgId,
             startDate: { $gte: targetTimeStart, $lt: targetTimeEnd },
             reminderSent: false,
+            status: { $nin: ['cancelled', 'cancelled_by_customer', 'cancelled_by_admin'] },
           })
           .populate("client")
           .populate("service")
@@ -977,6 +978,7 @@ const appointmentService = {
             client: { $in: clientIds },
             startDate: { $gte: dayStart, $lt: dayEnd },
             reminderSent: false,
+            status: { $nin: ['cancelled', 'cancelled_by_customer', 'cancelled_by_admin'] },
           })
           .populate("client")
           .populate("service")

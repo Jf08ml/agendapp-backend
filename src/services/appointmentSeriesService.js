@@ -142,7 +142,7 @@ function isSlotWithinWorkingHours(slotTime, durationMinutes, schedule) {
  * @param {string} timezone - Timezone IANA (ej: 'America/Bogota')
  * @returns {Array<{date: Date, dayOfWeek: number}>}
  */
-function generateWeeklyOccurrences(baseDate, pattern, timezone = 'America/Bogota') {
+function generateWeeklyOccurrences(baseDateInput, pattern, timezone = 'America/Bogota') {
   const { intervalWeeks = 1, weekdays = [], endType, endDate, count } = pattern;
 
   if (!weekdays || weekdays.length === 0) {
@@ -150,7 +150,8 @@ function generateWeeklyOccurrences(baseDate, pattern, timezone = 'America/Bogota
   }
 
   const occurrences = [];
-  const baseMoment = moment.tz(baseDate, timezone);
+  // Interpretar la hora base en la zona horaria de la organización para evitar desfaces
+  const baseMoment = moment.tz(baseDateInput, timezone);
   const baseTime = baseMoment.format('HH:mm:ss'); // Preservar hora exacta
   
   let currentWeekStart = baseMoment.clone().startOf('week'); // Domingo de la semana base
@@ -172,7 +173,11 @@ function generateWeeklyOccurrences(baseDate, pattern, timezone = 'America/Bogota
       if (occurrenceDate.isSameOrAfter(baseMoment.clone().startOf('day'))) {
         // Validar límite por fecha
         if (endType === 'date' && endDate) {
-          const endMoment = moment.tz(endDate, timezone);
+          // Tomar solo la parte de fecha y evaluarla en la timezone de la organización
+          const endDay = typeof endDate === 'string'
+            ? endDate.split('T')[0]
+            : moment(endDate).tz(timezone).format('YYYY-MM-DD');
+          const endMoment = moment.tz(endDay, 'YYYY-MM-DD', timezone).endOf('day');
           if (occurrenceDate.isAfter(endMoment)) {
             break; // Salir del for de weekdays
           }
@@ -196,7 +201,11 @@ function generateWeeklyOccurrences(baseDate, pattern, timezone = 'America/Bogota
     }
 
     if (endType === 'date' && endDate) {
-      const endMoment = moment.tz(endDate, timezone);
+      // Inclusivo hasta el final del día límite, ignorando la hora enviada
+      const endDay = typeof endDate === 'string'
+        ? endDate.split('T')[0]
+        : moment(endDate).tz(timezone).format('YYYY-MM-DD');
+      const endMoment = moment.tz(endDay, 'YYYY-MM-DD', timezone).endOf('day');
       if (currentWeekStart.isAfter(endMoment)) {
         break;
       }
@@ -337,7 +346,7 @@ async function previewSeriesAppointments(baseAppointment, recurrencePattern, opt
 
   // Generar fechas de ocurrencias
   const occurrenceDates = generateWeeklyOccurrences(
-    new Date(startDate),
+    startDate,
     recurrencePattern,
     timezone
   );
