@@ -7,16 +7,18 @@ Recuerda que tienes {{count}} {{cita_pal}} {{agendada_pal}}.
 
 🗓️ Fecha: {{date_range}}
 📍 Lugar: {{organization}}
+📍 Dirección: {{address}}
 
 ✨ Servicios:
 {{services_list}}
 
 👩‍💼 Te atenderá: {{employee}}
 
+Gestiona tu cita desde el siguiente enlace:
 {{manage_block}}
 
-Por favor confirma tu asistencia *respondiendo a este chat de WhatsApp*.
-Si no puedes asistir, avísanos con anticipación para reprogramar tu turno.
+Por favor confirma tu asistencia o cancela tu cita desde el enlace.
+Si necesitas ayuda, puedes responder a este mensaje.
 
-¡Te esperamos!
+💖 ¡Te esperamos!
 `.trim();
