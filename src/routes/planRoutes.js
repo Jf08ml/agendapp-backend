@@ -3,6 +3,9 @@ import planController from "../controllers/planController.js";
 
 const router = express.Router();
 
+// Planes públicos (sin autenticación)
+router.get("/public", planController.getPublicPlans);
+
 // Crear un nuevo plan
 router.post("/", planController.createPlan);
 

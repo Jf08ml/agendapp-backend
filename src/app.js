@@ -21,6 +21,14 @@ webPush.setVapidDetails(
 
 app.use(cors({ origin: "*" }));
 app.use(morgan("dev"));
+// Evitar respuestas 304 en desarrollo para que el frontend siempre reciba datos frescos
+if (process.env.NODE_ENV !== "production") {
+  app.disable("etag");
+  app.use((req, res, next) => {
+    res.setHeader("Cache-Control", "no-store");
+    next();
+  });
+}
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
