@@ -267,8 +267,7 @@ const polarService = {
       console.warn("[polar webhook] signature mismatch details", {
         secretProvided: !!secret,
         header: signature,
-        version: observedVersion,
-        receivedDigest: observedDigest,
+        candidatesCount: Array.isArray(candidates) ? candidates.length : 0,
         webhookId: webhookId,
         bodyHex: hHex,
         bodyB64: hB64,
