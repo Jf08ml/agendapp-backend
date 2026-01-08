@@ -311,6 +311,54 @@ const paymentController = {
       return sendResponse(res, 500, null, err.message);
     }
   },
+
+  // POST /api/payments/manual-payment
+  // Crear PaymentSession manual (para superadmin)
+  createManualPayment: async (req, res) => {
+    try {
+      const {
+        organizationId,
+        membershipId,
+        planId,
+        amount,
+        currency = "USD",
+        paymentMethod = "manual",
+        adminNotes = "",
+      } = req.body;
+
+      if (!organizationId || !planId || !amount) {
+        return sendResponse(res, 400, null, "organizationId, planId y amount son requeridos");
+      }
+
+      // Generar sessionId único para pagos manuales
+      const sessionId = `manual_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
+      const paymentSession = await PaymentSession.create({
+        organizationId,
+        membershipId,
+        planId,
+        sessionId,
+        amount,
+        currency,
+        status: "completed",
+        paymentMethod,
+        provider: paymentMethod === "polar" ? "polar" : "manual",
+        processed: true,
+        processedAt: new Date(),
+        metadata: {
+          adminNotes,
+          createdBy: "superadmin",
+          createdAt: new Date().toISOString(),
+        },
+        completedAt: new Date(),
+      });
+
+      return sendResponse(res, 201, paymentSession, "Pago manual registrado");
+    } catch (err) {
+      console.error("Error creando pago manual:", err);
+      return sendResponse(res, 500, null, err.message);
+    }
+  },
 };
 
 export default paymentController;

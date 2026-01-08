@@ -41,12 +41,13 @@ const membershipService = {
 
   /**
    * Obtener membresía activa de una organización
+   * Incluye membresías activas, en prueba, en período de gracia y suspendidas
    */
   getActiveMembership: async (organizationId) => {
     return await membershipModel
       .findOne({
         organizationId,
-        status: { $in: ["active", "trial", "grace_period"] },
+        status: { $in: ["active", "trial", "grace_period", "suspended"] },
       })
       .populate("planId")
       .sort({ createdAt: -1 });

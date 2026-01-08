@@ -17,4 +17,7 @@ router.get("/verify", paymentController.verify);
 router.get("/history", paymentController.listHistory);
 router.get("/sessions", paymentController.listSessions);
 
+// Registro manual de pago (superadmin)
+router.post("/manual-payment", paymentController.createManualPayment);
+
 export default router;
