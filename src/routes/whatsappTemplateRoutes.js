@@ -23,4 +23,10 @@ router.put("/:organizationId/all", whatsappTemplateController.updateAllTemplates
 // Preview de una plantilla con datos de ejemplo
 router.post("/preview", whatsappTemplateController.previewTemplate);
 
+// 🆕 Obtener configuración de envíos (habilitar/deshabilitar mensajes)
+router.get("/:organizationId/settings", whatsappTemplateController.getTemplateSettings);
+
+// 🆕 Actualizar configuración de envíos
+router.put("/:organizationId/settings", whatsappTemplateController.updateTemplateSettings);
+
 export default router;

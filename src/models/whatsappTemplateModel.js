@@ -9,6 +9,43 @@ const whatsappTemplateSchema = new mongoose.Schema(
       unique: true,
       index: true,
     },
+    // 🆕 Control de envíos - habilitar/deshabilitar mensajes automáticos
+    enabledTypes: {
+      type: {
+        scheduleAppointment: {
+          type: Boolean,
+          default: true,
+        },
+        scheduleAppointmentBatch: {
+          type: Boolean,
+          default: true,
+        },
+        recurringAppointmentSeries: {
+          type: Boolean,
+          default: true,
+        },
+        reminder: {
+          type: Boolean,
+          default: true,
+        },
+        statusReservationApproved: {
+          type: Boolean,
+          default: false,
+        },
+        statusReservationRejected: {
+          type: Boolean,
+          default: false,
+        },
+      },
+      default: () => ({
+        scheduleAppointment: true,
+        scheduleAppointmentBatch: true,
+        recurringAppointmentSeries: true,
+        reminder: true,
+        statusReservationApproved: false,
+        statusReservationRejected: false,
+      }),
+    },
     scheduleAppointment: {
       type: String,
       default: null, // null = usar template por defecto del sistema

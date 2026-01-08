@@ -179,22 +179,31 @@ const appointmentService = {
     // 🔗 Generar enlace de cancelación
     const cancellationLink = generateCancellationLink(cancelToken, organization);
 
-    // Enviar confirmación por WhatsApp
+    // Enviar confirmación por WhatsApp (solo si está habilitado)
     try {
-      const msg = await whatsappTemplates.getRenderedTemplate(
-        organizationId,
-        'scheduleAppointment',
-        {
-          ...appointmentDetails,
-          cancellationLink,
-        }
-      );
+      // 🆕 Verificar si el envío de confirmación está habilitado
+      const whatsappTemplate = await WhatsappTemplate.findOne({ organizationId });
+      const isConfirmationEnabled = whatsappTemplate?.enabledTypes?.scheduleAppointment !== false;
 
-      await whatsappService.sendMessage(
-        organizationId,
-        client?.phoneNumber,
-        msg
-      );
+      if (isConfirmationEnabled && client?.phoneNumber) {
+        const msg = await whatsappTemplates.getRenderedTemplate(
+          organizationId,
+          'scheduleAppointment',
+          {
+            ...appointmentDetails,
+            cancellationLink,
+          }
+        );
+
+        await whatsappService.sendMessage(
+          organizationId,
+          client?.phoneNumber,
+          msg
+        );
+        console.log(`✅ Confirmación enviada para cita ${newAppointment._id}`);
+      } else if (!isConfirmationEnabled) {
+        console.log(`⏭️  Confirmación deshabilitada para cita ${newAppointment._id}`);
+      }
     } catch (error) {
       console.error(
         `Error enviando la confirmación para ${client?.phoneNumber}:`,
@@ -543,20 +552,29 @@ const appointmentService = {
           cancellationLink: groupCancellationLink, // 🔗 Un solo enlace para todo el grupo
         };
 
-        // Usar template personalizado de la organización
-        const msg = await whatsappTemplates.getRenderedTemplate(
-          organizationId,
-          'scheduleAppointmentBatch',
-          templateData
-        );
+        // 🆕 Verificar si el envío de confirmación batch está habilitado
+        const whatsappTemplate = await WhatsappTemplate.findOne({ organizationId });
+        const isBatchConfirmationEnabled = whatsappTemplate?.enabledTypes?.scheduleAppointmentBatch !== false;
 
-        // Envío 1-a-1 (mensaje ya renderizado)
-        await waIntegrationService.sendMessage({
-          orgId: organizationId,
-          phone: phoneE164,
-          message: msg,
-          image: null,
-        });
+        if (isBatchConfirmationEnabled) {
+          // Usar template personalizado de la organización
+          const msg = await whatsappTemplates.getRenderedTemplate(
+            organizationId,
+            'scheduleAppointmentBatch',
+            templateData
+          );
+
+          // Envío 1-a-1 (mensaje ya renderizado)
+          await waIntegrationService.sendMessage({
+            orgId: organizationId,
+            phone: phoneE164,
+            message: msg,
+            image: null,
+          });
+          console.log(`✅ Confirmación batch enviada (${allGroupAppointments.length} citas)`);
+        } else {
+          console.log(`⏭️  Confirmación batch deshabilitada`);
+        }
       }
     } catch (error) {
       console.error(

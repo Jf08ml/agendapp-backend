@@ -607,22 +607,31 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
             cancellationLink,
           };
           
-          // Usar template específico para series recurrentes
-          const msg = await whatsappTemplates.getRenderedTemplate(
-            baseAppointment.organizationId,
-            'recurringAppointmentSeries',
-            templateData
-          );
-          
-          // Enviar UN SOLO mensaje
-          await waIntegrationService.sendMessage({
-            orgId: baseAppointment.organizationId,
-            phone: phoneE164,
-            message: msg,
-            image: null,
-          });
-          
-          console.log(`📱 Mensaje enviado con ${Object.keys(citasPorOcurrencia).length} ocurrencias (${created.length} citas totales)`);
+          // 🆕 Verificar si el envío de confirmación de series está habilitado
+          const WhatsappTemplate = (await import('../models/whatsappTemplateModel.js')).default;
+          const whatsappTemplate = await WhatsappTemplate.findOne({ organizationId: baseAppointment.organizationId });
+          const isRecurringConfirmationEnabled = whatsappTemplate?.enabledTypes?.recurringAppointmentSeries !== false;
+
+          if (isRecurringConfirmationEnabled) {
+            // Usar template específico para series recurrentes
+            const msg = await whatsappTemplates.getRenderedTemplate(
+              baseAppointment.organizationId,
+              'recurringAppointmentSeries',
+              templateData
+            );
+            
+            // Enviar UN SOLO mensaje
+            await waIntegrationService.sendMessage({
+              orgId: baseAppointment.organizationId,
+              phone: phoneE164,
+              message: msg,
+              image: null,
+            });
+            
+            console.log(`✅ Confirmación de serie recurrente enviada: ${Object.keys(citasPorOcurrencia).length} ocurrencias (${created.length} citas totales)`);
+          } else {
+            console.log(`⏭️  Confirmación de serie recurrente deshabilitada`);
+          }
           
         } else {
           // 📨 OPCIÓN 2: Enviar mensaje solo de la PRIMERA ocurrencia

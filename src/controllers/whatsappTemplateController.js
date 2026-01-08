@@ -297,6 +297,94 @@ const whatsappTemplateController = {
       sendResponse(res, 500, null, error.message);
     }
   },
+
+  /**
+   * 🆕 Obtiene la configuración de envíos (enabledTypes)
+   */
+  getTemplateSettings: async (req, res) => {
+    try {
+      const { organizationId } = req.params;
+
+      const organization = await organizationService.getOrganizationById(organizationId);
+      if (!organization) {
+        return sendResponse(res, 404, null, "Organización no encontrada");
+      }
+
+      let templateDoc = await WhatsappTemplate.findOne({ organizationId });
+
+      // Si no existe documento, retornar defaults
+      if (!templateDoc) {
+        const defaults = {
+          scheduleAppointment: true,
+          scheduleAppointmentBatch: true,
+          recurringAppointmentSeries: true,
+          reminder: true,
+          statusReservationApproved: false,
+          statusReservationRejected: false,
+        };
+        return sendResponse(res, 200, defaults, "Configuración por defecto");
+      }
+
+      const settings = templateDoc.enabledTypes || {
+        scheduleAppointment: true,
+        scheduleAppointmentBatch: true,
+        recurringAppointmentSeries: true,
+        reminder: true,
+        statusReservationApproved: false,
+        statusReservationRejected: false,
+      };
+
+      sendResponse(res, 200, settings, "Configuración obtenida correctamente");
+    } catch (error) {
+      console.error("Error obteniendo configuración:", error);
+      sendResponse(res, 500, null, error.message);
+    }
+  },
+
+  /**
+   * 🆕 Actualiza la configuración de envíos (enabledTypes)
+   */
+  updateTemplateSettings: async (req, res) => {
+    try {
+      const { organizationId } = req.params;
+      const { enabledTypes } = req.body;
+
+      if (!enabledTypes) {
+        return sendResponse(res, 400, null, "enabledTypes es requerido");
+      }
+
+      // Validar que enabledTypes tenga la estructura correcta
+      const validKeys = [
+        'scheduleAppointment',
+        'scheduleAppointmentBatch',
+        'recurringAppointmentSeries',
+        'reminder',
+        'statusReservationApproved',
+        'statusReservationRejected',
+      ];
+
+      for (const key of Object.keys(enabledTypes)) {
+        if (!validKeys.includes(key)) {
+          return sendResponse(res, 400, null, `Tipo de mensaje inválido: ${key}`);
+        }
+        if (typeof enabledTypes[key] !== 'boolean') {
+          return sendResponse(res, 400, null, `${key} debe ser booleano`);
+        }
+      }
+
+      const updated = await WhatsappTemplate.findOneAndUpdate(
+        { organizationId },
+        { enabledTypes },
+        { new: true, upsert: true }
+      );
+
+      console.log(`✅ Configuración de envíos actualizada para org ${organizationId}`);
+      sendResponse(res, 200, updated.enabledTypes, "Configuración actualizada correctamente");
+    } catch (error) {
+      console.error("Error actualizando configuración:", error);
+      sendResponse(res, 500, null, error.message);
+    }
+  },
 };
 
 export default whatsappTemplateController;
