@@ -350,9 +350,9 @@ const appointmentService = {
         const duration = svc.duration ?? 0; // en minutos
         const serviceEnd = new Date(currentStart.getTime() + duration * 60000);
 
-        // 🔍 VALIDACIÓN DE DISPONIBILIDAD para auto_if_available
-        // Verificar si hay conflictos con otras citas del empleado
-        const hasConflict = await appointmentModel.findOne({
+        // 🔍 VALIDACIÓN DE DISPONIBILIDAD - Verificar citas simultáneas
+        // Contar cuántas citas simultáneas tiene el empleado en ese horario
+        const simultaneousCount = await appointmentModel.countDocuments({
           employee: employeeForThisService,
           organizationId,
           status: { $nin: ['cancelled_by_admin', 'cancelled_by_customer', 'cancelled', 'rejected'] },
@@ -366,9 +366,11 @@ const appointmentService = {
           ]
         });
 
-        if (hasConflict) {
-          console.log(`⚠️ Conflicto de horario detectado para empleado ${employeeForThisService} en ${currentStart}`);
-          throw new Error(`No hay disponibilidad para el servicio ${svc.name} en el horario solicitado`);
+        // 👥 Verificar límite de citas simultáneas configurado en el servicio
+        const maxConcurrent = svc.maxConcurrentAppointments ?? 1;
+        if (simultaneousCount >= maxConcurrent) {
+          console.log(`⚠️ Límite de citas simultáneas alcanzado para empleado ${employeeForThisService} en ${currentStart}. Simultáneas: ${simultaneousCount}, Máximo: ${maxConcurrent}`);
+          throw new Error(`No hay disponibilidad para el servicio ${svc.name} en el horario solicitado (límite de ${maxConcurrent} cita${maxConcurrent > 1 ? 's' : ''} simultánea${maxConcurrent > 1 ? 's' : ''})`);
         }
 
         const additionalItems = additionalItemsByService[serviceId] || [];

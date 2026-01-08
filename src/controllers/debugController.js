@@ -7,7 +7,7 @@ import moment from 'moment-timezone';
 
 export default {
   debugSlots: async (req, res) => {
-    const { organizationId, date, employeeId, serviceDuration = 30 } = req.query;
+    const { organizationId, date, employeeId, serviceDuration = 30, serviceId } = req.query;
     
     try {
       const debug = {
@@ -19,6 +19,7 @@ export default {
       const organizationModel = (await import('../models/organizationModel.js')).default;
       const employeeModel = (await import('../models/employeeModel.js')).default;
       const appointmentModel = (await import('../models/appointmentModel.js')).default;
+      const serviceModel = (await import('../models/serviceModel.js')).default;
       const scheduleService = (await import('../services/scheduleService.js')).default;
 
       // 1. Buscar organización
@@ -155,12 +156,21 @@ export default {
       });
 
       // 5. Generar slots
+      let maxConcurrentAppointments = 1;
+      if (serviceId) {
+        const service = await serviceModel.findById(serviceId);
+        if (service) {
+          maxConcurrentAppointments = service.maxConcurrentAppointments ?? 1;
+        }
+      }
+      
       const slots = scheduleService.generateAvailableSlots(
         date,
         organization,
         employee,
         parseInt(serviceDuration),
-        appointments
+        appointments,
+        maxConcurrentAppointments
       );
 
       const availableSlots = slots.filter(s => s.available);

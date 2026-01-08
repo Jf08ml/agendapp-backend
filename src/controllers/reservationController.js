@@ -123,12 +123,14 @@ const reservationController = {
         );
 
         // Generar slots disponibles
+        // 🔒 En reserva en línea SIEMPRE usar maxConcurrentAppointments = 1 (sin solapamientos)
         const availableSlots = scheduleService.generateAvailableSlots(
           requestedDateTime,
           org,
           employee,
           service.duration,
-          dayAppointments
+          dayAppointments,
+          1 // 🔒 Forzar 1 para reserva en línea - citas simultáneas solo desde admin
         );
 
         const requestedTimeInTz = moment.tz(requestedDateTime, timezone);

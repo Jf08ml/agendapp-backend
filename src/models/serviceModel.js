@@ -11,6 +11,9 @@ const serviceSchema = new Schema({
   organizationId: { type: Types.ObjectId, ref: "Organization", required: true },
   isActive: { type: Boolean, default: true },
   hidePrice: { type: Boolean, default: false },
+  // 👥 Número de clientes que pueden ser atendidos simultáneamente por un empleado
+  // (ej: doctor puede ver 2 pacientes a la vez)
+  maxConcurrentAppointments: { type: Number, default: 1, min: 1 },
 });
 
 export default model("Service", serviceSchema);

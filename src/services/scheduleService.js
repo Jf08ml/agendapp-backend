@@ -266,9 +266,10 @@ function validateDateTime(datetime, organization, employee = null) {
  * @param {Object} employee - Documento de empleado (opcional)
  * @param {number} durationMinutes - Duración del servicio en minutos
  * @param {Array} appointments - Citas existentes (opcional, para filtrar slots ocupados)
+ * @param {number} maxConcurrentAppointments - Máximo de citas simultáneas que puede atender el empleado (default 1)
  * @returns {Array} Array de objetos {time: "HH:mm", available: boolean}
  */
-function generateAvailableSlots(date, organization, employee = null, durationMinutes = 30, appointments = []) {
+function generateAvailableSlots(date, organization, employee = null, durationMinutes = 30, appointments = [], maxConcurrentAppointments = 1) {
   const timezone = organization.timezone || 'America/Bogota';
   // Obtener día de la semana en la timezone de la organización
   const dateInTz = moment.tz(date, timezone);
@@ -340,8 +341,10 @@ function generateAvailableSlots(date, organization, employee = null, durationMin
     // Verificar si el slot se solapa con algún break (pasamos el día para validar breaks por día)
     const overlapsBreak = isSlotInBreak(slotTime, durationMinutes, effectiveBreaks, dayOfWeek);
     
-    // Verificar si el slot se solapa con alguna cita existente
-    const overlapsAppointment = relevantAppointments.some(appt => {
+    // 👥 Contar citas simultáneas en lugar de solo verificar conflictos
+    // Esto permite que un empleado atienda múltiples clientes si maxConcurrentAppointments > 1
+    let simultaneousAppointmentCount = 0;
+    relevantAppointments.forEach(appt => {
       // Convertir las fechas de la cita a la timezone de la organización
       const apptStartInTz = moment.tz(appt.startDate, timezone);
       const apptEndInTz = moment.tz(appt.endDate, timezone);
@@ -352,7 +355,7 @@ function generateAvailableSlots(date, organization, employee = null, durationMin
       
       // Si la cita no es del día que estamos generando, ignorarla
       if (apptDateStr !== currentDateStr) {
-        return false;
+        return;
       }
       
       const apptStart = apptStartInTz.hours() * 60 + apptStartInTz.minutes();
@@ -360,8 +363,13 @@ function generateAvailableSlots(date, organization, employee = null, durationMin
       
       // Hay solapamiento si el slot empieza antes de que termine la cita
       // Y el slot termina después de que empieza la cita
-      return currentMin < apptEnd && slotEndMin > apptStart;
+      if (currentMin < apptEnd && slotEndMin > apptStart) {
+        simultaneousAppointmentCount++;
+      }
     });
+    
+    // Slot disponible si no se solapa con breaks y no excede el límite concurrente
+    const overlapsAppointment = simultaneousAppointmentCount >= maxConcurrentAppointments;
     
     // Crear datetime usando moment-timezone con la zona horaria de la organización
     const hours = Math.floor(currentMin / 60);

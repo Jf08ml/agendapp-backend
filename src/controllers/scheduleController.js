@@ -7,6 +7,7 @@ import moment from 'moment-timezone';
 import organizationModel from "../models/organizationModel.js";
 import employeeModel from "../models/employeeModel.js";
 import appointmentModel from "../models/appointmentModel.js";
+import serviceModel from "../models/serviceModel.js";
 import scheduleService from "../services/scheduleService.js";
 import sendResponse from "../utils/sendResponse.js";
 
@@ -321,12 +322,23 @@ const scheduleController = {
 
       const appointments = await appointmentModel.find(appointmentQuery);
 
+      // 👥 Si se proporciona serviceId, obtener maxConcurrentAppointments del servicio
+      let maxConcurrentAppointments = 1;
+      const { serviceId } = req.query;
+      if (serviceId) {
+        const service = await serviceModel.findById(serviceId);
+        if (service) {
+          maxConcurrentAppointments = service.maxConcurrentAppointments ?? 1;
+        }
+      }
+
       const slots = scheduleService.generateAvailableSlots(
         date, // Pasar el string de fecha
         organization,
         employee,
         duration,
-        appointments
+        appointments,
+        maxConcurrentAppointments
       );
       appointments.forEach(appt => {
         const start = moment.tz(appt.startDate, timezone);
@@ -607,6 +619,13 @@ const scheduleController = {
         }
       }
       
+      // Obtener todos los servicios únicos necesarios para maxConcurrentAppointments
+      const serviceIds = new Set(requests.map(r => r.serviceId).filter(Boolean));
+      const services = serviceIds.size > 0 
+        ? await serviceModel.find({ _id: { $in: Array.from(serviceIds) } })
+        : [];
+      const servicesMap = new Map(services.map(s => [s._id.toString(), s]));
+      
       const employees = await employeeModel.find({
         _id: { $in: Array.from(allEmployeeIds) }
       });
@@ -687,25 +706,31 @@ const scheduleController = {
           // Empleado específico
           const employee = eligibleEmployees.find(e => e._id.toString() === request.employeeId);
           if (employee) {
+            const service = servicesMap.get(request.serviceId);
+            const maxConcurrent = service?.maxConcurrentAppointments ?? 1;
             const generatedSlots = scheduleService.generateAvailableSlots(
               requestDate,
               organization,
               employee,
               request.duration || 30,
-              dayAppointments
+              dayAppointments,
+              maxConcurrent
             );
             slots = generatedSlots.filter(s => s.available).map(s => s.time);
           }
         } else {
           // Auto-asignar: obtener slots de todos los empleados elegibles
           const timeSet = new Set();
+          const service = servicesMap.get(request.serviceId);
+          const maxConcurrent = service?.maxConcurrentAppointments ?? 1;
           for (const emp of eligibleEmployees) {
             const generatedSlots = scheduleService.generateAvailableSlots(
               requestDate,
               organization,
               emp,
               request.duration || 30,
-              dayAppointments
+              dayAppointments,
+              maxConcurrent
             );
             generatedSlots.filter(s => s.available).forEach(s => timeSet.add(s.time));
           }
