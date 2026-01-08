@@ -94,26 +94,37 @@ const polarService = {
     try {
       if (!signature || !payloadStr) return false;
 
-      // El secret de Polar tiene formato "whsec_..." o "polar_whs_..."
-      // La parte después del prefijo es base64-encoded
-      let actualSecret = secret;
-      let secretBuffer = null;
-      
-      if (secret.startsWith("whsec_")) {
-        const base64Part = secret.slice("whsec_".length);
-        secretBuffer = Buffer.from(base64Part, "base64");
-      } else if (secret.startsWith("polar_whs_")) {
-        const base64Part = secret.slice("polar_whs_".length);
-        secretBuffer = Buffer.from(base64Part, "base64");
-      } else {
-        // Si no tiene prefijo, intentar usar como está y también como base64
-        actualSecret = secret;
-        try {
-          secretBuffer = Buffer.from(secret, "base64");
-        } catch (e) {
-          secretBuffer = null;
-        }
-      }
+      // Polar/Svix secrets suelen venir como "whsec_<base64>".
+      // En algunos casos hemos visto "polar_whs_<...>".
+      // Para evitar ambigüedades (base64 vs raw), probamos múltiples derivaciones.
+      const secretStr = String(secret);
+      const noPrefix = secretStr.startsWith("whsec_")
+        ? secretStr.slice("whsec_".length)
+        : secretStr.startsWith("polar_whs_")
+          ? secretStr.slice("polar_whs_".length)
+          : secretStr;
+
+      const normalizeBase64Url = (s) => {
+        const replaced = s.replace(/-/g, "+").replace(/_/g, "/");
+        const padLen = (4 - (replaced.length % 4)) % 4;
+        return replaced + "=".repeat(padLen);
+      };
+
+      const candidateKeys = [];
+      // 1) Secret tal cual (incluye prefijo si existe)
+      candidateKeys.push({ kind: "raw", key: secretStr });
+      // 2) Secret sin prefijo (string)
+      if (noPrefix !== secretStr) candidateKeys.push({ kind: "noPrefix", key: noPrefix });
+      // 3) Secret sin prefijo decodificado como base64 estándar
+      try {
+        const buf = Buffer.from(noPrefix, "base64");
+        if (buf.length > 0) candidateKeys.push({ kind: "base64(noPrefix)", key: buf });
+      } catch {}
+      // 4) Secret sin prefijo decodificado como base64url
+      try {
+        const buf = Buffer.from(normalizeBase64Url(noPrefix), "base64");
+        if (buf.length > 0) candidateKeys.push({ kind: "base64url(noPrefix)", key: buf });
+      } catch {}
 
       const bodyBuf = Buffer.from(payloadStr, "utf8");
 
@@ -157,60 +168,106 @@ const polarService = {
       // Fallback: por si no pudimos extraer nada, usar el header completo
       if (candidates.length === 0) candidates.push(normalizedSignature);
 
-      // Calcular HMACs con el secret decodificado (Buffer)
-      const secretToUse = secretBuffer || actualSecret;
-      
-      // Calcular HMAC del cuerpo (sin timestamp)
-      const hHex = crypto.createHmac("sha256", secretToUse).update(bodyBuf).digest("hex");
-      const hB64 = crypto.createHmac("sha256", secretToUse).update(bodyBuf).digest("base64");
+      // Intentar con cada derivación de secret hasta que alguna coincida
+      let lastComputed = null;
+      for (const { kind, key } of candidateKeys) {
+        // Calcular HMAC del cuerpo (sin timestamp)
+        const hHex = crypto.createHmac("sha256", key).update(bodyBuf).digest("hex");
+        const hB64 = crypto.createHmac("sha256", key).update(bodyBuf).digest("base64");
 
-      if (debug) {
-        console.log("[polar webhook] computed HMAC (body only):", {
-          secretFormat: secret.startsWith("polar_whs_") ? "polar_whs_" : secret.startsWith("whsec_") ? "whsec_" : "raw",
-          secretIsBuffer: Buffer.isBuffer(secretToUse),
-          payloadLength: payloadStr.length,
-          hHex: hHex,
-          hB64: hB64,
-        });
-      }
+        // Si hay timestamp, probar formato `${timestamp}.${body}`
+        let tHex = null;
+        let tB64 = null;
+        // Probar formato con webhook-id: `${webhook_id}.${timestamp}.${body}` (estilo Svix)
+        let wtHex = null;
+        let wtB64 = null;
 
-      // Si hay timestamp, probar formato `${timestamp}.${body}`
-      let tHex = null;
-      let tB64 = null;
-      // Probar formato con webhook-id: `${webhook_id}.${timestamp}.${body}` (estilo Svix)
-      let wtHex = null;
-      let wtB64 = null;
-      
-      if (timestamp) {
-        const signedPayload = `${timestamp}.${payloadStr}`;
-        tHex = crypto.createHmac("sha256", secretToUse).update(signedPayload, "utf8").digest("hex");
-        tB64 = crypto.createHmac("sha256", secretToUse).update(signedPayload, "utf8").digest("base64");
+        if (timestamp) {
+          const signedPayload = `${timestamp}.${payloadStr}`;
+          tHex = crypto.createHmac("sha256", key).update(signedPayload, "utf8").digest("hex");
+          tB64 = crypto.createHmac("sha256", key).update(signedPayload, "utf8").digest("base64");
+        }
+
+        if (webhookId && timestamp) {
+          const signedPayloadWithId = `${webhookId}.${timestamp}.${payloadStr}`;
+          wtHex = crypto.createHmac("sha256", key).update(signedPayloadWithId, "utf8").digest("hex");
+          wtB64 = crypto.createHmac("sha256", key).update(signedPayloadWithId, "utf8").digest("base64");
+        }
+
+        lastComputed = { kind, hHex, hB64, tHex, tB64, wtHex, wtB64 };
+
         if (debug) {
-          console.log("[polar webhook] computed signedPayload (ts.body):", {
-            ts: timestamp,
+          console.log("[polar webhook] computed digests:", {
+            keyKind: kind,
+            keyIsBuffer: Buffer.isBuffer(key),
             payloadLength: payloadStr.length,
-            signedPayloadPreview: signedPayload.slice(0, 100),
-            tHex: tHex,
-            tB64: tB64,
+            hHex,
+            hB64,
+            tHex,
+            tB64,
+            wtHex,
+            wtB64,
           });
+        }
+
+        // Comparar candidatos con cualquier digest conocido
+        for (const cand of candidates) {
+          const c = cand.trim();
+          if (debug) {
+            console.log("[polar webhook] testing candidate:", {
+              candidate: c.slice(0, 70),
+              candidateLength: c.length,
+              keyKind: kind,
+            });
+          }
+
+          // Base64 exact (case-sensitive)
+          if (hB64 && equalsSafe(hB64, c)) {
+            if (debug) console.log("[polar webhook] ✓ Match:", { keyKind: kind, type: "hB64" });
+            return true;
+          }
+          if (tB64 && equalsSafe(tB64, c)) {
+            if (debug) console.log("[polar webhook] ✓ Match:", { keyKind: kind, type: "tB64" });
+            return true;
+          }
+          if (wtB64 && equalsSafe(wtB64, c)) {
+            if (debug) console.log("[polar webhook] ✓ Match:", { keyKind: kind, type: "wtB64" });
+            return true;
+          }
+
+          // Hex compare (case-insensitive)
+          const cLower = c.toLowerCase();
+          if (equalsSafe(hHex, cLower)) {
+            if (debug) console.log("[polar webhook] ✓ Match:", { keyKind: kind, type: "hHex" });
+            return true;
+          }
+          if (tHex && equalsSafe(tHex, cLower)) {
+            if (debug) console.log("[polar webhook] ✓ Match:", { keyKind: kind, type: "tHex" });
+            return true;
+          }
+          if (wtHex && equalsSafe(wtHex, cLower)) {
+            if (debug) console.log("[polar webhook] ✓ Match:", { keyKind: kind, type: "wtHex" });
+            return true;
+          }
+
+          if (cLower.startsWith("sha256=")) {
+            const val = c.slice("sha256=".length);
+            const vLower = val.toLowerCase();
+            if (equalsSafe(hHex, vLower) || (tHex && equalsSafe(tHex, vLower)) || (wtHex && equalsSafe(wtHex, vLower))) {
+              if (debug) console.log("[polar webhook] ✓ Match:", { keyKind: kind, type: "sha256=prefix" });
+              return true;
+            }
+          }
         }
       }
 
-      if (webhookId && timestamp) {
-        const signedPayloadWithId = `${webhookId}.${timestamp}.${payloadStr}`;
-        wtHex = crypto.createHmac("sha256", secretToUse).update(signedPayloadWithId, "utf8").digest("hex");
-        wtB64 = crypto.createHmac("sha256", secretToUse).update(signedPayloadWithId, "utf8").digest("base64");
-        if (debug) {
-          console.log("[polar webhook] computed signedPayload (id.ts.body):", {
-            webhookId: webhookId,
-            ts: timestamp,
-            payloadLength: payloadStr.length,
-            signedPayloadPreview: signedPayloadWithId.slice(0, 100),
-            wtHex: wtHex,
-            wtB64: wtB64,
-          });
-        }
-      }
+      // Si no coincidió ninguna derivación
+      const hHex = lastComputed?.hHex;
+      const hB64 = lastComputed?.hB64;
+      const tHex = lastComputed?.tHex;
+      const tB64 = lastComputed?.tB64;
+      const wtHex = lastComputed?.wtHex;
+      const wtB64 = lastComputed?.wtB64;
 
       // Comparar candidatos con cualquier digest conocido
       for (const cand of candidates) {
@@ -268,6 +325,7 @@ const polarService = {
         secretProvided: !!secret,
         header: signature,
         candidatesCount: Array.isArray(candidates) ? candidates.length : 0,
+        keyKindsTried: candidateKeys.map((k) => k.kind),
         webhookId: webhookId,
         bodyHex: hHex,
         bodyB64: hB64,
