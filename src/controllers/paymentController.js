@@ -105,34 +105,20 @@ const paymentController = {
   // POST /api/payments/webhook (Polar -> Backend)
   webhook: async (req, res) => {
     try {
-      // Buscar header de firma usando varios nombres posibles
+      // Polar/Svix envía estos headers: webhook-signature, webhook-timestamp, webhook-id.
+      // OJO: en Vercel hay headers internos como x-vercel-proxy-signature-ts que NO son la firma del webhook.
       const headerKeys = Object.keys(req.headers || {});
-      const signatureHeaderCandidates = [
-        "polar-signature",
-        "x-polar-signature",
-        "polar-webhook-signature",
-        "x-polar-webhook-signature",
-        "polar-signature-256",
-        "x-polar-signature-256",
-        "x-hub-signature",
-        "x-hub-signature-256",
-        "signature",
-        "x-signature",
-      ];
-      let signature = null;
-      for (const key of signatureHeaderCandidates) {
-        if (req.headers[key]) { signature = req.headers[key]; break; }
-      }
-      if (!signature) {
-        // Si no encontramos ninguna, intenta localizar cualquier header que contenga "signature"
-        const dynamicKey = headerKeys.find(k => k.includes("signature"));
-        if (dynamicKey) signature = req.headers[dynamicKey];
-      }
-      const payloadRaw = req.body; // Buffer (por express.raw)
-      const payloadStr = Buffer.isBuffer(payloadRaw) ? payloadRaw.toString("utf8") : (typeof payloadRaw === 'string' ? payloadRaw : JSON.stringify(payloadRaw));
+      const signature = req.headers["webhook-signature"] || req.headers["svix-signature"] || null;
 
-      const timestampHeader = req.headers["webhook-timestamp"] || req.headers["x-webhook-timestamp"] || null;
-      const webhookId = req.headers["webhook-id"] || req.headers["x-webhook-id"] || null;
+      // Usar body crudo preservado por express.json verify (ver app.js)
+      // y como fallback soportar Buffer por express.raw si aplica.
+      const payloadRaw = req.rawBody || req.body;
+      const payloadStr = Buffer.isBuffer(payloadRaw)
+        ? payloadRaw.toString("utf8")
+        : (typeof payloadRaw === "string" ? payloadRaw : JSON.stringify(payloadRaw));
+
+      const timestampHeader = req.headers["webhook-timestamp"] || req.headers["svix-timestamp"] || null;
+      const webhookId = req.headers["webhook-id"] || req.headers["svix-id"] || null;
       const valid = polarService.verifyWebhookSignature(signature, timestampHeader, webhookId, payloadStr);
       if (!valid) {
         console.warn("[polar webhook] Invalid signature", {

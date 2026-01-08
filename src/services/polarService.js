@@ -124,39 +124,38 @@ const polarService = {
         if (ab.length !== bb.length) return false;
         return crypto.timingSafeEqual(ab, bb);
       };
-      const debug = String(process.env.POLAR_WEBHOOK_DEBUG || "").toLowerCase() === "true";
 
-      // Polar (observado): headers "webhook-signature" y "webhook-timestamp"
-      // Formatos soportados:
-      // 1) "v1,<digest>" - formato Svix
-      // 2) "Bearer <hex_digest>" - formato Bearer token
-      // 3) digest directo (hex o base64)
-      let observedVersion = null;
-      let observedDigest = null;
-      
-      // Normalizar signature eliminando espacios extra
-      const normalizedSignature = signature.trim();
-      
-      // Detectar formato Bearer
-      if (normalizedSignature.startsWith("Bearer ")) {
-        observedDigest = normalizedSignature.slice("Bearer ".length).trim();
-      } 
-      // Detectar formato "v1,<digest>"
-      else if (normalizedSignature.includes(",")) {
-        const [ver, dig] = normalizedSignature.split(",");
-        observedVersion = ver.trim();
-        observedDigest = dig.trim();
-      }
-      // Si no es ninguno, usar el signature completo como digest
-      else {
-        observedDigest = normalizedSignature;
-      }
+      // Polar/Svix: webhook-signature puede venir como:
+      // - "v1,<base64>"
+      // - "v1,<sig1> v1,<sig2>" (múltiples firmas)
+      // - "Bearer <hex>" (observado en algunos entornos)
+      // - digest directo
+      const normalizedSignature = String(signature).trim();
 
-      // Preparar candidatos de comparación
+      // Preparar candidatos de comparación (solo digests)
       const candidates = [];
-      if (observedDigest) candidates.push(observedDigest);
-      // También considerar el header completo por si acaso
-      candidates.push(normalizedSignature);
+
+      if (normalizedSignature.startsWith("Bearer ")) {
+        candidates.push(normalizedSignature.slice("Bearer ".length).trim());
+      } else {
+        // Soportar múltiples firmas separadas por espacios
+        const parts = normalizedSignature.split(/\s+/).filter(Boolean);
+        for (const part of parts) {
+          if (part.includes(",")) {
+            const [ver, dig] = part.split(",", 2);
+            if ((ver || "").trim() === "v1" && dig) {
+              candidates.push(dig.trim());
+            } else if (dig) {
+              candidates.push(dig.trim());
+            }
+          } else {
+            candidates.push(part.trim());
+          }
+        }
+      }
+
+      // Fallback: por si no pudimos extraer nada, usar el header completo
+      if (candidates.length === 0) candidates.push(normalizedSignature);
 
       // Calcular HMACs con el secret decodificado (Buffer)
       const secretToUse = secretBuffer || actualSecret;

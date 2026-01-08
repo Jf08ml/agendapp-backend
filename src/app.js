@@ -29,7 +29,18 @@ if (process.env.NODE_ENV !== "production") {
     next();
   });
 }
-app.use(express.json({ limit: "10mb" }));
+// Importante: preservar el body crudo para la verificación de firmas de webhooks.
+// Si express.json parsea primero, se pierde el body exacto y la firma nunca va a coincidir.
+app.use(
+  express.json({
+    limit: "10mb",
+    verify: (req, _res, buf) => {
+      if (req.originalUrl === "/api/payments/webhook") {
+        req.rawBody = buf;
+      }
+    },
+  })
+);
 app.use(express.urlencoded({ extended: true }));
 
 // Rutas principales
