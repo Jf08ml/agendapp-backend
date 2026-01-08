@@ -82,12 +82,24 @@ const polarService = {
       if (!signature || !payloadStr) return false;
 
       // El secret de Polar tiene formato "whsec_..." o "polar_whs_..."
-      // Necesitamos extraer la parte después del prefijo
+      // La parte después del prefijo es base64-encoded
       let actualSecret = secret;
+      let secretBuffer = null;
+      
       if (secret.startsWith("whsec_")) {
-        actualSecret = secret.slice("whsec_".length);
+        const base64Part = secret.slice("whsec_".length);
+        secretBuffer = Buffer.from(base64Part, "base64");
       } else if (secret.startsWith("polar_whs_")) {
-        actualSecret = secret.slice("polar_whs_".length);
+        const base64Part = secret.slice("polar_whs_".length);
+        secretBuffer = Buffer.from(base64Part, "base64");
+      } else {
+        // Si no tiene prefijo, intentar usar como está y también como base64
+        actualSecret = secret;
+        try {
+          secretBuffer = Buffer.from(secret, "base64");
+        } catch (e) {
+          secretBuffer = null;
+        }
       }
 
       const bodyBuf = Buffer.from(payloadStr, "utf8");
@@ -133,13 +145,17 @@ const polarService = {
       // También considerar el header completo por si acaso
       candidates.push(normalizedSignature);
 
+      // Calcular HMACs con el secret decodificado (Buffer)
+      const secretToUse = secretBuffer || actualSecret;
+      
       // Calcular HMAC del cuerpo (sin timestamp)
-      const hHex = crypto.createHmac("sha256", actualSecret).update(bodyBuf).digest("hex");
-      const hB64 = crypto.createHmac("sha256", actualSecret).update(bodyBuf).digest("base64");
+      const hHex = crypto.createHmac("sha256", secretToUse).update(bodyBuf).digest("hex");
+      const hB64 = crypto.createHmac("sha256", secretToUse).update(bodyBuf).digest("base64");
 
       if (debug) {
         console.log("[polar webhook] computed HMAC (body only):", {
           secretFormat: secret.startsWith("polar_whs_") ? "polar_whs_" : secret.startsWith("whsec_") ? "whsec_" : "raw",
+          secretIsBuffer: Buffer.isBuffer(secretToUse),
           payloadLength: payloadStr.length,
           hHex: hHex,
           hB64: hB64,
@@ -155,8 +171,8 @@ const polarService = {
       
       if (timestamp) {
         const signedPayload = `${timestamp}.${payloadStr}`;
-        tHex = crypto.createHmac("sha256", actualSecret).update(signedPayload, "utf8").digest("hex");
-        tB64 = crypto.createHmac("sha256", actualSecret).update(signedPayload, "utf8").digest("base64");
+        tHex = crypto.createHmac("sha256", secretToUse).update(signedPayload, "utf8").digest("hex");
+        tB64 = crypto.createHmac("sha256", secretToUse).update(signedPayload, "utf8").digest("base64");
         if (debug) {
           console.log("[polar webhook] computed signedPayload (ts.body):", {
             ts: timestamp,
@@ -170,8 +186,8 @@ const polarService = {
 
       if (webhookId && timestamp) {
         const signedPayloadWithId = `${webhookId}.${timestamp}.${payloadStr}`;
-        wtHex = crypto.createHmac("sha256", actualSecret).update(signedPayloadWithId, "utf8").digest("hex");
-        wtB64 = crypto.createHmac("sha256", actualSecret).update(signedPayloadWithId, "utf8").digest("base64");
+        wtHex = crypto.createHmac("sha256", secretToUse).update(signedPayloadWithId, "utf8").digest("hex");
+        wtB64 = crypto.createHmac("sha256", secretToUse).update(signedPayloadWithId, "utf8").digest("base64");
         if (debug) {
           console.log("[polar webhook] computed signedPayload (id.ts.body):", {
             webhookId: webhookId,
