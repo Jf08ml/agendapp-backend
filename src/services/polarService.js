@@ -72,9 +72,22 @@ const polarService = {
   verifyWebhookSignature: (signature, timestamp, webhookId, payloadStr) => {
     const secret = process.env.POLAR_WEBHOOK_SECRET;
     const allowUnsigned = String(process.env.POLAR_WEBHOOK_ALLOW_UNSIGNED || "").toLowerCase() === "true";
+    const debug = String(process.env.POLAR_WEBHOOK_DEBUG || "").toLowerCase() === "true";
+    
+    // Debug: mostrar el secret (solo primeros caracteres por seguridad)
+    if (debug) {
+      console.log("[polar webhook] Secret info:", {
+        hasSecret: !!secret,
+        secretPrefix: secret ? secret.slice(0, 15) + "..." : "none",
+        secretLength: secret ? secret.length : 0,
+      });
+    }
     
     // Si modo permisivo está activo, permitir cualquier webhook sin verificación
-    if (allowUnsigned) return true;
+    if (allowUnsigned) {
+      console.log("[polar webhook] ✓ Allowing unsigned webhook (POLAR_WEBHOOK_ALLOW_UNSIGNED=true)");
+      return true;
+    }
     
     if (!secret) return true; // Permitir en desarrollo si no está configurado
 
