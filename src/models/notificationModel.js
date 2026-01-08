@@ -28,7 +28,7 @@ const notificationSchema = new mongoose.Schema(
       type: {
         type: String,
         required: true,
-        enum: ["reservation", "membership", "system", "cancellation"],
+        enum: ["reservation", "membership", "system", "cancellation", "confirmation"],
       },
       frontendRoute: {
         type: String,

@@ -119,11 +119,12 @@ export async function waBulkSend({
   messageTpl,
   image,
   dryRun = false,
+  preRendered = false, // 🆕 Si true, items tienen 'message' ya renderizado
 }) {
   const r = await fetch(`${WA_API_URL}/api/bulk/send`, {
     method: "POST",
     headers: headers(),
-    body: JSON.stringify({ clientId, title, items, messageTpl, image, dryRun }),
+    body: JSON.stringify({ clientId, title, items, messageTpl, image, dryRun, preRendered }),
   });
   let data = null;
   try {

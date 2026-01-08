@@ -13,4 +13,7 @@ router.get('/cancel/info', publicCancellationController.getCancellationInfo);
 // POST /api/public/cancel
 router.post('/cancel', publicCancellationController.cancelByToken);
 
+// POST /api/public/cancel/confirm
+router.post('/cancel/confirm', publicCancellationController.confirmByToken);
+
 export default router;

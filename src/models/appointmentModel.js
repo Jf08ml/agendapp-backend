@@ -39,10 +39,24 @@ const appointmentModelSchema = new mongoose.Schema(
       enum: ["pending", "confirmed", "cancelled", "cancelled_by_customer", "cancelled_by_admin"],
       default: "pending",
     },
+    // ✅ Confirmación del cliente (independiente del status administrativo)
+    clientConfirmed: {
+      type: Boolean,
+      default: false,
+    },
+    clientConfirmedAt: {
+      type: Date,
+      required: false,
+    },
     organizationId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Organization",
       required: true,
+    },
+    // 🔗 Enlace público para confirmar o cancelar (mismo token)
+    cancellationLink: {
+      type: String,
+      required: false,
     },
     // 🔐 Campos de cancelación
     cancelTokenHash: {

@@ -62,6 +62,32 @@ const publicCancellationController = {
       return sendResponse(res, 500, null, 'Error al procesar la cancelación');
     }
   },
+
+  /**
+   * POST /api/public/cancel/confirm
+   * Confirma una o varias citas usando el token público
+   * Body: { token, appointmentIds?: string[] }
+   */
+  confirmByToken: async (req, res) => {
+    try {
+      const { token, appointmentIds } = req.body;
+
+      if (!token) {
+        return sendResponse(res, 400, null, 'Token requerido');
+      }
+
+      const result = await cancellationService.confirmByToken(token, appointmentIds);
+
+      if (!result.success) {
+        return sendResponse(res, 400, null, result.message);
+      }
+
+      return sendResponse(res, 200, result.data, result.message);
+    } catch (error) {
+      console.error('[confirmByToken] Error:', error);
+      return sendResponse(res, 500, null, 'Error al confirmar la cita');
+    }
+  },
 };
 
 export default publicCancellationController;

@@ -445,6 +445,7 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
 
   // Obtener organización y servicios para cálculos
   const organization = await organizationService.getOrganizationById(baseAppointment.organizationId);
+  const seriesCancellationLink = generateCancellationLink(cancelToken, organization);
   const servicesDetails = await Promise.all(
     baseAppointment.services.map(serviceId => serviceService.getServiceById(serviceId))
   );
@@ -503,7 +504,8 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
           recurrencePattern: occurrenceNumber === 0 ? recurrencePattern : undefined, // Solo en la primera
           // 🔗 Campos de grupo para cancelación conjunta
           groupId,
-          cancelTokenHash
+          cancelTokenHash,
+          cancellationLink: seriesCancellationLink,
         };
 
         const newAppointment = new appointmentModel(appointmentData);
@@ -562,8 +564,8 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
           // 📨 OPCIÓN 1: Enviar UN mensaje con TODAS las citas de la serie
           console.log('📨 Enviando mensaje con TODAS las citas de la serie...');
           
-          // 🔗 Generar enlace de cancelación único para TODA la serie
-          const cancellationLink = generateCancellationLink(cancelToken, organization);
+          // 🔗 Enlace único para confirmar/cancelar toda la serie
+          const cancellationLink = seriesCancellationLink;
           
           // Agrupar citas por occurrenceNumber para formatear el mensaje
           const citasPorOcurrencia = {};
@@ -653,7 +655,8 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
               { 
                 $set: { 
                   groupId: firstGroupId,
-                  cancelTokenHash: firstCancelTokenHash
+                  cancelTokenHash: firstCancelTokenHash,
+                  cancellationLink: generateCancellationLink(firstCancelToken, organization)
                 } 
               }
             );

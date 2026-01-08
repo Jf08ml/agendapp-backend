@@ -36,6 +36,15 @@ const whatsappTemplateSchema = new mongoose.Schema(
           type: Boolean,
           default: false,
         },
+        // 🆕 Agradecimientos/avisos al cliente
+        clientConfirmationAck: {
+          type: Boolean,
+          default: true,
+        },
+        clientCancellationAck: {
+          type: Boolean,
+          default: true,
+        },
       },
       default: () => ({
         scheduleAppointment: true,
@@ -44,6 +53,8 @@ const whatsappTemplateSchema = new mongoose.Schema(
         reminder: true,
         statusReservationApproved: false,
         statusReservationRejected: false,
+        clientConfirmationAck: true,
+        clientCancellationAck: true,
       }),
     },
     scheduleAppointment: {
@@ -51,6 +62,10 @@ const whatsappTemplateSchema = new mongoose.Schema(
       default: null, // null = usar template por defecto del sistema
     },
     scheduleAppointmentBatch: {
+      type: String,
+      default: null,
+    },
+    recurringAppointmentSeries: {
       type: String,
       default: null,
     },
@@ -63,6 +78,15 @@ const whatsappTemplateSchema = new mongoose.Schema(
       default: null,
     },
     statusReservationRejected: {
+      type: String,
+      default: null,
+    },
+    // 🆕 Nuevas plantillas personalizables
+    clientConfirmationAck: {
+      type: String,
+      default: null,
+    },
+    clientCancellationAck: {
       type: String,
       default: null,
     },

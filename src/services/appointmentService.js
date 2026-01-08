@@ -134,6 +134,9 @@ const appointmentService = {
 
     // 🔗 Generar token de cancelación
     const { token: cancelToken, hash: cancelTokenHash } = cancellationService.generateCancelToken();
+
+    // 🔗 Generar enlace público (usará el mismo token para confirmar/cancelar)
+    const cancellationLink = generateCancellationLink(cancelToken, organization);
     
     console.log('🔑 Token generado para appointment:', {
       token: cancelToken,
@@ -154,6 +157,7 @@ const appointmentService = {
       additionalItems,
       totalPrice, // Asignar precio total calculado
       cancelTokenHash, // 🔗 Guardar hash del token
+      cancellationLink,
     });
 
     // Formatear fecha para la confirmación
@@ -175,9 +179,6 @@ const appointmentService = {
       employee: employee.names,
       phoneNumber: organization.phoneNumber,
     };
-
-    // 🔗 Generar enlace de cancelación
-    const cancellationLink = generateCancellationLink(cancelToken, organization);
 
     // Enviar confirmación por WhatsApp (solo si está habilitado)
     try {
@@ -317,6 +318,11 @@ const appointmentService = {
       console.log('🔑 Token nuevo generado para grupo:', groupId);
     }
 
+    // Enlace único para confirmar/cancelar el grupo (solo si tenemos el token en texto plano)
+    const groupCancellationLink = groupCancelToken
+      ? generateCancellationLink(groupCancelToken, org)
+      : null;
+
     try {
       session.startTransaction();
 
@@ -400,6 +406,7 @@ const appointmentService = {
           totalPrice,
           status: "pending",
           cancelTokenHash: groupCancelTokenHash, // 🔗 Mismo hash para todo el grupo
+          cancellationLink: groupCancellationLink || undefined,
         });
 
         const saved = await doc.save({ session });
@@ -502,17 +509,11 @@ const appointmentService = {
           end: fmtTime(c.end, timezone),
         }));
 
-        // 🔗 Generar enlace de cancelación
-        // Si usamos sharedTokenHash (viene de reservas), NO podemos generar el link
-        // porque no tenemos el token en texto plano. En ese caso, retornamos sin enviar.
-        let groupCancellationLink;
-        if (sharedTokenHash) {
+        // 🔗 Enlace de confirmación/cancelación ya generado (solo disponible si hubo token en texto plano)
+        if (!groupCancellationLink) {
           console.warn('⚠️ Usando token compartido de reservas. No se puede generar link sin token en texto plano.');
           console.warn('⚠️ El mensaje debe enviarse desde donde se tiene el token original.');
           return created.map(c => c.saved);
-        } else {
-          // Tenemos el token en texto plano generado en este batch
-          groupCancellationLink = generateCancellationLink(groupCancelToken, org);
         }
 
         // Cargar cliente/empleado si vinieron como IDs
@@ -1055,6 +1056,8 @@ const appointmentService = {
             ? `${fmtHour.format(start)} – ${fmtHour.format(end)}`
             : `${fmtHour.format(start)}`;
 
+          console.log(`[${org.name}] 🔗 Cita ${appt._id}: cancellationLink=${appt?.cancellationLink?.substring(0, 50)}...`);
+
           if (!byPhone.has(phone)) {
             byPhone.set(phone, {
               phone,
@@ -1064,6 +1067,7 @@ const appointmentService = {
               lastEnd: end || start,
               employees: new Set(),
               apptIds: new Set(),
+              cancellationLink: null,
             });
           }
 
@@ -1073,6 +1077,11 @@ const appointmentService = {
           if ((end || start) > bucket.lastEnd) bucket.lastEnd = end || start;
           if (appt?.employee?.names) bucket.employees.add(appt.employee.names);
           bucket.apptIds.add(String(appt._id));
+          // 🔗 Capturar el primer link de cancelación disponible
+          if (!bucket.cancellationLink && appt?.cancellationLink) {
+            console.log(`[${org.name}] ✅ Asignando cancellationLink al bucket`);
+            bucket.cancellationLink = appt.cancellationLink;
+          }
         }
 
         // Agregar address a las variables
@@ -1108,7 +1117,15 @@ const appointmentService = {
             count: String(countNum),
             cita_pal: isSingle ? "cita" : "citas",
             agendada_pal: isSingle ? "agendada" : "agendadas",
+            manage_block: bucket.cancellationLink
+              ? `${bucket.cancellationLink.replace('source=confirmation', 'source=reminder')}\n\n`
+              : "",
           };
+
+          console.log(`[${org.name}] 📋 Vars para ${bucket.names}:`, {
+            manage_block: vars.manage_block ? "SÍ PRESENTE" : "NO PRESENTE",
+            cancellationLink: bucket.cancellationLink ? "SÍ" : "NO",
+          });
 
           console.log(`[${org.name}] 📱 Item para campaña:`, {
             phone: bucket.phone,
@@ -1137,6 +1154,7 @@ const appointmentService = {
           const messageTpl = templateDoc?.reminder || whatsappTemplates.getDefaultTemplate('reminder');
           
           console.log(`[${org.name}] 📤 Usando template:`, templateDoc?.reminder ? 'PERSONALIZADO' : 'POR DEFECTO');
+          console.log(`[${org.name}] 📄 Template tiene {{manage_block}}:`, messageTpl.includes('{{manage_block}}') ? 'SÍ' : 'NO');
 
           console.log(`[${org.name}] 📤 Enviando campaña:`, {
             clientId: orgClientId,

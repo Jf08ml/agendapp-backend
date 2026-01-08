@@ -2,6 +2,7 @@
 import { waBulkSend, waBulkOptIn } from "./waHttpService.js";
 import appointmentModel from "../models/appointmentModel.js";
 import organizationModel from "../models/organizationModel.js";
+import whatsappTemplates from "../utils/whatsappTemplates.js";
 import {
   hasUsablePhone,
   getBogotaDayWindowUTC,
@@ -119,6 +120,7 @@ export const reminderService = {
             lastEnd: end || start,
             employees: new Set(),
             apptIds: new Set(),
+            actionLink: null,
           });
         }
 
@@ -128,9 +130,12 @@ export const reminderService = {
         if ((end || start) > bucket.lastEnd) bucket.lastEnd = end || start;
         if (a?.employee?.names) bucket.employees.add(a.employee.names);
         bucket.apptIds.add(String(a._id));
+        if (!bucket.actionLink && a?.cancellationLink) {
+          bucket.actionLink = a.cancellationLink;
+        }
       }
 
-      // 4) Construir items de campaña finales
+      // 4) Construir items de campaña finales con templates personalizados
       const items = [];
       const includedIds = [];
 
@@ -162,9 +167,33 @@ export const reminderService = {
           count: String(countNum),
           cita_pal: isSingle ? "cita" : "citas",
           agendada_pal: isSingle ? "agendada" : "agendadas",
+          manage_block: bucket.actionLink
+            ? `${bucket.actionLink}\n\n`
+            : "",
         };
 
-        items.push({ phone: bucket.phone, vars });
+        // 🆕 Renderizar mensaje con template personalizado de la organización
+        let renderedMessage = messageTplReminder; // fallback a default
+        try {
+          renderedMessage = await whatsappTemplates.getRenderedTemplate(
+            _orgId,
+            'reminder',
+            vars
+          );
+        } catch (e) {
+          console.warn(
+            `[${_orgId}] No se pudo obtener template personalizado reminder, usando default:`,
+            e?.message
+          );
+          // Renderizar con template por defecto
+          renderedMessage = messageTplReminder;
+          for (const [key, value] of Object.entries(vars)) {
+            const regex = new RegExp(`{{${key}}}`, 'g');
+            renderedMessage = renderedMessage.replace(regex, value);
+          }
+        }
+
+        items.push({ phone: bucket.phone, message: renderedMessage });
         includedIds.push(...Array.from(bucket.apptIds));
       }
 
@@ -180,7 +209,7 @@ export const reminderService = {
         console.warn(`[${_orgId}] OptIn falló: ${e?.message || e}`);
       }
 
-      // 6) Enviar campaña
+      // 6) Enviar campaña con mensajes pre-renderizados
       const targetDateForTitle = targetDate ? new Date(targetDate) : new Date();
       const titleDateStr = targetDateForTitle.toISOString().slice(0, 10);
 
@@ -190,7 +219,7 @@ export const reminderService = {
         clientId,
         title,
         items,
-        messageTpl: messageTplReminder,
+        preRendered: true, // 🆕 Items tienen 'message' pre-renderizado, no 'vars' + 'messageTpl'
         dryRun,
       });
 

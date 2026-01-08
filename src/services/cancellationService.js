@@ -6,6 +6,7 @@ import Appointment from '../models/appointmentModel.js';
 import organizationService from './organizationService.js';
 import whatsappService from './sendWhatsappService.js';
 import notificationService from './notificationService.js';
+import whatsappTemplates from '../utils/whatsappTemplates.js';
 
 const cancellationService = {
   /**
@@ -53,7 +54,7 @@ const cancellationService = {
         cancelTokenHash: tokenHashSHA256,
         startDate: { $gte: thirtyDaysAgo }
       })
-        .select('service client organizationId startDate endDate status groupId cancelTokenHash')
+        .select('service client organizationId startDate endDate status clientConfirmed groupId cancelTokenHash')
         .populate('service', 'name duration')
         .populate('client', 'name')
         .populate('organizationId', 'name timezone')
@@ -69,7 +70,7 @@ const cancellationService = {
           cancelTokenHash: { $exists: true, $ne: null },
           startDate: { $gte: thirtyDaysAgo }
         })
-          .select('+cancelTokenHash service client organizationId startDate endDate status groupId')
+          .select('+cancelTokenHash service client organizationId startDate endDate status clientConfirmed groupId')
           .populate('service', 'name duration')
           .populate('client', 'name')
           .populate('organizationId', 'name timezone')
@@ -109,7 +110,7 @@ const cancellationService = {
           groupAppointments = await Appointment.find({ 
             groupId: appointment.groupId 
           })
-            .select('service client organizationId startDate endDate status groupId')
+            .select('service client organizationId startDate endDate status clientConfirmed groupId')
             .populate('service', 'name duration')
             .populate('client', 'name')
             .populate('organizationId', 'name timezone')
@@ -158,6 +159,7 @@ const cancellationService = {
             startDate: apt.startDate,
             endDate: apt.endDate,
             status: apt.status,
+            clientConfirmed: apt.clientConfirmed || false,
             isCancelled: apt.status.includes('cancelled'),
             isPast: moment.tz(apt.startDate, timezone).isBefore(now),
           })),
@@ -319,6 +321,255 @@ const cancellationService = {
       return {
         success: false,
         message: 'Error al procesar la cancelación',
+      };
+    }
+  },
+
+  /**
+   * Confirma citas usando el mismo token público (misma ruta /cancel en frontend)
+   * @param {string} token - Token compartido para confirmación/cancelación
+   * @param {Array<string>} appointmentIds - IDs específicos a confirmar (para grupos)
+   */
+  async confirmByToken(token, appointmentIds = null) {
+    try {
+      if (!token) {
+        return {
+          success: false,
+          message: 'Token requerido',
+        };
+      }
+
+      const info = await this.getCancellationInfo(token);
+
+      if (!info.valid) {
+        return {
+          success: false,
+          message: info.reason,
+        };
+      }
+
+      if (info.type !== 'appointment') {
+        return {
+          success: false,
+          message: 'Solo se pueden confirmar citas',
+        };
+      }
+
+      const idsToConfirm = info.isGroup && Array.isArray(appointmentIds) && appointmentIds.length
+        ? appointmentIds
+        : info.appointments.map((apt) => apt.id);
+
+      if (!idsToConfirm.length) {
+        return {
+          success: false,
+          message: 'No hay citas para confirmar',
+        };
+      }
+
+      const appointments = await Appointment.find({ _id: { $in: idsToConfirm } })
+        .populate('client', 'name phoneNumber')
+        .populate('service', 'name')
+        .populate('employee', 'names')
+        .populate('organizationId', 'name timezone');
+
+      const timezone = info.data?.timezone || appointments[0]?.organizationId?.timezone || 'America/Bogota';
+      const now = moment.tz(timezone);
+
+      const results = [];
+      const confirmedIds = [];
+      const confirmedAppointments = [];
+      let clientService;
+
+      for (const appointment of appointments) {
+        const start = moment.tz(appointment.startDate, timezone);
+
+        if (appointment.clientConfirmed) {
+          results.push({ id: appointment._id, status: 'already_confirmed' });
+          continue;
+        }
+
+        if (appointment.status.includes('cancelled')) {
+          results.push({ id: appointment._id, status: 'cannot_confirm', reason: 'Cita cancelada' });
+          continue;
+        }
+
+        if (start.isBefore(now)) {
+          results.push({ id: appointment._id, status: 'cannot_confirm', reason: 'No se pueden confirmar citas pasadas' });
+          continue;
+        }
+
+        // Marcar solo la confirmación del cliente, NO cambiar el status
+        appointment.clientConfirmed = true;
+        appointment.clientConfirmedAt = now.toDate();
+        await appointment.save();
+        confirmedIds.push(appointment._id);
+        results.push({ id: appointment._id, status: 'client_confirmed' });
+
+        // Guardar datos para mensajes/notificaciones
+        confirmedAppointments.push({
+          id: appointment._id,
+          service: appointment.service?.name || 'Servicio',
+          employeeName: appointment.employee?.names || null,
+          employeeId: appointment.employee?._id || null,
+          date: appointment.startDate,
+          organizationTimezone: appointment.organizationId?.timezone || timezone,
+        });
+
+        if (appointment.client) {
+          try {
+            if (!clientService) {
+              const mod = await import('./clientService.js');
+              clientService = mod.default;
+            }
+            await clientService.registerService(appointment.client);
+          } catch (clientError) {
+            console.warn('[confirmByToken] No se pudo registrar servicio en cliente:', clientError.message);
+          }
+        }
+      }
+
+      const successCount = confirmedIds.length;
+      const alreadyConfirmed = results.filter(r => r.status === 'already_confirmed').length;
+
+      // 📱 Enviar mensaje de WhatsApp de agradecimiento al cliente si hubo confirmaciones
+      try {
+        if (successCount > 0) {
+          const first = appointments[0];
+          const organizationId = first.organizationId?._id || first.organizationId;
+          const clientPhone = first.client?.phoneNumber;
+          const clientName = first.client?.name || 'Cliente';
+          const orgTz = first.organizationId?.timezone || timezone;
+
+          if (organizationId && clientPhone) {
+            // Verificar si el envío está habilitado para clientConfirmationAck
+            let isEnabled = true;
+            try {
+              const { default: WhatsappTemplate } = await import('../models/whatsappTemplateModel.js');
+              const tpl = await WhatsappTemplate.findOne({ organizationId });
+              if (tpl && tpl.enabledTypes && typeof tpl.enabledTypes.clientConfirmationAck === 'boolean') {
+                isEnabled = tpl.enabledTypes.clientConfirmationAck;
+              }
+            } catch (e) {
+              // Si falla la lectura, asumir habilitado para no bloquear el flujo
+              isEnabled = true;
+            }
+
+            if (!isEnabled) {
+              console.log('⏭️  Envío de clientConfirmationAck deshabilitado para la organización', organizationId.toString());
+            } else {
+            // Construir appointments_list para el template
+            const appointments_list = confirmedAppointments
+              .map((apt, idx) => {
+                const formattedDate = moment(apt.date).tz(orgTz).format('DD/MM/YYYY [a las] hh:mm A');
+                return `  ${idx + 1}. ${apt.service} – ${formattedDate}`;
+              })
+              .join('\n');
+
+            const message = await whatsappTemplates.getRenderedTemplate(
+              organizationId.toString(),
+              'clientConfirmationAck',
+              {
+                names: clientName,
+                appointments_list,
+              }
+            );
+
+            await whatsappService.sendMessage(
+              organizationId.toString(),
+              clientPhone,
+              message
+            );
+            }
+          }
+        }
+      } catch (whatsappError) {
+        console.error('❌ Error al enviar WhatsApp de confirmación:', whatsappError);
+      }
+
+      // 🔔 Notificaciones para administrador y empleados (si aplica)
+      try {
+        if (successCount > 0) {
+          const first = appointments[0];
+          const organizationId = first.organizationId?._id || first.organizationId;
+          const clientName = first.client?.name || 'Cliente';
+          const orgTz = first.organizationId?.timezone || timezone;
+
+          if (organizationId) {
+            let adminMessage = '';
+            if (confirmedAppointments.length === 1) {
+              const apt = confirmedAppointments[0];
+              const formattedDate = moment(apt.date).tz(orgTz).format('DD/MM/YYYY [a las] hh:mm A');
+              adminMessage = `${clientName} confirmó su asistencia a ${apt.service} para el ${formattedDate}`;
+            } else {
+              adminMessage = `${clientName} confirmó su asistencia en ${confirmedAppointments.length} citas:\n`;
+              confirmedAppointments.forEach((apt, index) => {
+                const formattedDate = moment(apt.date).tz(orgTz).format('DD/MM/YYYY');
+                adminMessage += `${index + 1}. ${apt.service} - ${formattedDate}\n`;
+              });
+            }
+
+            await notificationService.createNotification({
+              title: confirmedAppointments.length === 1 ? '✅ Asistencia confirmada' : `✅ ${confirmedAppointments.length} asistencias confirmadas`,
+              message: adminMessage,
+              organizationId: organizationId,
+              employeeId: null,
+              type: 'confirmation',
+              status: 'unread',
+              frontendRoute: '/manage-agenda',
+            });
+
+            // Notificar empleados involucrados (si hay)
+            const uniqueEmployeeIds = [...new Set(confirmedAppointments.map(a => a.employeeId).filter(Boolean))];
+            for (const employeeId of uniqueEmployeeIds) {
+              const employeeAppointments = confirmedAppointments.filter(a => a.employeeId?.toString() === employeeId.toString());
+              let employeeMessage = '';
+              if (employeeAppointments.length === 1) {
+                const apt = employeeAppointments[0];
+                const formattedDate = moment(apt.date).tz(orgTz).format('DD/MM/YYYY [a las] hh:mm A');
+                employeeMessage = `${clientName} confirmó su asistencia a ${apt.service} para el ${formattedDate}`;
+              } else {
+                employeeMessage = `${clientName} confirmó su asistencia en ${employeeAppointments.length} de tus citas:\n`;
+                employeeAppointments.forEach((apt, index) => {
+                  const formattedDate = moment(apt.date).tz(orgTz).format('DD/MM/YYYY');
+                  employeeMessage += `${index + 1}. ${apt.service} - ${formattedDate}\n`;
+                });
+              }
+
+              await notificationService.createNotification({
+                title: employeeAppointments.length === 1 ? '✅ Asistencia confirmada' : `✅ ${employeeAppointments.length} asistencias confirmadas`,
+                message: employeeMessage,
+                organizationId: organizationId,
+                employeeId: employeeId,
+                type: 'confirmation',
+                status: 'unread',
+                frontendRoute: '/manage-agenda',
+              });
+            }
+          }
+        }
+      } catch (notificationError) {
+        console.error('❌ Error al crear notificación de confirmación:', notificationError);
+      }
+
+      return {
+        success: successCount > 0,
+        message:
+          successCount > 0
+            ? `${successCount} cita(s) confirmada(s)${alreadyConfirmed ? `, ${alreadyConfirmed} ya estaban confirmadas` : ''}`
+            : alreadyConfirmed > 0
+              ? 'Las citas ya estaban confirmadas'
+              : 'No se pudieron confirmar las citas',
+        data: {
+          results,
+          successCount,
+          alreadyConfirmed,
+        },
+      };
+    } catch (error) {
+      console.error('[confirmByToken] Error:', error);
+      return {
+        success: false,
+        message: 'Error al confirmar las citas',
       };
     }
   },
@@ -554,35 +805,48 @@ const cancellationService = {
       
       if (successCount > 0 && organizationId && clientPhone) {
         try {
-          const timezone = cancelledAppointments[0]?.organizationTimezone || 'America/Bogota';
-          
-          console.log('🔧 Construyendo mensaje para cliente...');
-          
-          // Construir mensaje de confirmación simplificado
-          let message = `Hola ${clientName},\n\n`;
-          message += `Tu${cancelledAppointments.length > 1 ? 's' : ''} cita${cancelledAppointments.length > 1 ? 's han' : ' ha'} sido *cancelada${cancelledAppointments.length > 1 ? 's' : ''}* exitosamente:\n\n`;
-          
-          cancelledAppointments.forEach((apt, index) => {
-            const formattedDate = moment(apt.date).tz(timezone).format('DD/MM/YYYY [a las] hh:mm A');
-            if (cancelledAppointments.length > 1) {
-              message += `${index + 1}. ${apt.service} - ${formattedDate}\n`;
-            } else {
-              message += `📅 ${formattedDate}\n💼 ${apt.service}\n`;
-            }
-          });
-          
-          message += `\nGracias por avisarnos. ¡Esperamos verte pronto! 😊`;
+          const tz = cancelledAppointments[0]?.organizationTimezone || 'America/Bogota';
 
-          console.log('📤 Enviando mensaje a:', clientPhone);
-          console.log('📄 Mensaje:', message);
-          
-          await whatsappService.sendMessage(
-            organizationId.toString(),
-            clientPhone,
-            message
-          );
-          
-          console.log(`✅ Mensaje de confirmación enviado a ${clientPhone}`);
+          // Construir appointments_list para el template
+          const appointments_list = cancelledAppointments
+            .map((apt, index) => {
+              const formattedDate = moment(apt.date).tz(tz).format('DD/MM/YYYY [a las] hh:mm A');
+              return `  ${index + 1}. ${apt.service} – ${formattedDate}`;
+            })
+            .join('\n');
+
+          // Verificar si el envío está habilitado para clientCancellationAck
+          let isEnabled = true;
+          try {
+            const { default: WhatsappTemplate } = await import('../models/whatsappTemplateModel.js');
+            const tpl = await WhatsappTemplate.findOne({ organizationId });
+            if (tpl && tpl.enabledTypes && typeof tpl.enabledTypes.clientCancellationAck === 'boolean') {
+              isEnabled = tpl.enabledTypes.clientCancellationAck;
+            }
+          } catch (e) {
+            isEnabled = true;
+          }
+
+          if (!isEnabled) {
+            console.log('⏭️  Envío de clientCancellationAck deshabilitado para la organización', organizationId.toString());
+          } else {
+            const message = await whatsappTemplates.getRenderedTemplate(
+              organizationId.toString(),
+              'clientCancellationAck',
+              {
+                names: clientName,
+                appointments_list,
+              }
+            );
+
+            await whatsappService.sendMessage(
+              organizationId.toString(),
+              clientPhone,
+              message
+            );
+          }
+
+          console.log(`✅ Mensaje de cancelación enviado a ${clientPhone}`);
         } catch (whatsappError) {
           console.error('❌ Error al enviar mensaje de WhatsApp:', whatsappError);
           console.error('Stack:', whatsappError.stack);

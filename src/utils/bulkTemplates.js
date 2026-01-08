@@ -13,6 +13,8 @@ Recuerda que tienes {{count}} {{cita_pal}} {{agendada_pal}}.
 
 👩‍💼 Te atenderá: {{employee}}
 
+{{manage_block}}
+
 Por favor confirma tu asistencia *respondiendo a este chat de WhatsApp*.
 Si no puedes asistir, avísanos con anticipación para reprogramar tu turno.
 

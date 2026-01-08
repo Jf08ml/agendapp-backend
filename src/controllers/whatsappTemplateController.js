@@ -31,6 +31,8 @@ const whatsappTemplateController = {
         reminder: whatsappTemplates.getDefaultTemplate('reminder'),
         statusReservationApproved: whatsappTemplates.getDefaultTemplate('statusReservationApproved'),
         statusReservationRejected: whatsappTemplates.getDefaultTemplate('statusReservationRejected'),
+        clientConfirmationAck: whatsappTemplates.getDefaultTemplate('clientConfirmationAck'),
+        clientCancellationAck: whatsappTemplates.getDefaultTemplate('clientCancellationAck'),
       };
 
       // Plantillas personalizadas (si existen)
@@ -68,6 +70,16 @@ const whatsappTemplateController = {
           isCustom: !!customTemplates.statusReservationRejected,
           variables: ['{{names}}', '{{date}}', '{{organization}}'],
         },
+        clientConfirmationAck: {
+          content: customTemplates.clientConfirmationAck || defaultTemplates.clientConfirmationAck,
+          isCustom: !!customTemplates.clientConfirmationAck,
+          variables: ['{{names}}', '{{appointments_list}}'],
+        },
+        clientCancellationAck: {
+          content: customTemplates.clientCancellationAck || defaultTemplates.clientCancellationAck,
+          isCustom: !!customTemplates.clientCancellationAck,
+          variables: ['{{names}}', '{{appointments_list}}'],
+        },
       };
 
       // También enviar los templates por defecto para el botón "Restaurar"
@@ -97,6 +109,8 @@ const whatsappTemplateController = {
         'reminder',
         'statusReservationApproved',
         'statusReservationRejected',
+        'clientConfirmationAck',
+        'clientCancellationAck',
       ];
 
       if (!validTypes.includes(templateType)) {
@@ -158,6 +172,8 @@ const whatsappTemplateController = {
         'reminder',
         'statusReservationApproved',
         'statusReservationRejected',
+        'clientConfirmationAck',
+        'clientCancellationAck',
       ];
 
       if (!validTypes.includes(templateType)) {
@@ -215,6 +231,8 @@ const whatsappTemplateController = {
         'reminder',
         'statusReservationApproved',
         'statusReservationRejected',
+        'clientConfirmationAck',
+        'clientCancellationAck',
       ];
 
       for (const key in templates) {
@@ -282,6 +300,7 @@ const whatsappTemplateController = {
         count: "2",
         cita_pal: "citas",
         agendada_pal: "agendadas",
+        appointments_list: `  1. Corte de cabello – 15/01/2026 a las 03:00 PM\n  2. Tinte – 22/01/2026 a las 03:00 PM`,
       };
 
       // Renderizar la plantilla con los datos de ejemplo
@@ -321,6 +340,8 @@ const whatsappTemplateController = {
           reminder: true,
           statusReservationApproved: false,
           statusReservationRejected: false,
+          clientConfirmationAck: true,
+          clientCancellationAck: true,
         };
         return sendResponse(res, 200, defaults, "Configuración por defecto");
       }
@@ -332,6 +353,8 @@ const whatsappTemplateController = {
         reminder: true,
         statusReservationApproved: false,
         statusReservationRejected: false,
+        clientConfirmationAck: true,
+        clientCancellationAck: true,
       };
 
       sendResponse(res, 200, settings, "Configuración obtenida correctamente");
@@ -361,6 +384,9 @@ const whatsappTemplateController = {
         'reminder',
         'statusReservationApproved',
         'statusReservationRejected',
+        // 🆕 Nuevos tipos togglables
+        'clientConfirmationAck',
+        'clientCancellationAck',
       ];
 
       for (const key of Object.keys(enabledTypes)) {

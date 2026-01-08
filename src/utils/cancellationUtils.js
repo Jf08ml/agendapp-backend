@@ -2,9 +2,10 @@
  * Genera el link de cancelación pública para enviar al cliente
  * @param {string} token - Token de cancelación
  * @param {Object} organization - Objeto de organización con domains
+ * @param {string} source - Origen del enlace ('confirmation' o 'reminder')
  * @returns {string} URL completa de cancelación
  */
-export const generateCancellationLink = (token, organization) => {
+export const generateCancellationLink = (token, organization, source = 'confirmation') => {
   // Usar el dominio de la organización si existe, o el default del environment
   let baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
   
@@ -16,7 +17,8 @@ export const generateCancellationLink = (token, organization) => {
     baseUrl = `${protocol}://${domain}`;
   }
   
-  return `${baseUrl}/cancel?token=${token}`;
+  // Agregar source para diferenciar entre confirmación y recordatorio
+  return `${baseUrl}/cancel?token=${token}&source=${source}`;
 };
 
 export default {

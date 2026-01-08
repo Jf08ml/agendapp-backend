@@ -78,6 +78,8 @@ Recuerda que tienes {{count}} {{cita_pal}} {{agendada_pal}}.
 
 👩‍💼 Te atenderá: {{employee}}
 
+{{manage_block}}
+
 Por favor confirma tu asistencia *respondiendo a este chat de WhatsApp*.
 Si no puedes asistir, avísanos con anticipación para reprogramar tu turno.
 
@@ -104,6 +106,24 @@ Lamentamos informarte que tu reserva para el *{{date}}* en *{{organization}}* no
 Si deseas reprogramar o tienes alguna pregunta, simplemente responde a este mensaje de WhatsApp y con gusto te ayudaremos.
 
 Gracias por tu comprensión. ¡Esperamos atenderte pronto! 😊`,
+
+  // 🆕 Agradecimiento por confirmar asistencia
+  clientConfirmationAck: `¡Hola, {{names}}! ✅
+
+Gracias por confirmar tu asistencia.
+
+Estas son tus cita(s):
+{{appointments_list}}
+
+Si necesitas cambiar o cancelar, puedes usar el mismo enlace que recibiste o responder este mensaje. ¡Nos vemos pronto! 😊`,
+
+  // 🆕 Aviso de cancelación al cliente
+  clientCancellationAck: `¡Hola, {{names}}! ❌
+
+Hemos registrado la cancelación de tu(s) cita(s):
+{{appointments_list}}
+
+Gracias por avisarnos. Si deseas reprogramar, responde a este mensaje y te ayudamos con un nuevo horario.`,
     };
 
     return templates[templateType] || '';
