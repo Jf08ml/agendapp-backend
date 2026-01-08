@@ -2,7 +2,12 @@ import organizationModel from "../models/organizationModel.js";
 
 export async function organizationResolver(req, res, next) {
   // Saltar el middleware para rutas que no necesitan organización
-  if (req.path.startsWith("/cron/")) {
+  if (
+    req.path.startsWith("/cron/") ||
+    req.path.startsWith("/payments") || // webhooks y pagos públicos no dependen de dominio
+    req.path.startsWith("/billing/public") ||
+    req.path.startsWith("/public")
+  ) {
     return next();
   }
 

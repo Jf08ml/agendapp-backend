@@ -22,6 +22,16 @@ const planController = {
     }
   },
 
+  // Obtener planes públicos
+  getPublicPlans: async (req, res) => {
+    try {
+      const plans = await planService.getPublicPlans();
+      sendResponse(res, 200, plans, "Planes públicos obtenidos exitosamente");
+    } catch (error) {
+      sendResponse(res, 500, null, error.message);
+    }
+  },
+
   // Obtener un plan por ID
   getPlanById: async (req, res) => {
     const { id } = req.params;

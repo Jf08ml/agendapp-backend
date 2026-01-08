@@ -21,7 +21,26 @@ webPush.setVapidDetails(
 
 app.use(cors({ origin: "*" }));
 app.use(morgan("dev"));
-app.use(express.json({ limit: "10mb" }));
+// Evitar respuestas 304 en desarrollo para que el frontend siempre reciba datos frescos
+if (process.env.NODE_ENV !== "production") {
+  app.disable("etag");
+  app.use((req, res, next) => {
+    res.setHeader("Cache-Control", "no-store");
+    next();
+  });
+}
+// Importante: preservar el body crudo para la verificación de firmas de webhooks.
+// Si express.json parsea primero, se pierde el body exacto y la firma nunca va a coincidir.
+app.use(
+  express.json({
+    limit: "10mb",
+    verify: (req, _res, buf) => {
+      if (req.originalUrl === "/api/payments/webhook") {
+        req.rawBody = buf;
+      }
+    },
+  })
+);
 app.use(express.urlencoded({ extended: true }));
 
 // Rutas principales

@@ -18,12 +18,14 @@ import cronRoutes from "./cronRoutes";
 import reservationRoutes from "./reservation";
 import notificationRoutes from "./notification";
 import planRoutes from "./planRoutes";
+import paymentRoutes from "./paymentRoutes.js";
 import waRoutes from "./waRoutes";
 import reminderRoutes from "./reminderRoutes";
 import membershipRoutes from "./membershipRoutes";
 import scheduleRoutes from "./scheduleRoutes.js";
 import debugRoutes from "./debugRoutes.js";
 import publicRoutes from "./publicRoutes.js";
+import membershipBillingRoutes from "./membershipBillingRoutes.js";
 import { organizationResolver } from "../middleware/organizationResolver";
 
 const router = Router();
@@ -107,11 +109,13 @@ router.use("/whatsapp-templates", whatsappTemplateRoutes);
 router.use(cronRoutes);
 router.use(notificationRoutes);
 router.use("/plans", planRoutes);
+router.use("/payments", paymentRoutes);
 router.use("/memberships", membershipRoutes);
 router.use(waRoutes);
 router.use(reminderRoutes);
 router.use("/schedule", scheduleRoutes);
 router.use("/debug", debugRoutes);
 router.use("/public", publicRoutes);
+router.use("/billing", membershipBillingRoutes);
 
 export default router;

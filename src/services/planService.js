@@ -8,11 +8,13 @@ const planService = {
       slug,
       displayName,
       price,
+      currency,
       billingCycle,
       characteristics,
       domainType,
       limits,
       description,
+      payment,
     } = planData;
 
     const newPlan = new Plan({
@@ -20,11 +22,13 @@ const planService = {
       slug: slug || name.toLowerCase().replace(/\s+/g, "-"),
       displayName: displayName || name,
       price,
+      currency: currency || "USD",
       billingCycle: billingCycle || "monthly",
       characteristics,
       domainType,
       limits,
       description,
+      payment,
     });
 
     return await newPlan.save();
@@ -33,6 +37,26 @@ const planService = {
   // Obtener todos los planes
   getPlans: async () => {
     return await Plan.find({ isActive: true });
+  },
+
+  // Obtener planes para público (oculta campos internos)
+  getPublicPlans: async () => {
+    const plans = await Plan.find({ isActive: true }).lean();
+    // Filtrar sólo lo necesario para mostrar
+    return plans.map((p) => ({
+      _id: p._id,
+      name: p.name,
+      slug: p.slug,
+      displayName: p.displayName,
+      billingCycle: p.billingCycle,
+      domainType: p.domainType,
+      characteristics: p.characteristics,
+      limits: p.limits,
+      // precio público
+      price: p.price,
+      currency: p.currency,
+      payment: p.payment,
+    }));
   },
 
   // Obtener todos los planes incluyendo inactivos (admin)
