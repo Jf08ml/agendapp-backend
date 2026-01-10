@@ -26,6 +26,7 @@ import scheduleRoutes from "./scheduleRoutes.js";
 import debugRoutes from "./debugRoutes.js";
 import publicRoutes from "./publicRoutes.js";
 import membershipBillingRoutes from "./membershipBillingRoutes.js";
+import campaignRoutes from "./campaignRoutes.js";
 import { organizationResolver } from "../middleware/organizationResolver";
 
 const router = Router();
@@ -117,5 +118,6 @@ router.use("/schedule", scheduleRoutes);
 router.use("/debug", debugRoutes);
 router.use("/public", publicRoutes);
 router.use("/billing", membershipBillingRoutes);
+router.use(campaignRoutes); // Campaign routes
 
 export default router;
