@@ -58,12 +58,20 @@ const membershipController = {
     try {
       const { membershipId } = req.params;
       const { paymentAmount } = req.body;
+      const amount = (() => {
+        if (typeof paymentAmount === "number") return paymentAmount;
+        if (typeof paymentAmount === "string") {
+          const cleaned = paymentAmount.replace(/[^0-9.-]/g, "");
+          return Number(cleaned);
+        }
+        return Number(paymentAmount);
+      })();
 
-      if (!paymentAmount || paymentAmount <= 0) {
+      if (!Number.isFinite(amount) || amount <= 0) {
         return sendResponse(res, 400, null, "Monto de pago inválido");
       }
 
-      const membership = await membershipService.renewMembership(membershipId, paymentAmount);
+      const membership = await membershipService.renewMembership(membershipId, amount);
 
       return sendResponse(res, 200, membership, "Membresía renovada exitosamente");
     } catch (error) {
