@@ -21,8 +21,8 @@ const clientService = {
     const newClient = new Client({
       name,
       email,
-      phoneNumber, // Mantener original para retrocompatibilidad
-      phone_e164: phoneResult.phone_e164,
+      phoneNumber: phoneResult.phone_national_clean, // 🆕 Solo dígitos locales, sin espacios ni guiones
+      phone_e164: phoneResult.phone_e164, // Con código de país en formato E.164
       phone_country: phoneResult.phone_country,
       organizationId,
       birthDate,
@@ -107,19 +107,31 @@ const clientService = {
       throw new Error("Cliente no encontrado");
     }
 
+    const org = await Organization.findById(client.organizationId).select('default_country');
+    const defaultCountry = org?.default_country || 'CO';
+
+    // 🔄 MIGRACIÓN AUTOMÁTICA: Si el cliente no tiene phone_e164, normalizar el número actual
+    if (!client.phone_e164 && client.phoneNumber) {
+      console.log(`[updateClient] Migrando cliente ${id} al nuevo schema de teléfonos`);
+      const phoneResult = normalizePhoneNumber(client.phoneNumber, defaultCountry);
+      if (phoneResult.isValid) {
+        client.phoneNumber = phoneResult.phone_national_clean;
+        client.phone_e164 = phoneResult.phone_e164;
+        client.phone_country = phoneResult.phone_country;
+        console.log(`[updateClient] Migración exitosa: ${client.phoneNumber} -> ${client.phone_e164}`);
+      }
+    }
+
     // 🌍 Si se actualiza el teléfono, normalizar a E.164
     if (phoneNumber !== undefined && phoneNumber !== client.phoneNumber) {
-      const org = await Organization.findById(client.organizationId).select('default_country');
-      const defaultCountry = org?.default_country || 'CO';
-      
       const phoneResult = normalizePhoneNumber(phoneNumber, defaultCountry);
       if (!phoneResult.isValid) {
         throw new Error(phoneResult.error);
       }
 
       // Actualizar campos de teléfono (índice único previene duplicados)
-      client.phoneNumber = phoneNumber;
-      client.phone_e164 = phoneResult.phone_e164;
+      client.phoneNumber = phoneResult.phone_national_clean; // 🆕 Solo dígitos locales
+      client.phone_e164 = phoneResult.phone_e164; // Con código de país
       client.phone_country = phoneResult.phone_country;
     }
 
@@ -170,6 +182,89 @@ const clientService = {
       throw new Error("Cliente no encontrado");
     }
     return await client.incrementReferrals();
+  },
+
+  // Carga masiva de clientes desde Excel
+  bulkCreateClients: async (clientsData, organizationId) => {
+    const results = {
+      success: [],
+      errors: [],
+      totalProcessed: 0,
+      totalSuccess: 0,
+      totalErrors: 0
+    };
+
+    // Obtener país por defecto de la organización
+    const org = await Organization.findById(organizationId).select('default_country');
+    const defaultCountry = org?.default_country || 'CO';
+
+    console.log(`[bulkCreateClients] Procesando ${clientsData.length} clientes para organización ${organizationId}, país: ${defaultCountry}`);
+
+    for (let i = 0; i < clientsData.length; i++) {
+      const row = clientsData[i];
+      results.totalProcessed++;
+
+      try {
+        // Validar datos requeridos
+        if (!row.name || !row.phoneNumber) {
+          throw new Error('Nombre y teléfono son obligatorios');
+        }
+
+        // Limpiar el número de teléfono antes de normalizar
+        const cleanPhoneNumber = String(row.phoneNumber).trim();
+        
+        console.log(`[bulkCreateClients] Fila ${i + 2}: Procesando ${row.name}, teléfono: ${cleanPhoneNumber}`);
+
+        // Normalizar teléfono a E.164
+        const phoneResult = normalizePhoneNumber(cleanPhoneNumber, defaultCountry);
+        
+        console.log(`[bulkCreateClients] Fila ${i + 2}: Resultado normalización:`, phoneResult);
+        
+        if (!phoneResult.isValid) {
+          throw new Error(phoneResult.error || 'Número de teléfono inválido');
+        }
+
+        // Crear cliente
+        const newClient = new Client({
+          name: row.name.trim(),
+          email: row.email ? row.email.trim() : undefined,
+          phoneNumber: phoneResult.phone_national_clean, // 🆕 Solo dígitos locales
+          phone_e164: phoneResult.phone_e164, // Con código de país
+          phone_country: phoneResult.phone_country,
+          organizationId,
+          birthDate: row.birthDate || null,
+        });
+
+        const savedClient = await newClient.save();
+        results.success.push({
+          row: i + 2, // +2 porque la primera fila es encabezado y Excel empieza en 1
+          name: savedClient.name,
+          phoneNumber: savedClient.phoneNumber
+        });
+        results.totalSuccess++;
+
+      } catch (error) {
+        let errorMessage = error.message;
+        
+        // Mejorar mensaje de error de duplicado
+        if (error.code === 11000) {
+          errorMessage = 'Cliente duplicado - Ya existe con este número de teléfono';
+        }
+
+        console.error(`[bulkCreateClients] Fila ${i + 2}: Error - ${errorMessage}`);
+
+        results.errors.push({
+          row: i + 2,
+          name: row.name || 'Sin nombre',
+          phoneNumber: row.phoneNumber || 'Sin teléfono',
+          error: errorMessage
+        });
+        results.totalErrors++;
+      }
+    }
+
+    console.log(`[bulkCreateClients] Completado: ${results.totalSuccess} éxitos, ${results.totalErrors} errores`);
+    return results;
   },
 };
 

@@ -24,4 +24,7 @@ router.put("/services/:id", serviceController.updateService);
 // Ruta para eliminar un servicio específico por ID
 router.delete("/services/:id", serviceController.deleteService);
 
+// Ruta para carga masiva de servicios desde Excel
+router.post("/services/bulk-upload", serviceController.bulkUploadServices);
+
 export default router;

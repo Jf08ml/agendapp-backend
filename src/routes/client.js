@@ -45,4 +45,7 @@ router.post(
   clientController.registerReferral
 );
 
+// Ruta para carga masiva de clientes desde Excel
+router.post("/clients/bulk-upload", clientController.bulkUploadClients);
+
 export default router;

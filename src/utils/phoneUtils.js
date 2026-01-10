@@ -13,8 +13,12 @@ export function normalizePhoneNumber(phone, defaultCountry = 'CO') {
   }
 
   try {
+    console.log(`[normalizePhoneNumber] Input: "${phone}", País: ${defaultCountry}`);
+    
     // Limpiar caracteres no numéricos excepto + al inicio
-    let cleanPhone = phone.replace(/[^\d+]/g, '');
+    let cleanPhone = String(phone).replace(/[^\d+]/g, '');
+    
+    console.log(`[normalizePhoneNumber] Limpiado: "${cleanPhone}"`);
     
     // 🇸🇻 VALIDACIÓN TEMPRANA para El Salvador (7-8 dígitos)
     if (defaultCountry === 'SV') {
@@ -27,6 +31,7 @@ export function normalizePhoneNumber(phone, defaultCountry = 'CO') {
           phone_e164: phoneE164,
           phone_country: 'SV',
           phone_national: digitsOnly,
+          phone_national_clean: digitsOnly,
           calling_code: '503',
           isValid: true,
           error: null
@@ -42,6 +47,7 @@ export function normalizePhoneNumber(phone, defaultCountry = 'CO') {
             phone_e164: phoneE164,
             phone_country: 'SV',
             phone_national: nationalNumber,
+            phone_national_clean: nationalNumber,
             calling_code: '503',
             isValid: true,
             error: null
@@ -57,31 +63,52 @@ export function normalizePhoneNumber(phone, defaultCountry = 'CO') {
     
     // Si no tiene + y no parece internacional, añadir país por defecto
     if (!cleanPhone.startsWith('+') && !looksLikeInternational(cleanPhone)) {
-      cleanPhone = `+${getCountryCode(defaultCountry)}${cleanPhone}`;
+      const countryCode = getCountryCode(defaultCountry);
+      cleanPhone = `+${countryCode}${cleanPhone}`;
+      console.log(`[normalizePhoneNumber] Agregado código país +${countryCode}: "${cleanPhone}"`);
     }
+
+    console.log(`[normalizePhoneNumber] Validando: "${cleanPhone}" con país ${defaultCountry}`);
 
     // Validar con libphonenumber-js
     const isValid = isValidPhoneNumber(cleanPhone, defaultCountry);
     
+    console.log(`[normalizePhoneNumber] Validación resultado: ${isValid}`);
+    
     if (!isValid) {
+      // Intentar parsear de todas formas para obtener más información
+      try {
+        const parsed = parsePhoneNumber(cleanPhone, defaultCountry);
+        console.log('[normalizePhoneNumber] Parseado (aunque inválido):', parsed);
+      } catch (e) {
+        console.log('[normalizePhoneNumber] No se pudo parsear:', e.message);
+      }
+      
       return { 
         phone_e164: null, 
         phone_country: null, 
         isValid: false, 
-        error: 'Número de teléfono inválido. Verifica el prefijo y la longitud.' 
+        error: `Número de teléfono inválido para ${defaultCountry}. Verifica el prefijo y la longitud.` 
       };
     }
 
     const phoneNumber = parsePhoneNumber(cleanPhone, defaultCountry);
     
-    return {
+    // Obtener el número nacional sin formato (solo dígitos)
+    const nationalNumberClean = phoneNumber.nationalNumber;
+    
+    const result = {
       phone_e164: phoneNumber.format('E.164'),
       phone_country: phoneNumber.country,
       phone_national: phoneNumber.formatNational(),
+      phone_national_clean: nationalNumberClean, // 🆕 Solo dígitos, sin espacios ni guiones
       calling_code: phoneNumber.countryCallingCode,
       isValid: true,
       error: null
     };
+    
+    console.log('[normalizePhoneNumber] Éxito:', result);
+    return result;
 
   } catch (error) {
     console.error('[normalizePhoneNumber] Error:', error.message, 'Input:', phone);
@@ -96,6 +123,7 @@ export function normalizePhoneNumber(phone, defaultCountry = 'CO') {
           phone_e164: phoneE164,
           phone_country: 'SV',
           phone_national: digitsOnly,
+          phone_national_clean: digitsOnly,
           calling_code: '503',
           isValid: true,
           error: null
@@ -109,6 +137,7 @@ export function normalizePhoneNumber(phone, defaultCountry = 'CO') {
           phone_e164: phoneE164,
           phone_country: 'SV',
           phone_national: nationalNumber,
+          phone_national_clean: nationalNumber,
           calling_code: '503',
           isValid: true,
           error: null

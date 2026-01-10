@@ -151,6 +151,32 @@ const clientController = {
       sendResponse(res, 404, null, error.message);
     }
   },
+
+  // Controlador para carga masiva de clientes desde Excel
+  bulkUploadClients: async (req, res) => {
+    try {
+      const { clients, organizationId } = req.body;
+
+      if (!clients || !Array.isArray(clients) || clients.length === 0) {
+        return sendResponse(res, 400, null, "No se proporcionaron datos de clientes");
+      }
+
+      if (!organizationId) {
+        return sendResponse(res, 400, null, "Se requiere el ID de la organización");
+      }
+
+      const results = await clientService.bulkCreateClients(clients, organizationId);
+      
+      sendResponse(
+        res,
+        200,
+        results,
+        `Proceso completado: ${results.totalSuccess} éxitos, ${results.totalErrors} errores`
+      );
+    } catch (error) {
+      sendResponse(res, 500, null, error.message);
+    }
+  },
 };
 
 export default clientController;

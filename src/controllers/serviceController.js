@@ -77,6 +77,32 @@ const serviceController = {
       sendResponse(res, 404, null, error.message);
     }
   },
+
+  // Controlador para carga masiva de servicios desde Excel
+  bulkUploadServices: async (req, res) => {
+    try {
+      const { services, organizationId } = req.body;
+
+      if (!services || !Array.isArray(services) || services.length === 0) {
+        return sendResponse(res, 400, null, "No se proporcionaron datos de servicios");
+      }
+
+      if (!organizationId) {
+        return sendResponse(res, 400, null, "Se requiere el ID de la organización");
+      }
+
+      const results = await serviceService.bulkCreateServices(services, organizationId);
+      
+      sendResponse(
+        res,
+        200,
+        results,
+        `Proceso completado: ${results.totalSuccess} éxitos, ${results.totalErrors} errores`
+      );
+    } catch (error) {
+      sendResponse(res, 500, null, error.message);
+    }
+  },
 };
 
 export default serviceController;
