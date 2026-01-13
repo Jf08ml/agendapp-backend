@@ -639,80 +639,85 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
           // 📨 OPCIÓN 2: Enviar mensaje solo de la PRIMERA ocurrencia
           console.log('📨 Enviando mensaje solo de la PRIMERA ocurrencia...');
           
-          // Filtrar solo las citas de la primera ocurrencia (occurrenceNumber: 1)
-          const primerasCitas = created.filter(c => c.occurrenceNumber === 1);
-          
-          if (primerasCitas.length === 0) {
-            console.warn('⚠️ No se encontraron citas de la primera ocurrencia');
+          // 🆕 Verificar si el envío está habilitado (usa el mismo check que la serie completa)
+          if (!isRecurringConfirmationEnabled) {
+            console.log(`⏭️  Confirmación de primera ocurrencia deshabilitada (controlada por recurringAppointmentSeries)`);
           } else {
-            // Generar token específico para estas citas
-            const firstGroupId = new mongoose.Types.ObjectId();
-            const { token: firstCancelToken, hash: firstCancelTokenHash } = cancellationService.generateCancelToken();
+            // Filtrar solo las citas de la primera ocurrencia (occurrenceNumber: 1)
+            const primerasCitas = created.filter(c => c.occurrenceNumber === 1);
             
-            // Actualizar solo las citas de la primera ocurrencia con un groupId y token específico
-            await appointmentModel.updateMany(
-              { _id: { $in: primerasCitas.map(c => c._id) } },
-              { 
-                $set: { 
-                  groupId: firstGroupId,
-                  cancelTokenHash: firstCancelTokenHash,
-                  cancellationLink: generateCancellationLink(firstCancelToken, organization)
-                } 
-              }
-            );
-            
-            const firstCancellationLink = generateCancellationLink(firstCancelToken, organization);
-            
-            const firstCita = primerasCitas[0];
-            const lastCita = primerasCitas[primerasCitas.length - 1];
-            
-            // Formatear servicios
-            const servicesForMsg = await Promise.all(
-              primerasCitas.map(async (cita) => {
-                const svc = await serviceService.getServiceById(cita.service);
-                return {
-                  name: svc.name,
-                  start: fmtTime(cita.startDate, timezone),
-                  end: fmtTime(cita.endDate, timezone),
-                };
-              })
-            );
-            
-            const dateRange = primerasCitas.length === 1
-              ? fmt(firstCita.startDate, timezone)
-              : `${fmt(firstCita.startDate, timezone)} – ${fmtTime(lastCita.endDate, timezone)}`;
-            
-            const templateData = {
-              names: clientDoc?.name || 'Estimado cliente',
-              dateRange,
-              organization: organization.name,
-              address: organization.address || '',
-              servicesList: servicesForMsg.map((s, i) => `  ${i + 1}. ${s.name} (${s.start} – ${s.end})`).join('\\n'),
-              employee: employeeDoc?.names || 'Nuestro equipo',
-              cancellationLink: firstCancellationLink,
-              // Para template simple (scheduleAppointment) cuando es 1 sola cita
-              date: fmt(firstCita.startDate, timezone),
-              service: primerasCitas.length === 1 ? servicesForMsg[0].name : ''
-            };
-            
-            // Usar template batch o simple según cantidad de servicios
-            const templateType = primerasCitas.length > 1 ? 'scheduleAppointmentBatch' : 'scheduleAppointment';
-            
-            const msg = await whatsappTemplates.getRenderedTemplate(
-              baseAppointment.organizationId,
-              templateType,
-              templateData
-            );
-            
-            // Enviar mensaje solo de la primera cita
-            await waIntegrationService.sendMessage({
-              orgId: baseAppointment.organizationId,
-              phone: phoneE164,
-              message: msg,
-              image: null,
-            });
-            
-            console.log(`📱 Mensaje enviado solo de primera ocurrencia (${primerasCitas.length} servicios)`);
+            if (primerasCitas.length === 0) {
+              console.warn('⚠️ No se encontraron citas de la primera ocurrencia');
+            } else {
+              // Generar token específico para estas citas
+              const firstGroupId = new mongoose.Types.ObjectId();
+              const { token: firstCancelToken, hash: firstCancelTokenHash } = cancellationService.generateCancelToken();
+              
+              // Actualizar solo las citas de la primera ocurrencia con un groupId y token específico
+              await appointmentModel.updateMany(
+                { _id: { $in: primerasCitas.map(c => c._id) } },
+                { 
+                  $set: { 
+                    groupId: firstGroupId,
+                    cancelTokenHash: firstCancelTokenHash,
+                    cancellationLink: generateCancellationLink(firstCancelToken, organization)
+                  } 
+                }
+              );
+              
+              const firstCancellationLink = generateCancellationLink(firstCancelToken, organization);
+              
+              const firstCita = primerasCitas[0];
+              const lastCita = primerasCitas[primerasCitas.length - 1];
+              
+              // Formatear servicios
+              const servicesForMsg = await Promise.all(
+                primerasCitas.map(async (cita) => {
+                  const svc = await serviceService.getServiceById(cita.service);
+                  return {
+                    name: svc.name,
+                    start: fmtTime(cita.startDate, timezone),
+                    end: fmtTime(cita.endDate, timezone),
+                  };
+                })
+              );
+              
+              const dateRange = primerasCitas.length === 1
+                ? fmt(firstCita.startDate, timezone)
+                : `${fmt(firstCita.startDate, timezone)} – ${fmtTime(lastCita.endDate, timezone)}`;
+              
+              const templateData = {
+                names: clientDoc?.name || 'Estimado cliente',
+                dateRange,
+                organization: organization.name,
+                address: organization.address || '',
+                servicesList: servicesForMsg.map((s, i) => `  ${i + 1}. ${s.name} (${s.start} – ${s.end})`).join('\\n'),
+                employee: employeeDoc?.names || 'Nuestro equipo',
+                cancellationLink: firstCancellationLink,
+                // Para template simple (scheduleAppointment) cuando es 1 sola cita
+                date: fmt(firstCita.startDate, timezone),
+                service: primerasCitas.length === 1 ? servicesForMsg[0].name : ''
+              };
+              
+              // Usar template batch o simple según cantidad de servicios
+              const templateType = primerasCitas.length > 1 ? 'scheduleAppointmentBatch' : 'scheduleAppointment';
+              
+              const msg = await whatsappTemplates.getRenderedTemplate(
+                baseAppointment.organizationId,
+                templateType,
+                templateData
+              );
+              
+              // Enviar mensaje solo de la primera cita
+              await waIntegrationService.sendMessage({
+                orgId: baseAppointment.organizationId,
+                phone: phoneE164,
+                message: msg,
+                image: null,
+              });
+              
+              console.log(`📱 Mensaje enviado solo de primera ocurrencia (${primerasCitas.length} servicios)`);
+            }
           }
         }
       }
