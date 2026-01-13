@@ -189,8 +189,9 @@ export const runMembershipCheck = async () => {
     
     // Procesar resultados (mismo código que el cron)
     let totalNotifications = 0;
-      let totalAppointmentsConfirmed = 0;
-    
+    let totalAppointmentsConfirmed = 0;
+
+    // Notificaciones de membresía
     for (const membership of results.threeDays) {
       await membershipService.createMembershipNotification({
         organizationId: membership.organizationId._id,
@@ -199,22 +200,8 @@ export const runMembershipCheck = async () => {
         membership,
       });
       totalNotifications++;
-
-        // Auto-confirmar citas del día
-        try {
-          const activeOrgs = await Organization.find({
-            membershipStatus: { $ne: 'suspended' }
-          }).select('_id name');
-
-          for (const org of activeOrgs) {
-            const result = await appointmentService.autoConfirmTodayAppointments(org._id);
-            totalAppointmentsConfirmed += result.confirmed.length;
-          }
-        } catch (error) {
-          console.error("Error confirmando citas:", error);
-        }
     }
-    
+
     for (const membership of results.oneDay) {
       await membershipService.createMembershipNotification({
         organizationId: membership.organizationId._id,
@@ -258,12 +245,26 @@ export const runMembershipCheck = async () => {
         membership,
       });
     }
+
+    // Auto-confirmar citas del día para organizaciones con membresía no suspendida
+    try {
+      const activeOrgs = await Organization.find({
+        membershipStatus: { $ne: "suspended" }
+      }).select("_id name");
+
+      for (const org of activeOrgs) {
+        const result = await appointmentService.autoConfirmTodayAppointments(org._id);
+        totalAppointmentsConfirmed += result.confirmed.length;
+      }
+    } catch (error) {
+      console.error("Error confirmando citas:", error);
+    }
     
     return {
       success: true,
       notifications: totalNotifications,
       suspended: results.toSuspend.length,
-        appointmentsConfirmed: totalAppointmentsConfirmed,
+      appointmentsConfirmed: totalAppointmentsConfirmed,
       results,
     };
   } catch (error) {
