@@ -28,6 +28,14 @@ export function hasUsablePhone(input) {
     return "57" + digits;
   }
 
+  // México: 10 dígitos locales -> 521XXXXXXXXXX (formato WhatsApp)
+  // Los números mexicanos pueden empezar con: 33, 55, 81, 442, 656, etc.
+  if (/^\d{10}$/.test(digits) && !digits.startsWith("3")) {
+    // Si no empieza con 3 (Colombia), asumimos que es México u otro país
+    // Para México, agregamos 521
+    return "521" + digits;
+  }
+
   // México: +521XXXXXXXXXX -> 521XXXXXXXXXX (13 dígitos - formato WhatsApp correcto)
   if (/^521\d{10}$/.test(digits)) {
     return digits;
@@ -114,45 +122,53 @@ export function getBogotaDayWindowUTC(targetDate) {
 export function getDayWindowUTC(targetDate, timezone = "America/Bogota") {
   const base = targetDate ? new Date(targetDate) : new Date();
   
-  // Obtenemos año/mes/día "vistos" en la timezone especificada
-  const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  const [y, m, d] = fmt
-    .format(base)
-    .split("-")
-    .map((v) => parseInt(v, 10));
+  // 🔧 FIX: Extraer solo la fecha (YYYY-MM-DD) de la entrada
+  // Si viene "2026-01-15T05:00:00.000Z", queremos interpretar como día 15
+  let dateStr;
+  if (typeof targetDate === 'string' && targetDate.includes('T')) {
+    // Tiene hora, extraer solo la parte de fecha
+    dateStr = targetDate.split('T')[0];
+  } else {
+    // Usar formatter para obtener la fecha
+    const fmt = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "UTC",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    dateStr = fmt.format(base);
+  }
+  
+  const [y, m, d] = dateStr.split("-").map((v) => parseInt(v, 10));
 
-  // Obtenemos el offset de la timezone para ese día específico
-  // Creamos una fecha a medianoche en esa timezone
-  const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}T00:00:00`;
-  const fmtWithOffset = new Intl.DateTimeFormat("en-US", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
+  // Construir las fechas de inicio y fin del día en la timezone objetivo
+  // Usamos un enfoque más directo: crear una fecha en esa timezone y obtener su equivalente UTC
   
-  // Crear fecha en UTC que representa medianoche en la timezone objetivo
-  const parts = fmtWithOffset.formatToParts(new Date(dateStr));
-  const hour = parseInt(parts.find(p => p.type === 'hour')?.value || '0');
+  // Para obtener medianoche en la timezone objetivo como UTC:
+  // Creamos una fecha ISO con la timezone, luego la parseamos
+  const startLocalStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}T00:00:00`;
+  const endLocalStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}T23:59:59.999`;
   
-  // Calcular offset en horas (aproximado, funciona para zonas fijas sin DST)
-  const testDate = new Date(`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}T12:00:00Z`);
-  const tzDate = new Date(testDate.toLocaleString('en-US', { timeZone: timezone }));
-  const offsetMs = testDate.getTime() - tzDate.getTime();
-  const offsetHours = Math.round(offsetMs / (1000 * 60 * 60));
+  // Convertir a UTC considerando la timezone
+  // Truco: crear una fecha interpretada como local, luego ajustar el offset
+  const tempStart = new Date(startLocalStr);
+  const tempEnd = new Date(endLocalStr);
   
-  // Medianoche en la timezone objetivo, expresada en UTC
-  const dayStartUTC = new Date(Date.UTC(y, m - 1, d, offsetHours, 0, 0, 0));
-  const dayEndUTC = new Date(dayStartUTC.getTime() + 24 * 60 * 60 * 1000);
+  // Obtener qué hora es en la timezone objetivo cuando es esa hora "local"
+  const startInTz = new Date(tempStart.toLocaleString('en-US', { timeZone: timezone }));
+  const endInTz = new Date(tempEnd.toLocaleString('en-US', { timeZone: timezone }));
+  
+  // El offset es la diferencia entre la hora "local" y la hora en timezone
+  const offsetStart = tempStart.getTime() - startInTz.getTime();
+  const offsetEnd = tempEnd.getTime() - endInTz.getTime();
+  
+  // Aplicar offset para obtener la hora UTC que corresponde a medianoche en timezone
+  const dayStartUTC = new Date(tempStart.getTime() + offsetStart);
+  const dayEndUTC = new Date(tempEnd.getTime() + offsetEnd);
+
+  console.log(`[getDayWindowUTC] targetDate=${targetDate}, timezone=${timezone}`);
+  console.log(`[getDayWindowUTC] Fecha extraída: ${dateStr} -> Día interpretado: ${y}-${m}-${d}`);
+  console.log(`[getDayWindowUTC] dayStartUTC=${dayStartUTC.toISOString()}, dayEndUTC=${dayEndUTC.toISOString()}`);
 
   return { dayStartUTC, dayEndUTC };
 }

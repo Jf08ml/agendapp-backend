@@ -894,7 +894,7 @@ const appointmentService = {
     appt.totalPrice = totalPrice;
 
     // Si envían status u otros campos sueltos (nota, etc.), respétalos
-    const passthrough = ["status", "notes", "source", "meta"];
+    const passthrough = ["status", "notes", "source", "meta", "reminderSent"];
     for (const k of passthrough) {
       if (updatedData[k] != null) appt[k] = updatedData[k];
     }

@@ -4,7 +4,7 @@ import appointmentModel from "../models/appointmentModel.js";
 import organizationModel from "../models/organizationModel.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
 import {
-  hasUsablePhone,
+  normalizeToCOE164,
   getBogotaDayWindowUTC,
   getDayWindowUTC,
   sleep,
@@ -51,10 +51,22 @@ export const reminderService = {
       })
       .populate("client service employee organizationId");
 
+
     if (!appointments.length) {
-      console.log("[RemindersBulk] No hay citas en la fecha seleccionada.");
+      console.log("[RemindersBulk] No hay citas en la fecha seleccionada sin recordatorio enviado.");
       return { ok: true, created: 0, results: [] };
     }
+
+    console.log(`[RemindersBulk] Encontradas ${appointments.length} citas sin recordatorio enviado para la fecha seleccionada`);
+    console.log(`[RemindersBulk] Citas encontradas:`, appointments.map(a => ({
+      id: a._id,
+      cliente: a.client?.name,
+      telefono: a.client?.phoneNumber,
+      servicio: a.service?.name,
+      inicio: a.startDate,
+      status: a.status,
+      reminderSent: a.reminderSent
+    })));
 
     // 2) Agrupar por organización
     const byOrg = new Map();
@@ -96,9 +108,20 @@ export const reminderService = {
 
       // --- Unificar por teléfono ---
       const byPhone = new Map();
+      let skippedNoPhone = 0;
+      
       for (const a of appts) {
-        const phone = hasUsablePhone(a?.client?.phoneNumber);
-        if (!phone) continue;
+        // 🔧 FIX: Normalizar teléfono igual que en el cronjob automático
+        const rawPhone = a?.client?.phoneNumber;
+        const phoneE164 = normalizeToCOE164(rawPhone); // Devuelve +57XXXXXXXXXX o +521XXXXXXXXXX
+        if (!phoneE164) {
+          skippedNoPhone++;
+          console.warn(`[${_orgId}] Cita ${a._id} sin teléfono válido. Cliente: ${a?.client?.name}, Tel: ${rawPhone}`);
+          continue;
+        }
+        
+        // Baileys (WhatsApp Web) requiere el número SIN el símbolo +
+        const phone = phoneE164.replace('+', ''); // -> 57XXXXXXXXXX o 521XXXXXXXXXX
 
         const start = new Date(a.startDate);
         const end = a.endDate ? new Date(a.endDate) : null;
@@ -135,12 +158,20 @@ export const reminderService = {
         }
       }
 
+      console.log(`[${_orgId}] Procesadas ${appts.length} citas: ${byPhone.size} números válidos, ${skippedNoPhone} omitidas por teléfono inválido`);
+
       // 4) Construir items de campaña finales con templates personalizados
       const items = [];
       const includedIds = [];
 
       for (const bucket of byPhone.values()) {
         if (!bucket.services.length) continue;
+
+        // 🔧 Validar que el teléfono sea válido antes de continuar
+        if (!bucket.phone || typeof bucket.phone !== 'string' || bucket.phone.trim() === '') {
+          console.warn(`[${_orgId}] Bucket sin teléfono válido, omitiendo:`, bucket.names);
+          continue;
+        }
 
         const servicesList = bucket.services
           .map((s, i) => `  ${i + 1}. ${s.name} (${s.time})`)
@@ -193,14 +224,22 @@ export const reminderService = {
           }
         }
 
+        // 🔧 Validar que el mensaje renderizado no esté vacío
+        if (!renderedMessage || renderedMessage.trim() === '') {
+          console.warn(`[${_orgId}] Mensaje vacío para ${bucket.phone}, omitiendo`);
+          continue;
+        }
+
         items.push({ phone: bucket.phone, message: renderedMessage });
         includedIds.push(...Array.from(bucket.apptIds));
       }
 
       if (!items.length) {
-        console.log(`[${_orgId}] No hay items válidos (teléfonos/vars).`);
+        console.log(`[${_orgId}] No hay items válidos (teléfonos/vars). Total citas: ${appts.length}, Buckets procesados: ${byPhone.size}`);
         continue;
       }
+
+      console.log(`[${_orgId}] Preparando ${items.length} mensajes para ${byPhone.size} números únicos`);
 
       // 5) (opcional) Sincronizar opt-in
       try {
@@ -219,6 +258,7 @@ export const reminderService = {
         clientId,
         title,
         items,
+        messageTpl: messageTplReminder, // Requerido por el servidor aunque no se use con preRendered
         preRendered: true, // 🆕 Items tienen 'message' pre-renderizado, no 'vars' + 'messageTpl'
         dryRun,
       });
