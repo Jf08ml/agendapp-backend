@@ -2,6 +2,7 @@
 import { waBulkSend, waBulkOptIn } from "./waHttpService.js";
 import appointmentModel from "../models/appointmentModel.js";
 import organizationModel from "../models/organizationModel.js";
+import WhatsappTemplate from "../models/whatsappTemplateModel.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
 import {
   normalizeToCOE164,
@@ -9,7 +10,6 @@ import {
   getDayWindowUTC,
   sleep,
 } from "../utils/timeAndPhones.js";
-import { messageTplReminder } from "../utils/bulkTemplates.js";
 
 export const reminderService = {
   /**
@@ -160,7 +160,7 @@ export const reminderService = {
 
       console.log(`[${_orgId}] Procesadas ${appts.length} citas: ${byPhone.size} números válidos, ${skippedNoPhone} omitidas por teléfono inválido`);
 
-      // 4) Construir items de campaña finales con templates personalizados
+      // 4) Construir items de campaña finales
       const items = [];
       const includedIds = [];
 
@@ -193,44 +193,21 @@ export const reminderService = {
           names: bucket.names,
           date_range: dateRange,
           organization: org?.name || "",
+          address: org?.address || "",
           services_list: servicesList,
           employee: Array.from(bucket.employees).join(", "),
           count: String(countNum),
           cita_pal: isSingle ? "cita" : "citas",
           agendada_pal: isSingle ? "agendada" : "agendadas",
           manage_block: bucket.actionLink
-            ? `${bucket.actionLink}\n\n`
+            ? `${bucket.actionLink.replace('source=confirmation', 'source=reminder')}\n\n`
             : "",
         };
 
-        // 🆕 Renderizar mensaje con template personalizado de la organización
-        let renderedMessage = messageTplReminder; // fallback a default
-        try {
-          renderedMessage = await whatsappTemplates.getRenderedTemplate(
-            _orgId,
-            'reminder',
-            vars
-          );
-        } catch (e) {
-          console.warn(
-            `[${_orgId}] No se pudo obtener template personalizado reminder, usando default:`,
-            e?.message
-          );
-          // Renderizar con template por defecto
-          renderedMessage = messageTplReminder;
-          for (const [key, value] of Object.entries(vars)) {
-            const regex = new RegExp(`{{${key}}}`, 'g');
-            renderedMessage = renderedMessage.replace(regex, value);
-          }
-        }
-
-        // 🔧 Validar que el mensaje renderizado no esté vacío
-        if (!renderedMessage || renderedMessage.trim() === '') {
-          console.warn(`[${_orgId}] Mensaje vacío para ${bucket.phone}, omitiendo`);
-          continue;
-        }
-
-        items.push({ phone: bucket.phone, message: renderedMessage });
+        console.log(`[${_orgId}] 📋 Vars para ${bucket.names}:`, vars);
+        
+        // 🔧 FIX: Enviar vars igual que el cronjob, no message pre-renderizado
+        items.push({ phone: bucket.phone, vars });
         includedIds.push(...Array.from(bucket.apptIds));
       }
 
@@ -241,14 +218,20 @@ export const reminderService = {
 
       console.log(`[${_orgId}] Preparando ${items.length} mensajes para ${byPhone.size} números únicos`);
 
-      // 5) (opcional) Sincronizar opt-in
+      // 5) Obtener template personalizado (sin renderizar, con placeholders)
+      const templateDoc = await WhatsappTemplate.findOne({ organizationId: _orgId });
+      const messageTpl = templateDoc?.reminder || whatsappTemplates.getDefaultTemplate('reminder');
+      
+      console.log(`[${_orgId}] 📤 Usando template:`, templateDoc?.reminder ? 'PERSONALIZADO' : 'POR DEFECTO');
+
+      // 6) (opcional) Sincronizar opt-in
       try {
         await waBulkOptIn(items.map((it) => it.phone));
       } catch (e) {
         console.warn(`[${_orgId}] OptIn falló: ${e?.message || e}`);
       }
 
-      // 6) Enviar campaña con mensajes pre-renderizados
+      // 7) Enviar campaña con vars y template (sin pre-renderizar)
       const targetDateForTitle = targetDate ? new Date(targetDate) : new Date();
       const titleDateStr = targetDateForTitle.toISOString().slice(0, 10);
 
@@ -258,9 +241,9 @@ export const reminderService = {
         clientId,
         title,
         items,
-        messageTpl: messageTplReminder, // Requerido por el servidor aunque no se use con preRendered
-        preRendered: true, // 🆕 Items tienen 'message' pre-renderizado, no 'vars' + 'messageTpl'
+        messageTpl: messageTpl, // 🔧 FIX: Enviar template con placeholders
         dryRun,
+        // Sin preRendered: true - el servidor renderizará con las vars
       });
 
       console.log(
@@ -274,7 +257,7 @@ export const reminderService = {
         title,
       });
 
-      // 7) Marcar como recordatorio enviado SOLO las citas incluidas
+      // 8) Marcar como recordatorio enviado SOLO las citas incluidas
       try {
         if (includedIds.length) {
           await appointmentModel.updateMany(
@@ -288,7 +271,7 @@ export const reminderService = {
         );
       }
 
-      // 8) Pequeño respiro para no saturar
+      // 9) Pequeño respiro para no saturar
       await sleep(200);
     }
 
