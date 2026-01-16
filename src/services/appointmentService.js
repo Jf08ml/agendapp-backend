@@ -870,11 +870,15 @@ const appointmentService = {
     const totalPrice = basePrice + additionalCost;
 
     // 7) Recalcular endDate:
+    //    - Si viene endDate explícito en el payload → usarlo (duración personalizada)
     //    - Si cambió el servicio → usar la duración del nuevo servicio
     //    - Si no cambió pero llegó startDate → mantener la misma duración anterior
     //      (duración = appt.endDate - appt.startDate)
     let newEnd;
-    if (serviceChanged) {
+    if (updatedData.endDate) {
+      // 🕐 Respetar endDate personalizado si viene en el payload
+      newEnd = moment.tz(updatedData.endDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate();
+    } else if (serviceChanged) {
       const durationMin = Number(svc.duration ?? 0);
       newEnd = new Date(newStart.getTime() + durationMin * 60000);
     } else if (updatedData.startDate) {
@@ -882,10 +886,8 @@ const appointmentService = {
         new Date(appt.endDate).getTime() - new Date(appt.startDate).getTime();
       newEnd = new Date(newStart.getTime() + Math.max(prevDurationMs, 0));
     } else {
-      // No cambió servicio ni startDate → endDate queda igual salvo que FE lo envíe
-      newEnd = updatedData.endDate
-        ? moment.tz(updatedData.endDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate()
-        : new Date(appt.endDate);
+      // No cambió servicio ni startDate ni endDate → mantener el actual
+      newEnd = new Date(appt.endDate);
     }
 
     // 8) Set de campos básicos
