@@ -262,6 +262,7 @@ const appointmentService = {
       employeeRequestedByClient,
       client,
       startDate,
+      endDate, // 🕐 Fecha de fin personalizada (opcional)
       organizationId,
       advancePayment,
       customPrices = {},
@@ -347,8 +348,24 @@ const appointmentService = {
         const svc = await serviceService.getServiceById(serviceId);
         if (!svc) throw new Error(`Servicio no encontrado: ${serviceId}`);
 
-        const duration = svc.duration ?? 0; // en minutos
-        const serviceEnd = new Date(currentStart.getTime() + duration * 60000);
+        // 🕐 Usar endDate personalizado si viene en el payload (solo para primer servicio)
+        // Sino, calcular basándose en la duración del servicio
+        let serviceEnd;
+        if (i === 0 && endDate) {
+          // Parsear endDate de la misma manera que startDate
+          if (typeof endDate === 'string') {
+            const parsed = moment.tz(endDate, 'YYYY-MM-DDTHH:mm:ss', timezone);
+            serviceEnd = parsed.toDate();
+          } else if (endDate instanceof Date) {
+            serviceEnd = endDate;
+          } else {
+            const duration = svc.duration ?? 0;
+            serviceEnd = new Date(currentStart.getTime() + duration * 60000);
+          }
+        } else {
+          const duration = svc.duration ?? 0;
+          serviceEnd = new Date(currentStart.getTime() + duration * 60000);
+        }
 
         // 🔍 VALIDACIÓN DE DISPONIBILIDAD - Verificar citas simultáneas
         // Contar cuántas citas simultáneas tiene el empleado en ese horario
