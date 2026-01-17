@@ -61,13 +61,19 @@ const membershipService = {
     const now = new Date();
     const threeDaysFromNow = new Date(now);
     threeDaysFromNow.setDate(threeDaysFromNow.getDate() + 3);
+    
+    // Buscar membresías activas O en período de gracia que vencieron en los últimos 2 días
+    // o vencen en los próximos 3 días
+    const twoDaysAgo = new Date(now);
+    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
 
-    // Buscar membresías activas que vencen en los próximos 3 días
+    // Buscar membresías que:
+    // 1. Están activas o en período de gracia
+    // 2. Vencen entre hace 2 días y los próximos 3 días
     const expiring = await membershipModel
       .find({
-        status: { $in: ["active", "trial"] },
-        currentPeriodEnd: { $lte: threeDaysFromNow, $gte: now },
-        "notifications.threeDaysSent": false,
+        status: { $in: ["active", "trial", "grace_period"] },
+        currentPeriodEnd: { $lte: threeDaysFromNow, $gte: twoDaysAgo },
       })
       .populate("organizationId planId");
 
@@ -110,8 +116,8 @@ const membershipService = {
       }
 
       // Período de gracia (día 1 y 2 después de vencer)
-      if (daysLeft < -1) {
-        const graceDays = Math.abs(daysLeft) - 1;
+      if (daysLeft <= -1) {
+        const graceDays = Math.abs(daysLeft);
         
         if (graceDays === 1 && !membership.notifications.gracePeriodDay1Sent) {
           results.gracePeriod.push({ membership, day: 1 });
