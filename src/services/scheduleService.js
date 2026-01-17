@@ -386,6 +386,19 @@ function generateAvailableSlots(date, organization, employee = null, durationMin
     });
   }
 
+  // Filtrar horarios pasados si la fecha es hoy
+  const nowInTz = moment.tz(timezone);
+  const todayStr = nowInTz.format('YYYY-MM-DD');
+  const requestDateStr = dateInTz.format('YYYY-MM-DD');
+  
+  if (todayStr === requestDateStr) {
+    // Solo mantener slots que están en el futuro
+    return slots.filter(slot => {
+      if (!slot.available) return true; // Mantener slots no disponibles para no alterar la UI
+      return moment.tz(slot.datetime, timezone).isAfter(nowInTz);
+    });
+  }
+
   return slots;
 }
 
@@ -724,6 +737,19 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
         intervals
       });
     }
+  }
+  
+  // Filtrar bloques pasados si la fecha es hoy
+  const nowInTz = moment.tz(timezone);
+  const todayStr = nowInTz.format('YYYY-MM-DD');
+  const requestDateStr = dateInTz.format('YYYY-MM-DD');
+  
+  if (todayStr === requestDateStr) {
+    // Solo mantener bloques que están en el futuro
+    return blocks.filter(block => {
+      const blockStartTime = moment.tz(block.start, timezone);
+      return blockStartTime.isAfter(nowInTz);
+    });
   }
   
   return blocks;
