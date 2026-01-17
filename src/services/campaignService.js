@@ -3,7 +3,7 @@ import Campaign from "../models/campaignModel.js";
 import organizationModel from "../models/organizationModel.js";
 import clientModel from "../models/clientModel.js";
 import { waBulkSend, waBulkGet } from "./waHttpService.js";
-import { normalizeToCOE164 } from "../utils/timeAndPhones.js";
+import { normalizePhoneNumber } from "../utils/phoneUtils.js";
 
 export const campaignService = {
   /**
@@ -16,15 +16,21 @@ export const campaignService = {
     const duplicates = [];
     const seen = new Set();
 
+    // Obtener país por defecto de la organización
+    const org = await organizationModel.findById(orgId).select('default_country');
+    const defaultCountry = org?.default_country || 'CO';
+
     // 1. Normalizar y validar cada teléfono
     for (const phone of phones) {
-      const clean = normalizeToCOE164(phone);
+      const result = normalizePhoneNumber(phone, defaultCountry);
       
-      // Validar formato E.164: +[código][número] (ej: +573001234567)
-      if (!clean || !/^\+\d{10,15}$/.test(clean)) {
+      // Validar que sea válido y en formato E.164
+      if (!result.isValid || !result.phone_e164) {
         invalid.push(phone);
         continue;
       }
+
+      const clean = result.phone_e164;
 
       // Detectar duplicados
       if (seen.has(clean)) {
@@ -72,8 +78,8 @@ export const campaignService = {
     image,
     dryRun = false,
   }) => {
-    // 1. Validar organización y obtener clientId de WhatsApp
-    const org = await organizationModel.findById(orgId);
+    // 1. Validar organización y obtener clientId de WhatsApp + país por defecto
+    const org = await organizationModel.findById(orgId).select('clientIdWhatsapp default_country');
     if (!org) throw new Error("Organización no encontrada");
 
     const clientId = org.clientIdWhatsapp;
@@ -83,13 +89,27 @@ export const campaignService = {
       );
     }
 
+    const defaultCountry = org.default_country || 'CO';
+
     // 2. Normalizar y preparar items
     const items = [];
     const seen = new Set();
 
     for (const recipient of recipients) {
-      const phone = normalizeToCOE164(recipient.phone);
-      if (!phone || seen.has(phone)) continue;
+      // Normalizar usando el sistema moderno multi-país
+      const phoneResult = normalizePhoneNumber(recipient.phone, defaultCountry);
+      
+      if (!phoneResult.isValid || !phoneResult.phone_e164) {
+        console.warn(`[Campaign] Número inválido ignorado: ${recipient.phone}`);
+        continue;
+      }
+
+      const phone = phoneResult.phone_e164;
+      
+      if (seen.has(phone)) {
+        console.warn(`[Campaign] Número duplicado ignorado: ${phone}`);
+        continue;
+      }
       
       seen.add(phone);
       
@@ -429,6 +449,7 @@ export const campaignService = {
       filter.$or = [
         { name: { $regex: search, $options: "i" } },
         { phoneNumber: { $regex: search, $options: "i" } },
+        { phone_e164: { $regex: search, $options: "i" } },
       ];
     }
 
@@ -437,25 +458,33 @@ export const campaignService = {
 
     const clients = await clientModel
       .find(filter)
-      .select("name phoneNumber phone_e164 email")
+      .select("name phoneNumber phone_e164 phone_country email")
       .sort({ createdAt: -1 }) // Más recientes primero
       .skip(skip)
       .limit(limit)
       .lean();
 
+    // Obtener país por defecto de la organización para normalizar teléfonos sin phone_e164
+    const org = await organizationModel.findById(orgId).select('default_country');
+    const defaultCountry = org?.default_country || 'CO';
+
     return {
       ok: true,
       clients: clients.map((c) => {
-        // Preferir phone_e164, si no existe, normalizar phoneNumber
+        // Preferir phone_e164 si existe
         let phone = c.phone_e164;
+        
+        // Si no existe phone_e164, intentar normalizar phoneNumber
         if (!phone && c.phoneNumber) {
-          phone = normalizeToCOE164(c.phoneNumber);
+          const phoneResult = normalizePhoneNumber(c.phoneNumber, c.phone_country || defaultCountry);
+          phone = phoneResult.isValid ? phoneResult.phone_e164 : null;
         }
         
         return {
           id: c._id,
           name: c.name,
-          phone: phone || c.phoneNumber, // Fallback al original si la normalización falla
+          phone: phone || c.phoneNumber, // Fallback al original si todo falla
+          country: c.phone_country || defaultCountry,
         };
       }),
       pagination: {
@@ -478,29 +507,38 @@ export const campaignService = {
       filter.$or = [
         { name: { $regex: search, $options: "i" } },
         { phoneNumber: { $regex: search, $options: "i" } },
+        { phone_e164: { $regex: search, $options: "i" } },
       ];
     }
 
     const clients = await clientModel
       .find(filter)
-      .select("name phoneNumber phone_e164")
+      .select("name phoneNumber phone_e164 phone_country")
       .sort({ createdAt: -1 })
       .lean();
+
+    // Obtener país por defecto de la organización
+    const org = await organizationModel.findById(orgId).select('default_country');
+    const defaultCountry = org?.default_country || 'CO';
 
     return {
       ok: true,
       total: clients.length,
       clients: clients.map((c) => {
-        // Preferir phone_e164, si no existe, normalizar phoneNumber
+        // Preferir phone_e164 si existe
         let phone = c.phone_e164;
+        
+        // Si no existe phone_e164, intentar normalizar phoneNumber
         if (!phone && c.phoneNumber) {
-          phone = normalizeToCOE164(c.phoneNumber);
+          const phoneResult = normalizePhoneNumber(c.phoneNumber, c.phone_country || defaultCountry);
+          phone = phoneResult.isValid ? phoneResult.phone_e164 : null;
         }
         
         return {
           id: c._id.toString(),
           name: c.name,
-          phone: phone || c.phoneNumber, // Fallback al original si la normalización falla
+          phone: phone || c.phoneNumber, // Fallback al original si todo falla
+          country: c.phone_country || defaultCountry,
         };
       }),
     };
