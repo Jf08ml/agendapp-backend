@@ -2,7 +2,7 @@
 import Campaign from "../models/campaignModel.js";
 import organizationModel from "../models/organizationModel.js";
 import clientModel from "../models/clientModel.js";
-import { waBulkSend, waBulkGet } from "./waHttpService.js";
+import { waBulkSend, waBulkGet, waBulkOptIn } from "./waHttpService.js";
 import { normalizePhoneNumber } from "../utils/phoneUtils.js";
 
 export const campaignService = {
@@ -148,7 +148,19 @@ export const campaignService = {
       startedAt: dryRun ? null : new Date(),
     });
 
-    // 4. Enviar al microservicio Baileys
+    // 4. Agregar números a la lista de opt-in del microservicio
+    // Esto es CRÍTICO: el microservicio solo envía a números que estén en opt-in
+    try {
+      const phonesToOptIn = items.map((it) => it.phone);
+      console.log(`[Campaign] Agregando ${phonesToOptIn.length} números a opt-in...`);
+      await waBulkOptIn(phonesToOptIn);
+      console.log(`[Campaign] Opt-in completado`);
+    } catch (error) {
+      console.error('[Campaign] Error agregando números a opt-in:', error);
+      // No lanzamos error aquí, intentamos enviar de todas formas
+    }
+
+    // 5. Enviar al microservicio Baileys
     try {
       const bulkItems = items.map((it) => ({
         phone: it.phone,
