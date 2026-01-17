@@ -206,15 +206,18 @@ const membershipService = {
     if (!membership) throw new Error("Membresía no encontrada");
 
     const now = new Date();
-    const newPeriodEnd = new Date(membership.currentPeriodEnd);
+    let newPeriodEnd;
     
     // Si ya venció, empezar desde hoy
     if (membership.currentPeriodEnd < now) {
       membership.currentPeriodStart = now;
-      newPeriodEnd.setTime(now.getTime());
+      newPeriodEnd = new Date(now);
+      newPeriodEnd.setMonth(newPeriodEnd.getMonth() + 1);
+    } else {
+      // Si aún no venció, extender desde la fecha de vencimiento actual
+      newPeriodEnd = new Date(membership.currentPeriodEnd);
+      newPeriodEnd.setMonth(newPeriodEnd.getMonth() + 1);
     }
-    
-    newPeriodEnd.setMonth(newPeriodEnd.getMonth() + 1);
 
     membership.currentPeriodEnd = newPeriodEnd;
     membership.nextPaymentDue = newPeriodEnd;
