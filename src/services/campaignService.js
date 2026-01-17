@@ -437,7 +437,7 @@ export const campaignService = {
 
     const clients = await clientModel
       .find(filter)
-      .select("name phoneNumber email")
+      .select("name phoneNumber phone_e164 email")
       .sort({ createdAt: -1 }) // Más recientes primero
       .skip(skip)
       .limit(limit)
@@ -445,11 +445,19 @@ export const campaignService = {
 
     return {
       ok: true,
-      clients: clients.map((c) => ({
-        id: c._id,
-        name: c.name,
-        phone: c.phoneNumber,
-      })),
+      clients: clients.map((c) => {
+        // Preferir phone_e164, si no existe, normalizar phoneNumber
+        let phone = c.phone_e164;
+        if (!phone && c.phoneNumber) {
+          phone = normalizeToCOE164(c.phoneNumber);
+        }
+        
+        return {
+          id: c._id,
+          name: c.name,
+          phone: phone || c.phoneNumber, // Fallback al original si la normalización falla
+        };
+      }),
       pagination: {
         page,
         limit,
@@ -475,18 +483,26 @@ export const campaignService = {
 
     const clients = await clientModel
       .find(filter)
-      .select("name phoneNumber")
+      .select("name phoneNumber phone_e164")
       .sort({ createdAt: -1 })
       .lean();
 
     return {
       ok: true,
       total: clients.length,
-      clients: clients.map((c) => ({
-        id: c._id.toString(),
-        name: c.name,
-        phone: c.phoneNumber,
-      })),
+      clients: clients.map((c) => {
+        // Preferir phone_e164, si no existe, normalizar phoneNumber
+        let phone = c.phone_e164;
+        if (!phone && c.phoneNumber) {
+          phone = normalizeToCOE164(c.phoneNumber);
+        }
+        
+        return {
+          id: c._id.toString(),
+          name: c.name,
+          phone: phone || c.phoneNumber, // Fallback al original si la normalización falla
+        };
+      }),
     };
   },
 };
