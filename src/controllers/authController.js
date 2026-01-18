@@ -14,7 +14,7 @@ const authController = {
       const token = jwt.sign(
         { userId: user._id, userType: user.userType },
         process.env.JWT_SECRET,
-        { expiresIn: "1h" }
+        { expiresIn: "7d" } // 7 días de validez
       );
 
       sendResponse(

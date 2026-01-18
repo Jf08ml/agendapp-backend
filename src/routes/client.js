@@ -4,48 +4,48 @@ import clientController from "../controllers/clientController.js";
 const router = express.Router();
 
 // Ruta para crear un cliente
-router.post("/clients", clientController.createClient);
+router.post("/", clientController.createClient);
 
 // Ruta para obtener todos los clientes
-router.get("/clients", clientController.getClients);
+router.get("/", clientController.getClients);
 
 // Obtener los clientes por organizationId
 router.get(
-  "/clients/organization/:organizationId",
+  "/organization/:organizationId",
   clientController.getClientsByOrganizationId
 );
 
 // 🚀 Búsqueda optimizada de clientes (con query params: search, limit)
 router.get(
-  "/clients/organization/:organizationId/search",
+  "/organization/:organizationId/search",
   clientController.searchClients
 );
 
 // Ruta para obtener un cliente específico por ID
-router.get("/clients/:id", clientController.getClientById);
+router.get("/:id", clientController.getClientById);
 
 // Ruta para obtener un cliente por número de teléfono y organizacion
 router.get(
-  "/clients/phone/:phoneNumber/organization/:organizationId",
+  "/phone/:phoneNumber/organization/:organizationId",
   clientController.getClientByPhoneNumberAndOrganization
 );
 
 // Ruta para actualizar un cliente específico por ID
-router.put("/clients/:id", clientController.updateClient);
+router.put("/:id", clientController.updateClient);
 
 // Ruta para eliminar un cliente específico por ID
-router.delete("/clients/:id", clientController.deleteClient);
+router.delete("/:id", clientController.deleteClient);
 
 // Ruta para registrar un servicio para un cliente
-router.post("/clients/:id/register-service", clientController.registerService);
+router.post("/:id/register-service", clientController.registerService);
 
 // Ruta para registrar un referido para un cliente
 router.post(
-  "/clients/:id/register-referral",
+  "/:id/register-referral",
   clientController.registerReferral
 );
 
 // Ruta para carga masiva de clientes desde Excel
-router.post("/clients/bulk-upload", clientController.bulkUploadClients);
+router.post("/bulk-upload", clientController.bulkUploadClients);
 
 export default router;

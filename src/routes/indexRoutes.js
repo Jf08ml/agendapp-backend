@@ -28,6 +28,7 @@ import publicRoutes from "./publicRoutes.js";
 import membershipBillingRoutes from "./membershipBillingRoutes.js";
 import campaignRoutes from "./campaignRoutes.js";
 import { organizationResolver } from "../middleware/organizationResolver";
+import { verifyToken } from "../middleware/authMiddleware.js";
 
 const router = Router();
 
@@ -88,36 +89,40 @@ router.get("/favicon.ico", organizationResolver, (req, res) => {
   res.redirect(org.branding?.faviconUrl || "/logo_default.png");
 });
 
-// Rutas que requieren organizaciónResolver (ejemplo)
-router.use(organizationResolver, clientRoutes);
-router.use(organizationResolver, appointmentRoutes);
-router.use(organizationResolver, serviceRoutes);
-router.use(organizationResolver, imagesRoutes);
-router.use(organizationResolver, employeeRoutes);
-router.use(organizationResolver, advanceRoutes);
-router.use(organizationResolver, reservationRoutes);
+// 🌐 Rutas PÚBLICAS que necesitan registrarse PRIMERO (sin middlewares)
+router.use("/memberships", membershipRoutes); // Maneja auth internamente (algunas públicas)
+router.use("/services", serviceRoutes); // Maneja auth internamente (consulta pública)
+
+// 🔒 Rutas que requieren organizaciónResolver y autenticación
+router.use("/clients", organizationResolver, verifyToken, clientRoutes);
+router.use("/appointments", organizationResolver, verifyToken, appointmentRoutes);
+router.use("/images", organizationResolver, verifyToken, imagesRoutes);
+router.use("/employees", organizationResolver, verifyToken, employeeRoutes);
+router.use("/advances", organizationResolver, verifyToken, advanceRoutes);
+router.use("/reservations", organizationResolver, verifyToken, reservationRoutes);
 
 // organization-config (config visual) también depende del middleware
-router.use(organizationResolver, organizationRoutes);
+router.use("/organizations", organizationResolver, verifyToken, organizationRoutes);
 
-// Rutas que NO dependen de tenant/organización
+// Rutas que NO dependen de tenant/organización pero SÍ requieren autenticación
+router.use("/whatsapp-templates", verifyToken, whatsappTemplateRoutes);
+router.use("/notifications", verifyToken, notificationRoutes);
+router.use("/wa", verifyToken, waRoutes);
+router.use("/reminders", verifyToken, reminderRoutes);
+router.use("/schedule", verifyToken, scheduleRoutes);
+router.use("/campaigns", verifyToken, campaignRoutes);
+
+// Rutas públicas (SIN autenticación)
 router.use(organizationRoutesPublic);
-router.use(roleRoutes);
-router.use(authRoutes);
-router.use(subscriptionRoutes);
-router.use(whatsappRoutes);
-router.use("/whatsapp-templates", whatsappTemplateRoutes);
-router.use(cronRoutes);
-router.use(notificationRoutes);
-router.use("/plans", planRoutes);
-router.use("/payments", paymentRoutes);
-router.use("/memberships", membershipRoutes);
-router.use(waRoutes);
-router.use(reminderRoutes);
-router.use("/schedule", scheduleRoutes);
-router.use("/debug", debugRoutes);
-router.use("/public", publicRoutes);
-router.use("/billing", membershipBillingRoutes);
-router.use(campaignRoutes); // Campaign routes
+router.use("/roles", roleRoutes); // Roles - considerar proteger luego
+router.use(authRoutes); // Login - debe ser público
+router.use(subscriptionRoutes); // Push notifications - considerar
+router.use(whatsappRoutes); // Webhooks - debe ser público
+router.use("/cron", cronRoutes); // Cron jobs - debe ser público
+router.use("/plans", planRoutes); // Planes - considerar según uso
+router.use("/payments", paymentRoutes); // Webhooks de pago - debe ser público
+router.use("/debug", debugRoutes); // Debug - considerar proteger en producción
+router.use("/public", publicRoutes); // Rutas públicas - debe ser público
+router.use("/billing", membershipBillingRoutes); // Billing público
 
 export default router;

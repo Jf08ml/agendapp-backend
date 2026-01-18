@@ -6,9 +6,12 @@ import dbConnection from "./config/db.js";
 import express from "express";
 import morgan from "morgan";
 import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import routes from "./routes/indexRoutes.js";
 import membershipCheckJob from "./cron/membershipCheckJob.js";
 import reminderJob from "./cron/reminderJob.js";
+import { dynamicCorsOptions } from "./middleware/corsMiddleware.js";
 
 const app = express();
 
@@ -19,7 +22,54 @@ webPush.setVapidDetails(
   process.env.VAPID_PRIVATE_KEY
 );
 
-app.use(cors({ origin: "*" }));
+// 🔒 Seguridad: Helmet para headers HTTP seguros
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:", "https://ik.imagekit.io"],
+      connectSrc: ["'self'", "https://sandbox-api.polar.sh", "https://api.polar.sh"],
+    },
+  },
+  crossOriginEmbedderPolicy: false, // Para permitir ImageKit
+}));
+
+// 🔒 CORS dinámico para plataforma multitenant
+// Valida contra los dominios registrados en la base de datos
+app.use(cors(dynamicCorsOptions));
+
+// 🔒 Rate limiting general (100 requests por 15 minutos)
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 100, // Límite de 100 requests por IP
+  message: {
+    result: 'error',
+    message: 'Demasiadas solicitudes desde esta IP, por favor intenta más tarde'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  // Excluir webhooks y cron jobs del rate limiting
+  skip: (req) => {
+    return req.path.startsWith('/api/payments/webhook') || 
+           req.path.startsWith('/api/cron/');
+  }
+});
+
+// 🔒 Rate limiting estricto para login (5 intentos por 15 minutos)
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: {
+    result: 'error',
+    message: 'Demasiados intentos de inicio de sesión, espera 15 minutos'
+  },
+  skipSuccessfulRequests: true, // No contar logins exitosos
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 app.use(morgan("dev"));
 // Evitar respuestas 304 en desarrollo para que el frontend siempre reciba datos frescos
 if (process.env.NODE_ENV !== "production") {
@@ -33,7 +83,7 @@ if (process.env.NODE_ENV !== "production") {
 // Si express.json parsea primero, se pierde el body exacto y la firma nunca va a coincidir.
 app.use(
   express.json({
-    limit: "10mb",
+    limit: "5mb", // 🔒 Reducido de 10mb a 5mb para prevenir ataques
     verify: (req, _res, buf) => {
       if (req.originalUrl === "/api/payments/webhook") {
         req.rawBody = buf;
@@ -42,6 +92,12 @@ app.use(
   })
 );
 app.use(express.urlencoded({ extended: true }));
+
+// 🔒 Aplicar rate limiting general a todas las rutas de API
+app.use("/api", generalLimiter);
+
+// 🔒 Aplicar rate limiting estricto a login
+app.use("/api/login", loginLimiter);
 
 // Rutas principales
 app.use("/api", routes);

@@ -1,30 +1,21 @@
 import express from "express";
 import serviceController from "../controllers/serviceController.js";
+import { verifyToken } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// Ruta para crear un servicio
-router.post("/services", serviceController.createService);
-
-// Ruta para obtener todos los servicios
-router.get("/services", serviceController.getServices);
-
-// Obtener los servicios por organizationId
+// 🌐 Rutas PÚBLICAS (sin autenticación) - Para landing y página de servicios
 router.get(
-  "/services/organization/:organizationId",
+  "/organization/:organizationId",
   serviceController.getServicesByOrganizationId
 );
 
-// Ruta para obtener un servicio específico por ID
-router.get("/services/:id", serviceController.getServiceById);
-
-// Ruta para actualizar un servicio específico por ID
-router.put("/services/:id", serviceController.updateService);
-
-// Ruta para eliminar un servicio específico por ID
-router.delete("/services/:id", serviceController.deleteService);
-
-// Ruta para carga masiva de servicios desde Excel
-router.post("/services/bulk-upload", serviceController.bulkUploadServices);
+// 🔒 Rutas PROTEGIDAS (requieren autenticación)
+router.post("/", verifyToken, serviceController.createService);
+router.get("/", verifyToken, serviceController.getServices);
+router.get("/:id", verifyToken, serviceController.getServiceById);
+router.put("/:id", verifyToken, serviceController.updateService);
+router.delete("/:id", verifyToken, serviceController.deleteService);
+router.post("/bulk-upload", verifyToken, serviceController.bulkUploadServices);
 
 export default router;
