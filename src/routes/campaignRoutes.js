@@ -7,49 +7,49 @@ const router = express.Router();
 
 // Validar teléfonos antes de crear campaña
 router.post(
-  "/organizations/:orgId/campaigns/validate-phones",
+  "/organizations/:orgId/validate-phones",
   campaignController.validatePhones
 );
 
 // Obtener sugerencias de audiencia (clientes) - DEBE IR ANTES de las rutas genéricas
 router.get(
-  "/organizations/:orgId/campaigns/audience/suggestions",
+  "/organizations/:orgId/audience/suggestions",
   campaignController.getAudienceSuggestions
 );
 
 // Obtener TODOS los clientes (para seleccionar todos) - DEBE IR ANTES de las rutas genéricas
 router.get(
-  "/organizations/:orgId/campaigns/audience/all",
+  "/organizations/:orgId/audience/all",
   campaignController.getAllClientsForCampaign
 );
 
 // Cancelar campaña en progreso - DEBE IR ANTES de /:campaignId
 router.post(
-  "/organizations/:orgId/campaigns/:campaignId/cancel",
+  "/organizations/:orgId/:campaignId/cancel",
   campaignController.cancelCampaign
 );
 
 // Convertir Dry Run a campaña real - DEBE IR ANTES de /:campaignId
 router.post(
-  "/organizations/:orgId/campaigns/:campaignId/convert-to-real",
+  "/organizations/:orgId/:campaignId/convert-to-real",
   campaignController.convertDryRunToReal
 );
 
 // Crear y enviar campaña
 router.post(
-  "/organizations/:orgId/campaigns",
+  "/organizations/:orgId",
   campaignController.createCampaign
 );
 
 // Obtener detalle de una campaña específica
 router.get(
-  "/organizations/:orgId/campaigns/:campaignId",
+  "/organizations/:orgId/:campaignId",
   campaignController.getCampaignDetail
 );
 
 // Listar campañas de una organización - DEBE IR AL FINAL
 router.get(
-  "/organizations/:orgId/campaigns",
+  "/organizations/:orgId",
   campaignController.listCampaigns
 );
 

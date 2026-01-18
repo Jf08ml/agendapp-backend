@@ -4,23 +4,22 @@
 
 import express from "express";
 import scheduleController from "../controllers/scheduleController.js";
+import { verifyToken } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// Rutas para horarios de organización
-router.put("/organization/:orgId", scheduleController.updateOrganizationSchedule);
-router.get("/organization/:orgId", scheduleController.getOrganizationSchedule);
-router.get("/organization/:orgId/open-days", scheduleController.getOpenDays);
-
-// Rutas para horarios de empleados
-router.put("/employee/:employeeId", scheduleController.updateEmployeeSchedule);
-router.get("/employee/:employeeId", scheduleController.getEmployeeSchedule);
-router.get("/employee/:employeeId/available-days", scheduleController.getEmployeeAvailableDays);
-
-// Rutas para consultar disponibilidad
+// 🌐 Rutas PÚBLICAS (sin autenticación) - Para consultar disponibilidad en reserva en línea
 router.post("/available-slots", scheduleController.getAvailableSlots);
 router.post("/validate-datetime", scheduleController.validateDateTime);
 router.post("/multi-service-blocks", scheduleController.getMultiServiceBlocks);
 router.post("/available-slots-batch", scheduleController.getAvailableSlotsBatch);
+
+// 🔒 Rutas PROTEGIDAS (requieren autenticación) - Para gestión de horarios
+router.put("/organization/:orgId", verifyToken, scheduleController.updateOrganizationSchedule);
+router.get("/organization/:orgId", verifyToken, scheduleController.getOrganizationSchedule);
+router.get("/organization/:orgId/open-days", verifyToken, scheduleController.getOpenDays);
+router.put("/employee/:employeeId", verifyToken, scheduleController.updateEmployeeSchedule);
+router.get("/employee/:employeeId", verifyToken, scheduleController.getEmployeeSchedule);
+router.get("/employee/:employeeId/available-days", verifyToken, scheduleController.getEmployeeAvailableDays);
 
 export default router;

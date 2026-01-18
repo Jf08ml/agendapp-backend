@@ -1,33 +1,27 @@
 import express from "express";
 import employeeController from "../controllers/employeeController.js";
+import { verifyToken } from "../middleware/authMiddleware.js";
+import { organizationResolver } from "../middleware/organizationResolver.js";
 
 const router = express.Router();
 
-// Ruta para crear un empleado
-router.post("/", employeeController.createEmployee);
-
-// Ruta para obtener todos los empleados
-router.get("/", employeeController.getEmployees);
-
-// Obtener los empleados por organizationId
+// 🌐 Rutas PÚBLICAS (sin autenticación) - Para reserva en línea
 router.get(
   "/organization/:organizationId",
   employeeController.getEmployeesByOrganizationId
 );
 
-// Ruta para obtener un empleado específico por ID
-router.get("/:id", employeeController.getEmployeeById);
-
-// Ruta para obtener un empleado por número de teléfono
+// 🔒 Rutas PROTEGIDAS (requieren autenticación)
+router.post("/", organizationResolver, verifyToken, employeeController.createEmployee);
+router.get("/", organizationResolver, verifyToken, employeeController.getEmployees);
+router.get("/:id", organizationResolver, verifyToken, employeeController.getEmployeeById);
 router.get(
   "/phone/:phoneNumber",
+  organizationResolver,
+  verifyToken,
   employeeController.getEmployeeByPhoneNumber
 );
-
-// Ruta para actualizar un empleado específico por ID
-router.put("/:id", employeeController.updateEmployee);
-
-// Ruta para eliminar un empleado específico por ID
-router.delete("/:id", employeeController.deleteEmployee);
+router.put("/:id", organizationResolver, verifyToken, employeeController.updateEmployee);
+router.delete("/:id", organizationResolver, verifyToken, employeeController.deleteEmployee);
 
 export default router;

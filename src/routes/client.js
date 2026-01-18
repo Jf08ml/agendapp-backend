@@ -1,51 +1,41 @@
 import express from "express";
 import clientController from "../controllers/clientController.js";
+import { verifyToken } from "../middleware/authMiddleware.js";
+import { organizationResolver } from "../middleware/organizationResolver.js";
 
 const router = express.Router();
 
-// Ruta para crear un cliente
-router.post("/", clientController.createClient);
-
-// Ruta para obtener todos los clientes
-router.get("/", clientController.getClients);
-
-// Obtener los clientes por organizationId
-router.get(
-  "/organization/:organizationId",
-  clientController.getClientsByOrganizationId
-);
-
-// 🚀 Búsqueda optimizada de clientes (con query params: search, limit)
-router.get(
-  "/organization/:organizationId/search",
-  clientController.searchClients
-);
-
-// Ruta para obtener un cliente específico por ID
-router.get("/:id", clientController.getClientById);
-
-// Ruta para obtener un cliente por número de teléfono y organizacion
+// 🌐 Rutas PÚBLICAS (sin autenticación) - Para reserva en línea
 router.get(
   "/phone/:phoneNumber/organization/:organizationId",
   clientController.getClientByPhoneNumberAndOrganization
 );
-
-// Ruta para actualizar un cliente específico por ID
 router.put("/:id", clientController.updateClient);
 
-// Ruta para eliminar un cliente específico por ID
-router.delete("/:id", clientController.deleteClient);
-
-// Ruta para registrar un servicio para un cliente
-router.post("/:id/register-service", clientController.registerService);
-
-// Ruta para registrar un referido para un cliente
+// 🔒 Rutas PROTEGIDAS (requieren autenticación)
+router.post("/", organizationResolver, verifyToken, clientController.createClient);
+router.get("/", organizationResolver, verifyToken, clientController.getClients);
+router.get(
+  "/organization/:organizationId",
+  organizationResolver,
+  verifyToken,
+  clientController.getClientsByOrganizationId
+);
+router.get(
+  "/organization/:organizationId/search",
+  organizationResolver,
+  verifyToken,
+  clientController.searchClients
+);
+router.get("/:id", organizationResolver, verifyToken, clientController.getClientById);
+router.delete("/:id", organizationResolver, verifyToken, clientController.deleteClient);
+router.post("/:id/register-service", organizationResolver, verifyToken, clientController.registerService);
 router.post(
   "/:id/register-referral",
+  organizationResolver,
+  verifyToken,
   clientController.registerReferral
 );
-
-// Ruta para carga masiva de clientes desde Excel
-router.post("/bulk-upload", clientController.bulkUploadClients);
+router.post("/bulk-upload", organizationResolver, verifyToken, clientController.bulkUploadClients);
 
 export default router;

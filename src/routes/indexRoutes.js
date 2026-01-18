@@ -92,14 +92,15 @@ router.get("/favicon.ico", organizationResolver, (req, res) => {
 // 🌐 Rutas PÚBLICAS que necesitan registrarse PRIMERO (sin middlewares)
 router.use("/memberships", membershipRoutes); // Maneja auth internamente (algunas públicas)
 router.use("/services", serviceRoutes); // Maneja auth internamente (consulta pública)
+router.use("/employees", employeeRoutes); // Maneja auth internamente (consulta pública por organización)
+router.use("/schedule", scheduleRoutes); // Maneja auth internamente (consulta de disponibilidad pública)
+router.use("/clients", clientRoutes); // Maneja auth internamente (búsqueda por teléfono pública)
+router.use("/reservations", reservationRoutes); // Maneja auth internamente (creación de reserva pública)
 
 // 🔒 Rutas que requieren organizaciónResolver y autenticación
-router.use("/clients", organizationResolver, verifyToken, clientRoutes);
 router.use("/appointments", organizationResolver, verifyToken, appointmentRoutes);
 router.use("/images", organizationResolver, verifyToken, imagesRoutes);
-router.use("/employees", organizationResolver, verifyToken, employeeRoutes);
 router.use("/advances", organizationResolver, verifyToken, advanceRoutes);
-router.use("/reservations", organizationResolver, verifyToken, reservationRoutes);
 
 // organization-config (config visual) también depende del middleware
 router.use("/organizations", organizationResolver, verifyToken, organizationRoutes);
@@ -109,7 +110,6 @@ router.use("/whatsapp-templates", verifyToken, whatsappTemplateRoutes);
 router.use("/notifications", verifyToken, notificationRoutes);
 router.use("/wa", verifyToken, waRoutes);
 router.use("/reminders", verifyToken, reminderRoutes);
-router.use("/schedule", verifyToken, scheduleRoutes);
 router.use("/campaigns", verifyToken, campaignRoutes);
 
 // Rutas públicas (SIN autenticación)
