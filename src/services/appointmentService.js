@@ -253,8 +253,9 @@ const appointmentService = {
       client: payload.client,
       startDate: payload.startDate,
       skipNotification: payload.skipNotification,
+      customDurations: payload.customDurations,
     });
-    
+
     const {
       services,
       employee, // Puede ser string (un empleado para todas) o array (uno por servicio)
@@ -262,7 +263,7 @@ const appointmentService = {
       employeeRequestedByClient,
       client,
       startDate,
-      endDate, // 🕐 Fecha de fin personalizada (opcional)
+      endDate, // 🕐 Fecha de fin personalizada (opcional, solo para un servicio)
       organizationId,
       advancePayment,
       customPrices = {},
@@ -270,6 +271,7 @@ const appointmentService = {
       skipNotification = false, // 🔇 Nueva opción para no enviar WhatsApp
       sharedGroupId = null, // 🔗 GroupId compartido (opcional)
       sharedTokenHash = null, // 🔗 Token hash compartido (opcional)
+      customDurations = {}, // 🕐 Duraciones personalizadas por servicio (en minutos)
     } = payload;
     
     if (!Array.isArray(services) || services.length === 0) {
@@ -348,11 +350,20 @@ const appointmentService = {
         const svc = await serviceService.getServiceById(serviceId);
         if (!svc) throw new Error(`Servicio no encontrado: ${serviceId}`);
 
-        // 🕐 Usar endDate personalizado si viene en el payload (solo para primer servicio)
-        // Sino, calcular basándose en la duración del servicio
+        // 🕐 Calcular endDate para este servicio
+        // Prioridad:
+        // 1. Si hay customDurations[serviceId], usar esa duración
+        // 2. Si hay UN solo servicio y endDate personalizado, usar ese
+        // 3. Si no, usar la duración estándar del servicio
         let serviceEnd;
-        if (i === 0 && endDate) {
-          // Parsear endDate de la misma manera que startDate
+        const customDuration = customDurations[serviceId];
+
+        if (customDuration !== undefined && customDuration !== null) {
+          // Usar duración personalizada del frontend
+          serviceEnd = new Date(currentStart.getTime() + customDuration * 60000);
+          console.log(`🕐 Servicio ${i + 1} (${svc.name}): usando duración personalizada ${customDuration} min`);
+        } else if (services.length === 1 && endDate) {
+          // Un solo servicio con endDate personalizado → respetar duración personalizada
           if (typeof endDate === 'string') {
             const parsed = moment.tz(endDate, 'YYYY-MM-DDTHH:mm:ss', timezone);
             serviceEnd = parsed.toDate();
@@ -362,9 +373,12 @@ const appointmentService = {
             const duration = svc.duration ?? 0;
             serviceEnd = new Date(currentStart.getTime() + duration * 60000);
           }
+          console.log(`🕐 Servicio único con endDate personalizado`);
         } else {
+          // Usar duración estándar del servicio
           const duration = svc.duration ?? 0;
           serviceEnd = new Date(currentStart.getTime() + duration * 60000);
+          console.log(`🕐 Servicio ${i + 1} (${svc.name}): usando duración estándar ${duration} min`);
         }
 
         // 🔍 VALIDACIÓN DE DISPONIBILIDAD - Verificar citas simultáneas
