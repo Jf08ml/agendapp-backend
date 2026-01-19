@@ -17,6 +17,19 @@ const campaignItemSchema = new Schema(
   { _id: false }
 );
 
+const mediaSchema = new Schema(
+  {
+    url: { type: String, required: true },
+    type: {
+      type: String,
+      enum: ["image", "gif", "video"],
+      required: true,
+    },
+    fileId: String,
+  },
+  { _id: false }
+);
+
 const campaignSchema = new Schema(
   {
     organizationId: {
@@ -40,7 +53,8 @@ const campaignSchema = new Schema(
       required: true,
       maxlength: 2000,
     },
-    image: String, // URL or base64
+    image: String, // Legacy - URL or base64
+    media: mediaSchema, // New - supports image, gif, video
     
     // Referencia al bulk del microservicio
     bulkId: {

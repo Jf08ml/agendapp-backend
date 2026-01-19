@@ -22,3 +22,21 @@ export const uploadImage = async (req, res) => {
     res.status(500).json({ message: "Error al subir la imagen" });
   }
 };
+
+export const getAuthParams = async (req, res) => {
+  try {
+    const authParams = imagekit.getAuthenticationParameters();
+    res.status(200).json({
+      ok: true,
+      ...authParams,
+      publicKey: process.env.IMAGEKIT_PUBLIC_KEY,
+      urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT,
+    });
+  } catch (error) {
+    console.error("Error al obtener parámetros de autenticación:", error);
+    res.status(500).json({
+      ok: false,
+      message: "Error al obtener parámetros de autenticación"
+    });
+  }
+};
