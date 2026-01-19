@@ -198,7 +198,7 @@ const whatsappService = {
     }
     const payload = {
       clientId: org.clientIdWhatsapp,
-      phone: this.normalizePhoneForWhatsapp(phone, 'CO'),
+      phone: this.normalizePhoneForWhatsapp(phone, org.default_country || 'CO'),
       message,
     };
     if (image) payload.image = image;

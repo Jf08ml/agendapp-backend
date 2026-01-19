@@ -6,7 +6,7 @@ export const sleep = (ms = 150) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Valida si un número es utilizable para WhatsApp.
- * Acepta números de Colombia (+57) y México (+52) en varios formatos.
+ * Acepta números de Colombia (+57), México (+52) y España (+34) en varios formatos.
  */
 export function hasUsablePhone(input) {
   if (!input) return null;
@@ -26,6 +26,22 @@ export function hasUsablePhone(input) {
   // Colombia: 10 dígitos móviles (inicia por 3)
   if (/^\d{10}$/.test(digits) && digits.startsWith("3")) {
     return "57" + digits;
+  }
+
+  // España: +34XXXXXXXXX -> 34XXXXXXXXX (11 dígitos: 34 + 9 dígitos)
+  // Los móviles españoles empiezan por 6 o 7, los fijos por 9
+  if (/^34[679]\d{8}$/.test(digits)) {
+    return digits;
+  }
+
+  // España: 0034XXXXXXXXX -> 34XXXXXXXXX
+  if (/^0034[679]\d{8}$/.test(digits)) {
+    return digits.slice(2);
+  }
+
+  // España: 9 dígitos locales (empiezan por 6, 7 o 9)
+  if (/^[679]\d{8}$/.test(digits)) {
+    return "34" + digits;
   }
 
   // México: 10 dígitos locales -> 521XXXXXXXXXX (formato WhatsApp)
