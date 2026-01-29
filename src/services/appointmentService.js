@@ -962,45 +962,32 @@ const appointmentService = {
       let totalOk = 0;
       let totalSkipped = 0;
 
-      // Procesar cada organización
-      for (const org of orgsWithReminders) {
+      /**
+       * Procesa una pasada de recordatorio para una organización.
+       * Se reutiliza para el primer y segundo recordatorio.
+       * @param {Object} org - Organización
+       * @param {number} hoursBefore - Horas antes de la cita
+       * @param {string} sentField - Campo booleano de tracking (reminderSent | secondReminderSent)
+       * @param {string} bulkIdField - Campo de bulkId (reminderBulkId | secondReminderBulkId)
+       * @param {string} label - Etiqueta para logs
+       * @returns {{ ok: number, skipped: number }}
+       */
+      const processReminderPass = async (org, hoursBefore, sentField, bulkIdField, label) => {
         const orgId = org._id.toString();
-        const hoursBefore = org.reminderSettings?.hoursBefore || 24;
-        const sendTimeStart = org.reminderSettings?.sendTimeStart || "07:00";
-        const sendTimeEnd = org.reminderSettings?.sendTimeEnd || "20:00";
-        
-        // 🔧 FIX: Usar la timezone de la organización para todos los cálculos
         const timezone = org.timezone || 'America/Bogota';
         const nowInOrgTz = moment.tz(timezone);
         const currentHourOrg = nowInOrgTz.hour();
-        const currentMinuteOrg = nowInOrgTz.minute();
 
-        // Parsear horas del rango permitido
-        const [startHour, startMinute] = sendTimeStart.split(":").map(Number);
-        const [endHour, endMinute] = sendTimeEnd.split(":").map(Number);
-
-        // Verificar si estamos dentro del rango horario permitido
-        const currentTimeMinutes = currentHourOrg * 60 + currentMinuteOrg;
-        const startTimeMinutes = startHour * 60 + startMinute;
-        const endTimeMinutes = endHour * 60 + endMinute;
-
-        if (currentTimeMinutes < startTimeMinutes || currentTimeMinutes > endTimeMinutes) {
-          // Fuera del rango horario permitido para esta organización
-          continue;
-        }
-
-        // 🔧 FIX: Calcular ventana de tiempo usando la timezone de la organización
-        // Ventana desde el inicio de la hora actual + hoursBefore hasta el final de esa hora
-        // Esto asegura que capture todas las citas de esa hora, sin importar el minuto de ejecución
+        // Calcular ventana de tiempo objetivo
         const targetTimeStart = moment.tz(timezone).add(hoursBefore, 'hours').startOf('hour').toDate();
         const targetTimeEnd = moment.tz(timezone).add(hoursBefore, 'hours').endOf('hour').toDate();
 
-        // Buscar citas que estén en la ventana de tiempo objetivo y no tengan recordatorio enviado
+        // Buscar citas en la ventana que NO tengan este recordatorio enviado
         const appointmentsInWindow = await appointmentModel
           .find({
             organizationId: orgId,
             startDate: { $gte: targetTimeStart, $lt: targetTimeEnd },
-            reminderSent: false,
+            [sentField]: { $ne: true },
             status: { $nin: ['cancelled', 'cancelled_by_customer', 'cancelled_by_admin'] },
           })
           .populate("client")
@@ -1009,29 +996,28 @@ const appointmentService = {
           .populate("organizationId");
 
         if (!appointmentsInWindow.length) {
-          continue; // No hay citas en este momento para esta organización
+          return { ok: 0, skipped: 0 };
         }
 
-        // Obtener todos los clientes únicos que tienen citas en esta ventana
+        // Obtener todos los clientes únicos
         const clientIds = [...new Set(
           appointmentsInWindow
             .map(appt => appt.client?._id?.toString())
             .filter(Boolean)
         )];
 
-        // Obtener el rango del día completo para las citas encontradas
-        // La timezone ya está definida arriba
+        // Rango del día completo para consolidar citas del mismo cliente
         const targetDateStr = moment.tz(targetTimeStart, timezone).format('YYYY-MM-DD');
         const dayStart = moment.tz(targetDateStr, timezone).startOf('day').toDate();
         const dayEnd = moment.tz(targetDateStr, timezone).endOf('day').toDate();
 
-        // Buscar TODAS las citas del día para estos clientes (no solo de esta hora)
+        // Buscar TODAS las citas del día para estos clientes
         const appointments = await appointmentModel
           .find({
             organizationId: orgId,
             client: { $in: clientIds },
             startDate: { $gte: dayStart, $lt: dayEnd },
-            reminderSent: false,
+            [sentField]: { $ne: true },
             status: { $nin: ['cancelled', 'cancelled_by_customer', 'cancelled_by_admin'] },
           })
           .populate("client")
@@ -1040,25 +1026,22 @@ const appointmentService = {
           .populate("organizationId");
 
         if (!appointments.length) {
-          continue;
+          return { ok: 0, skipped: 0 };
         }
 
-        console.log(`[${org.name}] Procesando ${appointments.length} citas para recordatorio vía campaña`);
+        console.log(`[${org.name}] [${label}] Procesando ${appointments.length} citas (${hoursBefore}h antes)`);
 
         // Verificar sesión de WhatsApp
         const orgClientId = org.clientIdWhatsapp;
         if (!orgClientId) {
           console.warn(
-            `[${org.name}] Sin clientIdWhatsapp. Se omiten ${appointments.length} recordatorios.`
+            `[${org.name}] [${label}] Sin clientIdWhatsapp. Se omiten ${appointments.length} recordatorios.`
           );
-          totalSkipped += appointments.length;
-          continue;
+          return { ok: 0, skipped: appointments.length };
         }
 
-        // Agrupar por teléfono (cliente) - el servicio de campaña ya lo hace, 
-        // pero necesitamos preparar los items
+        // Agrupar por teléfono (cliente)
         const byPhone = new Map();
-        // 🔧 FIX: Usar la timezone de la organización en los formatos de fecha
         const fmtHour = new Intl.DateTimeFormat("es-ES", {
           hour: "2-digit",
           minute: "2-digit",
@@ -1072,13 +1055,11 @@ const appointmentService = {
         });
 
         for (const appt of appointments) {
-          // 🔧 FIX: Normalizar teléfono correctamente para campañas bulk
           const rawPhone = appt?.client?.phoneNumber;
-          const phoneE164 = normalizeToCOE164(rawPhone); // Devuelve +57XXXXXXXXXX
+          const phoneE164 = normalizeToCOE164(rawPhone);
           if (!phoneE164) continue;
-          
-          // Baileys (WhatsApp Web) requiere el número SIN el símbolo +
-          const phone = phoneE164.replace('+', ''); // -> 57XXXXXXXXXX
+
+          const phone = phoneE164.replace('+', '');
 
           const start = new Date(appt.startDate);
           const end = appt.endDate ? new Date(appt.endDate) : null;
@@ -1090,8 +1071,6 @@ const appointmentService = {
           const timeLabel = end
             ? `${fmtHour.format(start)} – ${fmtHour.format(end)}`
             : `${fmtHour.format(start)}`;
-
-          console.log(`[${org.name}] 🔗 Cita ${appt._id}: cancellationLink=${appt?.cancellationLink?.substring(0, 50)}...`);
 
           if (!byPhone.has(phone)) {
             byPhone.set(phone, {
@@ -1112,14 +1091,12 @@ const appointmentService = {
           if ((end || start) > bucket.lastEnd) bucket.lastEnd = end || start;
           if (appt?.employee?.names) bucket.employees.add(appt.employee.names);
           bucket.apptIds.add(String(appt._id));
-          // 🔗 Capturar el primer link de cancelación disponible
           if (!bucket.cancellationLink && appt?.cancellationLink) {
-            console.log(`[${org.name}] ✅ Asignando cancellationLink al bucket`);
             bucket.cancellationLink = appt.cancellationLink;
           }
         }
 
-        // Agregar address a las variables
+        // Construir items para la campaña
         const items = [];
         const includedIds = [];
 
@@ -1132,12 +1109,8 @@ const appointmentService = {
 
           const dateRange =
             bucket.firstStart.getTime() === bucket.lastEnd.getTime()
-              ? `${fmtDay.format(bucket.firstStart)} ${fmtHour.format(
-                  bucket.firstStart
-                )}`
-              : `${fmtDay.format(bucket.firstStart)} ${fmtHour.format(
-                  bucket.firstStart
-                )} – ${fmtHour.format(bucket.lastEnd)}`;
+              ? `${fmtDay.format(bucket.firstStart)} ${fmtHour.format(bucket.firstStart)}`
+              : `${fmtDay.format(bucket.firstStart)} ${fmtHour.format(bucket.firstStart)} – ${fmtHour.format(bucket.lastEnd)}`;
 
           const countNum = bucket.services.length;
           const isSingle = countNum === 1;
@@ -1157,52 +1130,31 @@ const appointmentService = {
               : "",
           };
 
-          console.log(`[${org.name}] 📋 Vars para ${bucket.names}:`, {
-            manage_block: vars.manage_block ? "SÍ PRESENTE" : "NO PRESENTE",
-            cancellationLink: bucket.cancellationLink ? "SÍ" : "NO",
-          });
-
-          console.log(`[${org.name}] 📱 Item para campaña:`, {
-            phone: bucket.phone,
-            names: bucket.names,
-            servicesCount: countNum,
-          });
-          
           items.push({ phone: bucket.phone, vars });
           includedIds.push(...Array.from(bucket.apptIds));
         }
 
         if (!items.length) {
-          console.log(`[${org.name}] No hay items válidos (teléfonos).`);
-          continue;
+          console.log(`[${org.name}] [${label}] No hay items válidos (teléfonos).`);
+          return { ok: 0, skipped: 0 };
         }
 
         // Enviar campaña
         try {
-          const targetDateStr = targetTimeStart.toISOString().slice(0, 10);
-          const title = `Recordatorios ${targetDateStr} ${currentHourOrg}:00 (${org.name})`;
+          const targetDateFmt = targetTimeStart.toISOString().slice(0, 10);
+          const title = `${label} ${targetDateFmt} ${currentHourOrg}:00 (${org.name})`;
 
           const { waBulkSend, waBulkOptIn } = await import("./waHttpService.js");
-          
-          // Obtener template personalizado (sin renderizar, con placeholders)
+
           const templateDoc = await WhatsappTemplate.findOne({ organizationId: org._id });
           const messageTpl = templateDoc?.reminder || whatsappTemplates.getDefaultTemplate('reminder');
-          
-          console.log(`[${org.name}] 📤 Usando template:`, templateDoc?.reminder ? 'PERSONALIZADO' : 'POR DEFECTO');
-          console.log(`[${org.name}] 📄 Template tiene {{manage_block}}:`, messageTpl.includes('{{manage_block}}') ? 'SÍ' : 'NO');
 
-          console.log(`[${org.name}] 📤 Enviando campaña:`, {
-            clientId: orgClientId,
-            itemCount: items.length,
-            items: items.map(it => ({ phone: it.phone, names: it.vars.names })),
-            title,
-          });
+          console.log(`[${org.name}] [${label}] 📤 Enviando campaña: ${items.length} mensajes`);
 
-          // Opcional: sincronizar opt-in
           try {
             await waBulkOptIn(items.map((it) => it.phone));
           } catch (e) {
-            console.warn(`[${org.name}] OptIn falló: ${e?.message || e}`);
+            console.warn(`[${org.name}] [${label}] OptIn falló: ${e?.message || e}`);
           }
 
           const result = await waBulkSend({
@@ -1214,28 +1166,62 @@ const appointmentService = {
           });
 
           console.log(
-            `[${org.name}] Campaña enviada: ${result.prepared} mensajes (bulkId: ${result.bulkId})`
+            `[${org.name}] [${label}] Campaña enviada: ${result.prepared} mensajes (bulkId: ${result.bulkId})`
           );
 
-          // Marcar citas como enviadas
+          // Marcar citas con el campo correspondiente
           if (includedIds.length) {
             await appointmentModel.updateMany(
               { _id: { $in: includedIds } },
-              { $set: { reminderSent: true, reminderBulkId: result.bulkId } }
+              { $set: { [sentField]: true, [bulkIdField]: result.bulkId } }
             );
           }
 
-          totalOk += includedIds.length;
-
-          // Pequeño respiro entre organizaciones
-          await sleep(300);
+          return { ok: includedIds.length, skipped: 0 };
         } catch (err) {
-          console.error(
-            `[${org.name}] Error enviando campaña:`,
-            err.message
-          );
-          totalSkipped += appointments.length;
+          console.error(`[${org.name}] [${label}] Error enviando campaña:`, err.message);
+          return { ok: 0, skipped: appointments.length };
         }
+      };
+
+      // Procesar cada organización
+      for (const org of orgsWithReminders) {
+        const sendTimeStart = org.reminderSettings?.sendTimeStart || "07:00";
+        const sendTimeEnd = org.reminderSettings?.sendTimeEnd || "20:00";
+        const timezone = org.timezone || 'America/Bogota';
+        const nowInOrgTz = moment.tz(timezone);
+        const currentHourOrg = nowInOrgTz.hour();
+        const currentMinuteOrg = nowInOrgTz.minute();
+
+        // Parsear horas del rango permitido
+        const [startHour, startMinute] = sendTimeStart.split(":").map(Number);
+        const [endHour, endMinute] = sendTimeEnd.split(":").map(Number);
+
+        // Verificar si estamos dentro del rango horario permitido
+        const currentTimeMinutes = currentHourOrg * 60 + currentMinuteOrg;
+        const startTimeMinutes = startHour * 60 + startMinute;
+        const endTimeMinutes = endHour * 60 + endMinute;
+
+        if (currentTimeMinutes < startTimeMinutes || currentTimeMinutes > endTimeMinutes) {
+          continue;
+        }
+
+        // Pasada 1: Recordatorio principal
+        const hoursBefore = org.reminderSettings?.hoursBefore || 24;
+        const r1 = await processReminderPass(org, hoursBefore, 'reminderSent', 'reminderBulkId', 'Recordatorio 1');
+        totalOk += r1.ok;
+        totalSkipped += r1.skipped;
+
+        // Pasada 2: Segundo recordatorio (si habilitado)
+        if (org.reminderSettings?.secondReminder?.enabled) {
+          const secondHoursBefore = org.reminderSettings.secondReminder.hoursBefore || 2;
+          const r2 = await processReminderPass(org, secondHoursBefore, 'secondReminderSent', 'secondReminderBulkId', 'Recordatorio 2');
+          totalOk += r2.ok;
+          totalSkipped += r2.skipped;
+        }
+
+        // Pequeño respiro entre organizaciones
+        await sleep(300);
       }
 
       console.log(

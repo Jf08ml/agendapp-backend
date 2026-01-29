@@ -74,6 +74,9 @@ const appointmentModelSchema = new mongoose.Schema(
       required: false,
     },
     reminderSent: { type: Boolean, default: false },
+    reminderBulkId: { type: String },
+    secondReminderSent: { type: Boolean, default: false },
+    secondReminderBulkId: { type: String },
     advancePayment: {
       type: Number,
       default: 0,

@@ -297,6 +297,18 @@ const organizationSchema = new mongoose.Schema({
       type: String,
       default: "20:00", // Hora fin para enviar (formato HH:mm)
     },
+    secondReminder: {
+      enabled: {
+        type: Boolean,
+        default: false,
+      },
+      hoursBefore: {
+        type: Number,
+        default: 2,
+        min: 1,
+        max: 72,
+      },
+    },
   },
 });
 
