@@ -27,7 +27,7 @@ const planSchema = new mongoose.Schema(
     },
     currency: {
       type: String,
-      enum: ["USD", "COP"],
+      enum: ["USD", "COP", "MXN", "EUR", "CLP", "CRC", "ARS", "BRL", "PEN", "VES", "PAB", "CAD"],
       default: "USD",
       required: true,
     },

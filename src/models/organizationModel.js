@@ -61,7 +61,7 @@ const PaymentMethodSchema = new mongoose.Schema(
   {
     type: {
       type: String,
-      enum: ["nequi", "bancolombia", "daviplata", "otros"],
+      enum: ["nequi", "bancolombia", "daviplata", "mercado_pago", "pix", "yape", "sinpe", "transferencia_bancaria", "efectivo", "otros"],
       required: true,
     },
     accountName: { type: String },
