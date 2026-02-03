@@ -29,6 +29,7 @@ const whatsappTemplateController = {
         scheduleAppointmentBatch: whatsappTemplates.getDefaultTemplate('scheduleAppointmentBatch'),
         recurringAppointmentSeries: whatsappTemplates.getDefaultTemplate('recurringAppointmentSeries'),
         reminder: whatsappTemplates.getDefaultTemplate('reminder'),
+        secondReminder: whatsappTemplates.getDefaultTemplate('secondReminder'),
         statusReservationApproved: whatsappTemplates.getDefaultTemplate('statusReservationApproved'),
         statusReservationRejected: whatsappTemplates.getDefaultTemplate('statusReservationRejected'),
         clientConfirmationAck: whatsappTemplates.getDefaultTemplate('clientConfirmationAck'),
@@ -58,7 +59,12 @@ const whatsappTemplateController = {
         reminder: {
           content: customTemplates.reminder || defaultTemplates.reminder,
           isCustom: !!customTemplates.reminder,
-          variables: ['{{names}}', '{{count}}', '{{cita_pal}}', '{{agendada_pal}}', '{{date_range}}', '{{organization}}', '{{address}}', '{{services_list}}', '{{employee}}'],
+          variables: ['{{names}}', '{{count}}', '{{cita_pal}}', '{{agendada_pal}}', '{{date_range}}', '{{organization}}', '{{address}}', '{{services_list}}', '{{employee}}', '{{manage_block}}', '{{recommendations}}'],
+        },
+        secondReminder: {
+          content: customTemplates.secondReminder || defaultTemplates.secondReminder,
+          isCustom: !!customTemplates.secondReminder,
+          variables: ['{{names}}', '{{count}}', '{{cita_pal}}', '{{agendada_pal}}', '{{date_range}}', '{{organization}}', '{{address}}', '{{services_list}}', '{{employee}}', '{{manage_block}}', '{{recommendations}}'],
         },
         statusReservationApproved: {
           content: customTemplates.statusReservationApproved || defaultTemplates.statusReservationApproved,
@@ -107,6 +113,7 @@ const whatsappTemplateController = {
         'scheduleAppointmentBatch',
         'recurringAppointmentSeries',
         'reminder',
+        'secondReminder',
         'statusReservationApproved',
         'statusReservationRejected',
         'clientConfirmationAck',
@@ -170,6 +177,7 @@ const whatsappTemplateController = {
         'scheduleAppointmentBatch',
         'recurringAppointmentSeries',
         'reminder',
+        'secondReminder',
         'statusReservationApproved',
         'statusReservationRejected',
         'clientConfirmationAck',
@@ -228,7 +236,9 @@ const whatsappTemplateController = {
       const validTypes = [
         'scheduleAppointment',
         'scheduleAppointmentBatch',
+        'recurringAppointmentSeries',
         'reminder',
+        'secondReminder',
         'statusReservationApproved',
         'statusReservationRejected',
         'clientConfirmationAck',
@@ -301,6 +311,8 @@ const whatsappTemplateController = {
         cita_pal: "citas",
         agendada_pal: "agendadas",
         appointments_list: `  1. Corte de cabello – 15/01/2026 a las 03:00 PM\n  2. Tinte – 22/01/2026 a las 03:00 PM`,
+        manage_block: "https://agenda.example.com/manage/abc123",
+        recommendations: `\n\n📝 *Recomendaciones:*\n• Llegar 10 minutos antes\n• Traer el cabello limpio y seco`,
       };
 
       // Renderizar la plantilla con los datos de ejemplo
@@ -338,6 +350,7 @@ const whatsappTemplateController = {
           scheduleAppointmentBatch: true,
           recurringAppointmentSeries: true,
           reminder: true,
+          secondReminder: true,
           statusReservationApproved: false,
           statusReservationRejected: false,
           clientConfirmationAck: true,
@@ -351,6 +364,7 @@ const whatsappTemplateController = {
         scheduleAppointmentBatch: true,
         recurringAppointmentSeries: true,
         reminder: true,
+        secondReminder: true,
         statusReservationApproved: false,
         statusReservationRejected: false,
         clientConfirmationAck: true,
@@ -382,9 +396,9 @@ const whatsappTemplateController = {
         'scheduleAppointmentBatch',
         'recurringAppointmentSeries',
         'reminder',
+        'secondReminder',
         'statusReservationApproved',
         'statusReservationRejected',
-        // 🆕 Nuevos tipos togglables
         'clientConfirmationAck',
         'clientCancellationAck',
       ];

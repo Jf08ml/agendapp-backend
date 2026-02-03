@@ -14,6 +14,9 @@ const serviceSchema = new Schema({
   // 👥 Número de clientes que pueden ser atendidos simultáneamente por un empleado
   // (ej: doctor puede ver 2 pacientes a la vez)
   maxConcurrentAppointments: { type: Number, default: 1, min: 1 },
+  // 📋 Recomendaciones para el cliente antes de la cita
+  // (ej: "Llegar sin maquillaje", "No consumir cafeína 2h antes")
+  recommendations: { type: String, default: null },
 });
 
 export default model("Service", serviceSchema);

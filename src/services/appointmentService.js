@@ -984,9 +984,10 @@ const appointmentService = {
        * @param {string} sentField - Campo booleano de tracking (reminderSent | secondReminderSent)
        * @param {string} bulkIdField - Campo de bulkId (reminderBulkId | secondReminderBulkId)
        * @param {string} label - Etiqueta para logs
+       * @param {string} templateType - Tipo de plantilla a usar ('reminder' | 'secondReminder')
        * @returns {{ ok: number, skipped: number }}
        */
-      const processReminderPass = async (org, hoursBefore, sentField, bulkIdField, label) => {
+      const processReminderPass = async (org, hoursBefore, sentField, bulkIdField, label, templateType = 'reminder') => {
         const orgId = org._id.toString();
         const timezone = org.timezone || 'America/Bogota';
         const nowInOrgTz = moment.tz(timezone);
@@ -1096,11 +1097,16 @@ const appointmentService = {
               employees: new Set(),
               apptIds: new Set(),
               cancellationLink: null,
+              recommendations: new Set(),
             });
           }
 
           const bucket = byPhone.get(phone);
           bucket.services.push({ name: serviceName, time: timeLabel });
+          // Agregar recomendaciones del servicio si existen
+          if (appt?.service?.recommendations) {
+            bucket.recommendations.add(appt.service.recommendations);
+          }
           if (start < bucket.firstStart) bucket.firstStart = start;
           if ((end || start) > bucket.lastEnd) bucket.lastEnd = end || start;
           if (appt?.employee?.names) bucket.employees.add(appt.employee.names);
@@ -1129,6 +1135,12 @@ const appointmentService = {
           const countNum = bucket.services.length;
           const isSingle = countNum === 1;
 
+          // Construir bloque de recomendaciones si existen
+          const recommendationsArr = Array.from(bucket.recommendations).filter(Boolean);
+          const recommendationsBlock = recommendationsArr.length > 0
+            ? `\n\n📝 *Recomendaciones:*\n${recommendationsArr.map(r => `• ${r}`).join('\n')}`
+            : "";
+
           const vars = {
             names: bucket.names,
             date_range: dateRange,
@@ -1142,6 +1154,7 @@ const appointmentService = {
             manage_block: bucket.cancellationLink
               ? `${bucket.cancellationLink.replace('source=confirmation', 'source=reminder')}\n\n`
               : "",
+            recommendations: recommendationsBlock,
           };
 
           items.push({ phone: bucket.phone, vars });
@@ -1161,7 +1174,7 @@ const appointmentService = {
           const { waBulkSend, waBulkOptIn } = await import("./waHttpService.js");
 
           const templateDoc = await WhatsappTemplate.findOne({ organizationId: org._id });
-          const messageTpl = templateDoc?.reminder || whatsappTemplates.getDefaultTemplate('reminder');
+          const messageTpl = templateDoc?.[templateType] || whatsappTemplates.getDefaultTemplate(templateType);
 
           console.log(`[${org.name}] [${label}] 📤 Enviando campaña: ${items.length} mensajes`);
 
@@ -1222,14 +1235,14 @@ const appointmentService = {
 
         // Pasada 1: Recordatorio principal
         const hoursBefore = org.reminderSettings?.hoursBefore || 24;
-        const r1 = await processReminderPass(org, hoursBefore, 'reminderSent', 'reminderBulkId', 'Recordatorio 1');
+        const r1 = await processReminderPass(org, hoursBefore, 'reminderSent', 'reminderBulkId', 'Recordatorio 1', 'reminder');
         totalOk += r1.ok;
         totalSkipped += r1.skipped;
 
         // Pasada 2: Segundo recordatorio (si habilitado)
         if (org.reminderSettings?.secondReminder?.enabled) {
           const secondHoursBefore = org.reminderSettings.secondReminder.hoursBefore || 2;
-          const r2 = await processReminderPass(org, secondHoursBefore, 'secondReminderSent', 'secondReminderBulkId', 'Recordatorio 2');
+          const r2 = await processReminderPass(org, secondHoursBefore, 'secondReminderSent', 'secondReminderBulkId', 'Recordatorio 2', 'secondReminder');
           totalOk += r2.ok;
           totalSkipped += r2.skipped;
         }
