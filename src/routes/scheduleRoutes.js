@@ -13,6 +13,7 @@ router.post("/available-slots", scheduleController.getAvailableSlots);
 router.post("/validate-datetime", scheduleController.validateDateTime);
 router.post("/multi-service-blocks", scheduleController.getMultiServiceBlocks);
 router.post("/available-slots-batch", scheduleController.getAvailableSlotsBatch);
+router.post("/check-days-availability", scheduleController.checkDaysAvailability);
 
 // 🔒 Rutas PROTEGIDAS (requieren autenticación) - Para gestión de horarios
 router.put("/organization/:orgId", verifyToken, scheduleController.updateOrganizationSchedule);

@@ -755,6 +755,53 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
   return blocks;
 }
 
+/**
+ * Verifica disponibilidad de múltiples días para un conjunto de servicios
+ * Retorna un objeto con cada día y si tiene al menos un bloque disponible
+ * @param {Array<string>} dateStrings - Array de fechas en formato "YYYY-MM-DD"
+ * @param {Object} organization - Documento de organización
+ * @param {Array} services - Array de servicios [{serviceId, employeeId|null, duration}]
+ * @param {Array} allEmployees - Todos los empleados relevantes
+ * @param {Array} appointments - Citas existentes del rango de días
+ * @returns {Object} { "YYYY-MM-DD": boolean, ... }
+ */
+function checkMultipleDaysAvailability(dateStrings, organization, services, allEmployees, appointments) {
+  const timezone = organization.timezone || 'America/Bogota';
+  const result = {};
+
+  for (const dateStr of dateStrings) {
+    const dateInTz = moment.tz(dateStr, timezone);
+    const dayOfWeek = dateInTz.day();
+
+    // Verificar que la organización esté abierta ese día
+    const orgSchedule = getOrganizationDaySchedule(organization, dayOfWeek);
+    if (!orgSchedule) {
+      result[dateStr] = false;
+      continue;
+    }
+
+    // Filtrar citas del día específico
+    const startOfDay = moment.tz(dateStr, timezone).startOf('day').toDate();
+    const endOfDay = moment.tz(dateStr, timezone).endOf('day').toDate();
+    const dayAppointments = appointments.filter(a =>
+      a.startDate >= startOfDay && a.startDate <= endOfDay
+    );
+
+    // Verificar si hay al menos un bloque disponible
+    const blocks = findAvailableMultiServiceBlocks(
+      dateStr,
+      organization,
+      services,
+      allEmployees,
+      dayAppointments
+    );
+
+    result[dateStr] = blocks.length > 0;
+  }
+
+  return result;
+}
+
 export default {
   getDayOfWeekFromDateString,
   timeToMinutes,
@@ -771,4 +818,5 @@ export default {
   isEmployeeAvailableOnDay,
   assignBestEmployeeForSlot,
   findAvailableMultiServiceBlocks,
+  checkMultipleDaysAvailability,
 };

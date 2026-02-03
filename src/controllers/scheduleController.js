@@ -752,6 +752,102 @@ const scheduleController = {
       return sendResponse(res, 500, null, `Error: ${error.message}`);
     }
   },
+
+  /**
+   * Verificar disponibilidad de múltiples días para un conjunto de servicios
+   * POST /api/schedule/check-days-availability
+   * Body: { organizationId, services: [{serviceId, employeeId|null, duration}], startDate, endDate }
+   * Returns: { availability: { "YYYY-MM-DD": boolean, ... } }
+   */
+  checkDaysAvailability: async (req, res) => {
+    const { organizationId, services, startDate, endDate } = req.body;
+
+    try {
+      // Validar parámetros
+      if (!organizationId || !services || !Array.isArray(services) || !startDate || !endDate) {
+        return sendResponse(res, 400, null, "Parámetros inválidos");
+      }
+
+      if (services.length === 0) {
+        return sendResponse(res, 400, null, "Debe proporcionar al menos un servicio");
+      }
+
+      // Obtener organización
+      const organization = await organizationModel.findById(organizationId);
+      if (!organization) {
+        return sendResponse(res, 404, null, "Organización no encontrada");
+      }
+
+      const timezone = organization.timezone || 'America/Bogota';
+
+      // Generar array de fechas entre startDate y endDate
+      const dateStrings = [];
+      let current = moment.tz(startDate, timezone);
+      const end = moment.tz(endDate, timezone);
+
+      while (current.isSameOrBefore(end, 'day')) {
+        dateStrings.push(current.format('YYYY-MM-DD'));
+        current.add(1, 'day');
+      }
+
+      // Limitar a máximo 60 días para evitar consultas muy pesadas
+      if (dateStrings.length > 60) {
+        return sendResponse(res, 400, null, "El rango máximo es de 60 días");
+      }
+
+      // Obtener empleados necesarios
+      const allEmployeeIds = new Set();
+      for (const svc of services) {
+        if (svc.employeeId) {
+          allEmployeeIds.add(svc.employeeId);
+        } else {
+          // Obtener empleados elegibles para este servicio
+          const eligible = await employeeModel.find({
+            organizationId,
+            isActive: true,
+            services: svc.serviceId
+          });
+          eligible.forEach(e => allEmployeeIds.add(e._id.toString()));
+        }
+      }
+
+      const allEmployees = await employeeModel.find({
+        _id: { $in: Array.from(allEmployeeIds) }
+      });
+
+      if (allEmployees.length === 0) {
+        // Si no hay empleados, todos los días están sin disponibilidad
+        const availability = {};
+        dateStrings.forEach(d => { availability[d] = false; });
+        return sendResponse(res, 200, { availability }, "Sin empleados disponibles");
+      }
+
+      // Obtener todas las citas en el rango
+      const rangeStart = moment.tz(startDate, timezone).startOf('day').toDate();
+      const rangeEnd = moment.tz(endDate, timezone).endOf('day').toDate();
+
+      const appointments = await appointmentModel.find({
+        organizationId,
+        employee: { $in: Array.from(allEmployeeIds) },
+        startDate: { $gte: rangeStart, $lte: rangeEnd },
+        status: { $nin: ['cancelled_by_customer', 'cancelled_by_admin'] }
+      });
+
+      // Verificar disponibilidad de cada día
+      const availability = scheduleService.checkMultipleDaysAvailability(
+        dateStrings,
+        organization,
+        services,
+        allEmployees,
+        appointments
+      );
+
+      return sendResponse(res, 200, { availability }, "Disponibilidad obtenida exitosamente");
+
+    } catch (error) {
+      return sendResponse(res, 500, null, `Error: ${error.message}`);
+    }
+  },
 };
 
 export default scheduleController;

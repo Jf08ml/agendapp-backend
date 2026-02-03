@@ -36,7 +36,10 @@ router.get("/:id", appointmentController.getAppointmentById);
 // Actualizar una cita específica por ID
 router.put("/:id", appointmentController.updateAppointment);
 
-// Eliminar una cita específica por ID
+// Cancelar una cita (cambia estado a cancelled_by_admin, mantiene historial)
+router.patch("/:id/cancel", appointmentController.cancelAppointment);
+
+// Eliminar una cita definitivamente (sin historial)
 router.delete("/:id", appointmentController.deleteAppointment);
 
 // Obtener todas las citas de un empleado específico

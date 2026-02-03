@@ -1,5 +1,6 @@
 import appointmentService from "../services/appointmentService.js";
 import appointmentSeriesService from "../services/appointmentSeriesService.js";
+import cancellationService from "../services/cancellationService.js";
 import organizationService from "../services/organizationService.js";
 import subscriptionService from "../services/subscriptionService.js";
 import sendResponse from "../utils/sendResponse.js";
@@ -169,9 +170,11 @@ const appointmentController = {
   // Controlador para obtener citas por cliente
   getAppointmentsByClient: async (req, res) => {
     const { clientId } = req.params;
+    const { status } = req.query; // Filtro opcional por estado (puede ser "pending,confirmed" o "cancelled_by_admin")
     try {
       const appointments = await appointmentService.getAppointmentsByClient(
-        clientId
+        clientId,
+        status
       );
       sendResponse(
         res,
@@ -218,7 +221,40 @@ const appointmentController = {
     }
   },
 
-  // Controlador para eliminar una cita
+  // Controlador para cancelar una cita (cambia estado a cancelled_by_admin, mantiene historial)
+  cancelAppointment: async (req, res) => {
+    const { id } = req.params;
+    try {
+      const appointmentData = await appointmentService.getAppointmentById(id);
+
+      // Usar cancellationService para cambiar el estado
+      const result = await cancellationService.cancelAppointment(id, 'admin');
+
+      if (!result.success) {
+        return sendResponse(res, 400, null, result.message);
+      }
+
+      const organization = await organizationService.getOrganizationById(
+        appointmentData.organizationId
+      );
+
+      const notify = {
+        title: "Cita cancelada",
+        message: "Se ha cancelado una cita",
+        icon: organization.branding.pwaIcon,
+      };
+
+      await subscriptionService.sendNotificationToUser(
+        appointmentData.employee,
+        JSON.stringify(notify)
+      );
+      sendResponse(res, 200, result.data, "Cita cancelada exitosamente");
+    } catch (error) {
+      sendResponse(res, 404, null, error.message);
+    }
+  },
+
+  // Controlador para eliminar una cita definitivamente (sin historial)
   deleteAppointment: async (req, res) => {
     const { id } = req.params;
     try {
@@ -230,8 +266,8 @@ const appointmentController = {
       );
 
       const notify = {
-        title: "Cita cancelada",
-        message: "Se ha cancelado una cita",
+        title: "Cita eliminada",
+        message: "Se ha eliminado una cita",
         icon: organization.branding.pwaIcon,
       };
 

@@ -786,12 +786,26 @@ const appointmentService = {
       .exec();
   },
 
-  // Obtener las citas de un empleado
-  getAppointmentsByClient: async (client) => {
+  // Obtener las citas de un cliente con filtro opcional por estado
+  getAppointmentsByClient: async (client, status = null) => {
+    const query = { client };
+
+    // Si se especifica un filtro de estado, aplicarlo
+    if (status) {
+      // Puede ser un estado individual o múltiples separados por coma
+      const statuses = status.split(',').map(s => s.trim());
+      if (statuses.length === 1) {
+        query.status = statuses[0];
+      } else {
+        query.status = { $in: statuses };
+      }
+    }
+
     return await appointmentModel
-      .find({ client })
+      .find(query)
       .populate("service")
       .populate("employee")
+      .sort({ startDate: -1 }) // Ordenar por fecha descendente
       .exec();
   },
 
