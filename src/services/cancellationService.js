@@ -50,14 +50,14 @@ const cancellationService = {
       // ⚡ PASO 1: Buscar con SHA-256 (tokens nuevos - búsqueda directa)
       const tokenHashSHA256 = crypto.createHash('sha256').update(token).digest('hex');
       
-      let appointment = await Appointment.findOne({ 
+      let appointment = await Appointment.findOne({
         cancelTokenHash: tokenHashSHA256,
         startDate: { $gte: thirtyDaysAgo }
       })
         .select('service client organizationId startDate endDate status clientConfirmed groupId cancelTokenHash')
         .populate('service', 'name duration')
         .populate('client', 'name')
-        .populate('organizationId', 'name timezone')
+        .populate('organizationId', 'name timezone cancellationPolicy')
         .lean();
 
       if (appointment) {
@@ -66,14 +66,14 @@ const cancellationService = {
         // 🔄 PASO 2: Fallback - Buscar con bcrypt (tokens antiguos)
         console.log('🔄 Token SHA-256 no encontrado, buscando con bcrypt (token antiguo)...');
         
-        const appointments = await Appointment.find({ 
+        const appointments = await Appointment.find({
           cancelTokenHash: { $exists: true, $ne: null },
           startDate: { $gte: thirtyDaysAgo }
         })
           .select('+cancelTokenHash service client organizationId startDate endDate status clientConfirmed groupId')
           .populate('service', 'name duration')
           .populate('client', 'name')
-          .populate('organizationId', 'name timezone')
+          .populate('organizationId', 'name timezone cancellationPolicy')
           .lean();
 
         console.log(`📋 Buscando en ${appointments.length} appointments con bcrypt...`);
@@ -107,13 +107,13 @@ const cancellationService = {
         
         if (appointment.groupId) {
           console.log(`👥 Buscando citas del grupo: ${appointment.groupId}`);
-          groupAppointments = await Appointment.find({ 
-            groupId: appointment.groupId 
+          groupAppointments = await Appointment.find({
+            groupId: appointment.groupId
           })
             .select('service client organizationId startDate endDate status clientConfirmed groupId')
             .populate('service', 'name duration')
             .populate('client', 'name')
-            .populate('organizationId', 'name timezone')
+            .populate('organizationId', 'name timezone cancellationPolicy')
             .lean();
           
           console.log(`👥 Encontradas ${groupAppointments.length} citas en el grupo`);
@@ -148,21 +148,70 @@ const cancellationService = {
           };
         }
 
-        return {
-          valid: true,
-          type: 'appointment',
-          isGroup: !!appointment.groupId,
-          groupId: appointment.groupId,
-          appointments: groupAppointments.map(apt => ({
+        // 🚫 Aplicar política de cancelación de la organización
+        const cancellationPolicy = org.cancellationPolicy || {};
+        const minHours = cancellationPolicy.minHoursBeforeAppointment || 0;
+        const preventConfirmed = cancellationPolicy.preventCancellingConfirmed || false;
+
+        // Procesar cada cita y verificar si puede ser cancelada según la política
+        const appointmentsWithPolicy = groupAppointments.map(apt => {
+          const aptStart = moment.tz(apt.startDate, timezone);
+          const hoursUntilAppointment = aptStart.diff(now, 'hours', true);
+          const isCancelled = apt.status.includes('cancelled');
+          const isPast = aptStart.isBefore(now);
+
+          // Determinar si la cancelación está bloqueada por política
+          let policyBlocked = false;
+          let policyBlockedReason = null;
+
+          if (!isCancelled && !isPast) {
+            // Verificar restricción de horas mínimas
+            if (minHours > 0 && hoursUntilAppointment < minHours) {
+              policyBlocked = true;
+              policyBlockedReason = `No se puede cancelar con menos de ${minHours} horas de anticipación`;
+            }
+
+            // Verificar restricción de citas confirmadas (por admin o por cliente)
+            if (!policyBlocked && preventConfirmed && (apt.status === 'confirmed' || apt.clientConfirmed)) {
+              policyBlocked = true;
+              policyBlockedReason = apt.clientConfirmed
+                ? 'No se pueden cancelar citas que ya confirmaste'
+                : 'No se pueden cancelar citas confirmadas';
+            }
+          }
+
+          return {
             id: apt._id,
             serviceName: apt.service?.name,
             startDate: apt.startDate,
             endDate: apt.endDate,
             status: apt.status,
             clientConfirmed: apt.clientConfirmed || false,
-            isCancelled: apt.status.includes('cancelled'),
-            isPast: moment.tz(apt.startDate, timezone).isBefore(now),
-          })),
+            isCancelled,
+            isPast,
+            policyBlocked,
+            policyBlockedReason,
+          };
+        });
+
+        // Verificar si todas las citas cancelables están bloqueadas por política
+        const cancellableAppointments = appointmentsWithPolicy.filter(
+          apt => !apt.isCancelled && !apt.isPast && !apt.policyBlocked
+        );
+        const allBlockedByPolicy = appointmentsWithPolicy.some(apt => apt.policyBlocked) &&
+          cancellableAppointments.length === 0;
+
+        return {
+          valid: true,
+          type: 'appointment',
+          isGroup: !!appointment.groupId,
+          groupId: appointment.groupId,
+          appointments: appointmentsWithPolicy,
+          allBlockedByPolicy,
+          cancellationPolicy: {
+            minHoursBeforeAppointment: minHours,
+            preventCancellingConfirmed: preventConfirmed,
+          },
           data: {
             customerName: appointment.client?.name,
             organizationName: org.name,
@@ -173,13 +222,13 @@ const cancellationService = {
 
       // 2️⃣ Si no se encontró en Appointments, buscar en Reservations
       // Primero intentar con SHA-256
-      let reservation = await Reservation.findOne({ 
+      let reservation = await Reservation.findOne({
         cancelTokenHash: tokenHashSHA256,
         startDate: { $gte: thirtyDaysAgo }
       })
         .select('serviceId organizationId startDate status customerDetails appointmentId cancelTokenHash')
         .populate('serviceId', 'name duration')
-        .populate('organizationId', 'name timezone')
+        .populate('organizationId', 'name timezone cancellationPolicy')
         .lean();
 
       if (reservation) {
@@ -187,13 +236,13 @@ const cancellationService = {
       } else {
         // Fallback a bcrypt
         console.log('🔄 Buscando reservations con bcrypt...');
-        const reservations = await Reservation.find({ 
+        const reservations = await Reservation.find({
           cancelTokenHash: { $exists: true, $ne: null },
           startDate: { $gte: thirtyDaysAgo }
         })
           .select('+cancelTokenHash serviceId organizationId startDate status customerDetails appointmentId')
           .populate('serviceId', 'name duration')
-          .populate('organizationId', 'name timezone')
+          .populate('organizationId', 'name timezone cancellationPolicy')
           .lean();
 
         for (const res of reservations) {
@@ -251,10 +300,29 @@ const cancellationService = {
           };
         }
 
+        // 🚫 Aplicar política de cancelación para reservaciones
+        const cancellationPolicy = org.cancellationPolicy || {};
+        const minHours = cancellationPolicy.minHoursBeforeAppointment || 0;
+        const hoursUntilAppointment = appointmentTime.diff(now, 'hours', true);
+
+        let policyBlocked = false;
+        let policyBlockedReason = null;
+
+        if (minHours > 0 && hoursUntilAppointment < minHours) {
+          policyBlocked = true;
+          policyBlockedReason = `No se puede cancelar con menos de ${minHours} horas de anticipación`;
+        }
+
         return {
           valid: true,
           type: 'reservation',
           id: reservation._id,
+          policyBlocked,
+          policyBlockedReason,
+          cancellationPolicy: {
+            minHoursBeforeAppointment: minHours,
+            preventCancellingConfirmed: cancellationPolicy.preventCancellingConfirmed || false,
+          },
           data: {
             serviceName: reservation.serviceId?.name,
             startDate: reservation.startDate,
@@ -298,17 +366,58 @@ const cancellationService = {
       }
 
       if (info.type === 'reservation') {
+        // 🚫 Verificar política de cancelación para reservaciones
+        if (info.policyBlocked) {
+          return {
+            success: false,
+            message: info.policyBlockedReason || 'No se puede cancelar esta reserva según la política de cancelación',
+            policyBlocked: true,
+          };
+        }
         return await this.cancelReservation(info.id, reason);
       }
 
       if (info.type === 'appointment') {
-        // Si es un grupo y se especificaron IDs, cancelar solo esos
+        // 🚫 Verificar política de cancelación para citas
+        // Si se especificaron IDs, verificar que ninguno esté bloqueado por política
+        let idsToCancel;
+
         if (info.isGroup && appointmentIds && appointmentIds.length > 0) {
-          return await this.cancelAppointmentsInGroup(appointmentIds, reason);
+          // Filtrar IDs que están bloqueados por política
+          const blockedIds = info.appointments
+            .filter(apt => apt.policyBlocked && appointmentIds.includes(String(apt.id)))
+            .map(apt => String(apt.id));
+
+          if (blockedIds.length > 0) {
+            const blockedApt = info.appointments.find(apt => blockedIds.includes(String(apt.id)));
+            return {
+              success: false,
+              message: blockedApt?.policyBlockedReason || 'Algunas citas no pueden ser canceladas según la política de cancelación',
+              policyBlocked: true,
+              blockedAppointments: blockedIds,
+            };
+          }
+
+          idsToCancel = appointmentIds;
+        } else {
+          // Si no se especificaron IDs, cancelar todas las citas cancelables
+          const cancellableAppointments = info.appointments.filter(
+            apt => !apt.isCancelled && !apt.isPast && !apt.policyBlocked
+          );
+
+          if (cancellableAppointments.length === 0) {
+            // Todas están bloqueadas por política
+            const blockedApt = info.appointments.find(apt => apt.policyBlocked);
+            return {
+              success: false,
+              message: blockedApt?.policyBlockedReason || 'No hay citas que se puedan cancelar según la política de cancelación',
+              policyBlocked: true,
+            };
+          }
+
+          idsToCancel = cancellableAppointments.map(apt => apt.id);
         }
-        
-        // Si no se especificaron IDs, cancelar todas las citas del grupo (o la única cita)
-        const idsToCancel = info.appointments.map(apt => apt.id);
+
         return await this.cancelAppointmentsInGroup(idsToCancel, reason);
       }
 

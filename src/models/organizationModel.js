@@ -310,6 +310,21 @@ const organizationSchema = new mongoose.Schema({
       },
     },
   },
+  // 🚫 Política de cancelación de citas
+  cancellationPolicy: {
+    // Horas mínimas antes de la cita para permitir cancelación (0 = sin restricción)
+    minHoursBeforeAppointment: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 168, // Máximo 1 semana
+    },
+    // No permitir cancelar citas que ya fueron confirmadas por el admin
+    preventCancellingConfirmed: {
+      type: Boolean,
+      default: false,
+    },
+  },
 });
 
 export default mongoose.model("Organization", organizationSchema);

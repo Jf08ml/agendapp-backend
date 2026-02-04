@@ -129,6 +129,7 @@ const organizationService = {
       default_country,
       timezone,
       currency,
+      cancellationPolicy,
     } = organizationData;
 
     const organization = await Organization.findById(id);
@@ -250,6 +251,14 @@ const organizationService = {
     // 💱 Actualizar moneda si se proporciona
     if (currency !== undefined) {
       organization.currency = currency;
+    }
+
+    // 🚫 Actualizar política de cancelación si se proporciona
+    if (cancellationPolicy !== undefined) {
+      organization.cancellationPolicy = {
+        ...organization.cancellationPolicy,
+        ...cancellationPolicy,
+      };
     }
 
     // Encriptar la contraseña solo si se proporciona una nueva
