@@ -64,7 +64,9 @@ const serviceService = {
       errors: [],
       totalProcessed: 0,
       totalSuccess: 0,
-      totalErrors: 0
+      totalErrors: 0,
+      created: 0,
+      updated: 0
     };
 
     console.log(`[bulkCreateServices] Procesando ${servicesData.length} servicios para organización ${organizationId}`);
@@ -100,10 +102,10 @@ const serviceService = {
           }
         }
 
-        console.log(`[bulkCreateServices] Fila ${i + 2}: Procesando ${row.name}, precio: ${price}, duración: ${duration}`);
+        // Determinar si es isActive
+        const isActive = row.isActive !== false && row.isActive !== 'No' && row.isActive !== 'no';
 
-        // Crear servicio
-        const newService = new Service({
+        const serviceData = {
           name: row.name.trim(),
           type: row.type ? row.type.trim() : '',
           description: row.description ? row.description.trim() : '',
@@ -112,15 +114,45 @@ const serviceService = {
           hidePrice: row.hidePrice === true || row.hidePrice === 'true' || row.hidePrice === 'Sí' || row.hidePrice === 'Si',
           maxConcurrentAppointments: maxConcurrentAppointments,
           organizationId,
-          isActive: true,
-        });
+          isActive: isActive,
+        };
 
-        const savedService = await newService.save();
+        let savedService;
+        let action = 'CREADO';
+
+        // Si tiene ID, intenta actualizar; si no, crea nuevo
+        if (row._id && row._id !== '' && row._id !== '(dejar vacío para crear nuevo)') {
+          console.log(`[bulkCreateServices] Fila ${i + 2}: Actualizando servicio ${row._id}`);
+          
+          // Buscar y actualizar servicio existente
+          savedService = await Service.findByIdAndUpdate(
+            row._id,
+            serviceData,
+            { new: true, runValidators: true }
+          );
+
+          if (!savedService) {
+            throw new Error(`Servicio con ID ${row._id} no encontrado`);
+          }
+
+          results.updated++;
+          action = 'ACTUALIZADO';
+        } else {
+          console.log(`[bulkCreateServices] Fila ${i + 2}: Creando nuevo servicio ${row.name}`);
+          
+          // Crear nuevo servicio
+          const newService = new Service(serviceData);
+          savedService = await newService.save();
+          results.created++;
+          action = 'CREADO';
+        }
+
         results.success.push({
           row: i + 2, // +2 porque la primera fila es encabezado y Excel empieza en 1
           name: savedService.name,
           price: savedService.price,
-          duration: savedService.duration
+          duration: savedService.duration,
+          action: action
         });
         results.totalSuccess++;
 
@@ -138,7 +170,7 @@ const serviceService = {
       }
     }
 
-    console.log(`[bulkCreateServices] Completado: ${results.totalSuccess} éxitos, ${results.totalErrors} errores`);
+    console.log(`[bulkCreateServices] Completado: ${results.totalSuccess} éxitos, ${results.totalErrors} errores (${results.created} creados, ${results.updated} actualizados)`);
     return results;
   },
 };
