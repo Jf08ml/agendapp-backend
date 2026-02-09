@@ -12,7 +12,6 @@ import serviceService from './serviceService.js';
 import clientService from './clientService.js';
 import whatsappTemplates from '../utils/whatsappTemplates.js';
 import { waIntegrationService } from './waIntegrationService.js';
-import { hasUsablePhone } from '../utils/timeAndPhones.js';
 import cancellationService from './cancellationService.js';
 import { generateCancellationLink } from '../utils/cancellationUtils.js';
 
@@ -551,14 +550,12 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
         ? await employeeService.getEmployeeById(baseAppointment.employee)
         : baseAppointment.employee;
 
-      // Verificar que el cliente tenga teléfono utilizable
-      const rawPhone = clientDoc?.phoneNumber;
-      const usablePhone = hasUsablePhone(rawPhone);
-      
-      if (!usablePhone) {
+      // Usar phone_e164 (ya tiene código de país correcto) con fallback al phoneNumber
+      const phoneE164 = clientDoc?.phone_e164 || clientDoc?.phoneNumber;
+
+      if (!phoneE164) {
         console.warn('⚠️ Cliente sin teléfono utilizable; no se enviará mensaje WhatsApp para la serie.');
       } else {
-        const phoneE164 = usablePhone.startsWith('+') ? usablePhone : `+${usablePhone}`;
         
         if (notifyAllAppointments) {
           // 📨 OPCIÓN 1: Enviar UN mensaje con TODAS las citas de la serie

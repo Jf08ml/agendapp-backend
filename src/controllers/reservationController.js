@@ -13,7 +13,6 @@ import employeeModel from "../models/employeeModel.js";
 import cancellationService from "../services/cancellationService.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
 import { waIntegrationService } from "../services/waIntegrationService.js";
-import { hasUsablePhone } from "../utils/timeAndPhones.js";
 import { generateCancellationLink } from "../utils/cancellationUtils.js";
 
 // ---------------------- helpers de notificación ----------------------
@@ -457,11 +456,10 @@ const reservationController = {
               templateData
             );
 
-            const usablePhone = hasUsablePhone(customerDetails.phone);
-            if (usablePhone) {
+            if (customerDetails.phone) {
               await waIntegrationService.sendMessage({
                 orgId: organizationId,
-                phone: `+${usablePhone}`,
+                phone: customerDetails.phone,
                 message: msg,
                 image: null,
               });

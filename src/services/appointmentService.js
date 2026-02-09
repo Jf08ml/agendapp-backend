@@ -7,7 +7,6 @@ import WhatsappTemplate from "../models/whatsappTemplateModel.js";
 import clientService from "../services/clientService.js";
 import employeeService from "../services/employeeService.js";
 import { waIntegrationService } from "../services/waIntegrationService.js";
-import { hasUsablePhone, normalizeToCOE164 } from "../utils/timeAndPhones.js";
 import cancellationService from "./cancellationService.js";
 import { generateCancellationLink } from "../utils/cancellationUtils.js";
 import notificationService from "./notificationService.js";
@@ -186,7 +185,7 @@ const appointmentService = {
       const whatsappTemplate = await WhatsappTemplate.findOne({ organizationId });
       const isConfirmationEnabled = whatsappTemplate?.enabledTypes?.scheduleAppointment !== false;
 
-      if (isConfirmationEnabled && client?.phoneNumber) {
+      if (isConfirmationEnabled && (client?.phone_e164 || client?.phoneNumber)) {
         const msg = await whatsappTemplates.getRenderedTemplate(
           organizationId,
           'scheduleAppointment',
@@ -198,7 +197,7 @@ const appointmentService = {
 
         await whatsappService.sendMessage(
           organizationId,
-          client?.phoneNumber,
+          client?.phone_e164 || client?.phoneNumber,
           msg
         );
         console.log(`✅ Confirmación enviada para cita ${newAppointment._id}`);
@@ -560,20 +559,14 @@ const appointmentService = {
             : employee;
 
 
-        const rawPhone = clientDoc?.phoneNumber;
-
-        // 1) validar con tu hasUsablePhone (retorna "57XXXXXXXXXX" o null)
-        const usable = hasUsablePhone(rawPhone);
-        if (!usable) {
+        // Usar phone_e164 (ya tiene el código de país correcto) con fallback al phoneNumber
+        const phoneE164 = clientDoc?.phone_e164 || clientDoc?.phoneNumber;
+        if (!phoneE164) {
           console.warn(
             "Cliente sin teléfono utilizable; no se enviará WhatsApp."
           );
           return created.map((c) => c.saved);
         }
-
-        // 2) normalizar a E.164 (+57XXXXXXXXXX) para el envío 1-a-1
-        //    Si tu wa-backend acepta también "57XXXXXXXXXX", podrías usar `usable` directo.
-        const phoneE164 = hasUsablePhone(rawPhone) || `+${usable}`;
 
         // Armar datos para el template
         const templateData = {
@@ -1070,11 +1063,12 @@ const appointmentService = {
         });
 
         for (const appt of appointments) {
-          const rawPhone = appt?.client?.phoneNumber;
-          const phoneE164 = normalizeToCOE164(rawPhone);
-          if (!phoneE164) continue;
+          // Usar phone_e164 (ya tiene código de país correcto) con fallback
+          const clientPhone = appt?.client?.phone_e164 || appt?.client?.phoneNumber;
+          if (!clientPhone) continue;
 
-          const phone = phoneE164.replace('+', '');
+          // Asegurar formato E.164 y luego quitar el + para Baileys
+          const phone = clientPhone.startsWith('+') ? clientPhone.replace('+', '') : clientPhone;
 
           const start = new Date(appt.startDate);
           const end = appt.endDate ? new Date(appt.endDate) : null;
@@ -1380,7 +1374,7 @@ const appointmentService = {
           $gte: startOfDay,
           $lte: endOfDay
         }
-      }).populate('client', 'name phoneNumber');
+      }).populate('client', 'name phoneNumber phone_e164 phone_country');
 
       const results = {
         total: pendingAppointments.length,

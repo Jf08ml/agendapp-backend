@@ -4,7 +4,7 @@ import http from "http";
 import https from "https";
 import organizationService from "./organizationService.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
-import { normalizePhoneNumber, formatPhone } from "../utils/phoneUtils.js";
+import { normalizePhoneNumber } from "../utils/phoneUtils.js";
 
 /** ===================== CONFIG ===================== */
 const BASE_URL =
@@ -71,7 +71,7 @@ const whatsappService = {
         contentSid: "HXc1cdd029c3eba4a1f303fd922ee74da6",
         contentVariables: JSON.stringify({ ...appointmentDetails }),
         from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
-        to: `whatsapp:+${this.normalizePhoneForWhatsapp(phone, 'CO')}`,
+        to: `whatsapp:+${this.normalizePhoneForWhatsapp(phone)}`,
       });
       return { message: "Mensaje enviado correctamente" };
     } catch (error) {
@@ -92,7 +92,7 @@ const whatsappService = {
             : "HX3c8a17fed3dc853f82d4eaabdb115857",
         contentVariables: JSON.stringify({ ...reservationDetails }),
         from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
-        to: `whatsapp:+${this.normalizePhoneForWhatsapp(phone, 'CO')}`,
+        to: `whatsapp:+${this.normalizePhoneForWhatsapp(phone)}`,
       });
 
       return { message: "Mensaje enviado correctamente" };
@@ -111,7 +111,7 @@ const whatsappService = {
         contentSid: "HX78a056237b71cb5f3232722cbf09b63d",
         contentVariables: JSON.stringify({ ...appointmentDetails }),
         from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
-        to: `whatsapp:+${this.normalizePhoneForWhatsapp(phone, 'CO')}`,
+        to: `whatsapp:+${this.normalizePhoneForWhatsapp(phone)}`,
       });
 
       return { message: "Mensaje enviado correctamente" };

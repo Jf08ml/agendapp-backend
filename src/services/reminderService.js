@@ -5,7 +5,6 @@ import organizationModel from "../models/organizationModel.js";
 import WhatsappTemplate from "../models/whatsappTemplateModel.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
 import {
-  normalizeToCOE164,
   getBogotaDayWindowUTC,
   getDayWindowUTC,
   sleep,
@@ -111,17 +110,16 @@ export const reminderService = {
       let skippedNoPhone = 0;
       
       for (const a of appts) {
-        // 🔧 FIX: Normalizar teléfono igual que en el cronjob automático
-        const rawPhone = a?.client?.phoneNumber;
-        const phoneE164 = normalizeToCOE164(rawPhone); // Devuelve +57XXXXXXXXXX o +521XXXXXXXXXX
-        if (!phoneE164) {
+        // Usar phone_e164 (ya tiene código de país correcto) con fallback al phoneNumber
+        const clientPhone = a?.client?.phone_e164 || a?.client?.phoneNumber;
+        if (!clientPhone) {
           skippedNoPhone++;
-          console.warn(`[${_orgId}] Cita ${a._id} sin teléfono válido. Cliente: ${a?.client?.name}, Tel: ${rawPhone}`);
+          console.warn(`[${_orgId}] Cita ${a._id} sin teléfono válido. Cliente: ${a?.client?.name}, Tel: ${a?.client?.phoneNumber}`);
           continue;
         }
-        
+
         // Baileys (WhatsApp Web) requiere el número SIN el símbolo +
-        const phone = phoneE164.replace('+', ''); // -> 57XXXXXXXXXX o 521XXXXXXXXXX
+        const phone = clientPhone.startsWith('+') ? clientPhone.replace('+', '') : clientPhone;
 
         const start = new Date(a.startDate);
         const end = a.endDate ? new Date(a.endDate) : null;
