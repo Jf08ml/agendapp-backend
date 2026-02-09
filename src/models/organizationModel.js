@@ -250,6 +250,10 @@ const organizationSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  enableOnlineBooking: {
+    type: Boolean,
+    default: true,
+  },
   paymentMethods: {
     type: [PaymentMethodSchema],
     default: [],

@@ -119,6 +119,7 @@ const organizationService = {
       domain,
       reservationPolicy,
       showLoyaltyProgram,
+      enableOnlineBooking,
       welcomeTitle,
       welcomeDescription,
       homeLayout,
@@ -205,6 +206,10 @@ const organizationService = {
 
     if (showLoyaltyProgram !== undefined) {
       organization.showLoyaltyProgram = showLoyaltyProgram;
+    }
+
+    if (enableOnlineBooking !== undefined) {
+      organization.enableOnlineBooking = enableOnlineBooking;
     }
 
     if (welcomeTitle !== undefined) {
