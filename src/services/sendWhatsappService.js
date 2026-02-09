@@ -4,7 +4,7 @@ import http from "http";
 import https from "https";
 import organizationService from "./organizationService.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
-import { normalizePhoneNumber } from "../utils/phoneUtils.js";
+import { normalizePhoneNumber, toWhatsappFormat } from "../utils/phoneUtils.js";
 
 /** ===================== CONFIG ===================== */
 const BASE_URL =
@@ -50,14 +50,14 @@ const whatsappService = {
     // Usar normalización internacional
     const result = normalizePhoneNumber(phone, defaultCountry);
     if (result.isValid && result.phone_e164) {
-      // Baileys requiere solo dígitos, sin el símbolo +
-      return result.phone_e164.replace('+', '');
+      // Convertir a formato WhatsApp (maneja México 52→521)
+      return toWhatsappFormat(result.phone_e164);
     }
     
-    // Fallback: limpiar caracteres no numéricos
+    // Fallback: limpiar caracteres no numéricos y aplicar formato WA
     const cleaned = phone.replace(/[^\d]/g, '');
     console.warn('[whatsappService] Fallback para:', phone, '→', cleaned);
-    return cleaned;
+    return toWhatsappFormat(cleaned);
   },
 
   /** ===================== TWILIO (opcional en servidor) ===================== */

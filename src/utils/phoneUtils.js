@@ -178,6 +178,29 @@ function getCountryCode(countryISO) {
 }
 
 /**
+ * Convierte un número E.164 al formato que WhatsApp/Baileys requiere (solo dígitos).
+ * Maneja el caso especial de México: +52 → 521 (móviles necesitan el "1" extra).
+ * @param {string} phoneE164 - Número en formato E.164 (ej. "+525512345678") o solo dígitos
+ * @returns {string} Número en formato WhatsApp sin "+" (ej. "5215512345678")
+ */
+export function toWhatsappFormat(phoneE164) {
+  if (!phoneE164) return '';
+
+  // Quitar el + si viene
+  let digits = String(phoneE164).replace(/[^\d]/g, '');
+
+  // 🇲🇽 México: si empieza con 52 y NO tiene el "1" extra, insertarlo
+  // Formato correcto para WhatsApp: 521 + 10 dígitos nacionales
+  // E.164 estándar de libphonenumber-js: 52 + 10 dígitos = 12 dígitos
+  if (digits.startsWith('52') && !digits.startsWith('521') && digits.length === 12) {
+    digits = '521' + digits.slice(2);
+    console.log(`[toWhatsappFormat] México: insertado "1" → ${digits}`);
+  }
+
+  return digits;
+}
+
+/**
  * Retrocompatibilidad: reemplaza la función formatPhone antigua
  * @deprecated Usar normalizePhoneNumber en su lugar
  */

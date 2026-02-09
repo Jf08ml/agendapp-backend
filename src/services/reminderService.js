@@ -4,6 +4,7 @@ import appointmentModel from "../models/appointmentModel.js";
 import organizationModel from "../models/organizationModel.js";
 import WhatsappTemplate from "../models/whatsappTemplateModel.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
+import { toWhatsappFormat } from "../utils/phoneUtils.js";
 import {
   getBogotaDayWindowUTC,
   getDayWindowUTC,
@@ -118,8 +119,8 @@ export const reminderService = {
           continue;
         }
 
-        // Baileys (WhatsApp Web) requiere el número SIN el símbolo +
-        const phone = clientPhone.startsWith('+') ? clientPhone.replace('+', '') : clientPhone;
+        // Baileys (WhatsApp Web) requiere el número SIN el símbolo + y con "1" para México
+        const phone = toWhatsappFormat(clientPhone);
 
         const start = new Date(a.startDate);
         const end = a.endDate ? new Date(a.endDate) : null;

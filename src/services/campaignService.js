@@ -3,7 +3,7 @@ import Campaign from "../models/campaignModel.js";
 import organizationModel from "../models/organizationModel.js";
 import clientModel from "../models/clientModel.js";
 import { waBulkSend, waBulkGet, waBulkOptIn } from "./waHttpService.js";
-import { normalizePhoneNumber } from "../utils/phoneUtils.js";
+import { normalizePhoneNumber, toWhatsappFormat } from "../utils/phoneUtils.js";
 
 export const campaignService = {
   /**
@@ -104,7 +104,7 @@ export const campaignService = {
         continue;
       }
 
-      const phone = phoneResult.phone_e164;
+      const phone = toWhatsappFormat(phoneResult.phone_e164);
       
       if (seen.has(phone)) {
         console.warn(`[Campaign] Número duplicado ignorado: ${phone}`);

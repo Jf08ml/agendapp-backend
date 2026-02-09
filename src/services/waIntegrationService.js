@@ -73,16 +73,16 @@ export const waIntegrationService = {
     let normalizedPhone = phone;
     
     // Importar utilidad de normalización
-    const { normalizePhoneNumber } = await import('../utils/phoneUtils.js');
+    const { normalizePhoneNumber, toWhatsappFormat } = await import('../utils/phoneUtils.js');
     const result = normalizePhoneNumber(phone, org.default_country || 'CO');
     
     if (result.isValid && result.phone_e164) {
-      // Remover el + inicial que Baileys no necesita
-      normalizedPhone = result.phone_e164.replace('+', '');
+      // Convertir a formato WhatsApp (maneja México 52→521)
+      normalizedPhone = toWhatsappFormat(result.phone_e164);
       console.log(`[waIntegrationService] Normalizado: ${phone} → ${result.phone_e164} → ${normalizedPhone}`);
     } else {
-      // Fallback: limpiar el número de caracteres no numéricos
-      normalizedPhone = phone.replace(/[^\d]/g, '');
+      // Fallback: limpiar el número de caracteres no numéricos y aplicar formato WA
+      normalizedPhone = toWhatsappFormat(phone.replace(/[^\d]/g, ''));
       console.warn(`[waIntegrationService] Normalización falló para: ${phone}, usando limpio: ${normalizedPhone}`);
     }
     

@@ -1067,8 +1067,9 @@ const appointmentService = {
           const clientPhone = appt?.client?.phone_e164 || appt?.client?.phoneNumber;
           if (!clientPhone) continue;
 
-          // Asegurar formato E.164 y luego quitar el + para Baileys
-          const phone = clientPhone.startsWith('+') ? clientPhone.replace('+', '') : clientPhone;
+          // Formato WhatsApp: sin "+" y con "1" extra para México
+          const { toWhatsappFormat } = await import("../utils/phoneUtils.js");
+          const phone = toWhatsappFormat(clientPhone);
 
           const start = new Date(appt.startDate);
           const end = appt.endDate ? new Date(appt.endDate) : null;
