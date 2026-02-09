@@ -224,11 +224,12 @@ const appointmentController = {
   // Controlador para cancelar una cita (cambia estado a cancelled_by_admin, mantiene historial)
   cancelAppointment: async (req, res) => {
     const { id } = req.params;
+    const { notifyClient } = req.body;
     try {
       const appointmentData = await appointmentService.getAppointmentById(id);
 
       // Usar cancellationService para cambiar el estado
-      const result = await cancellationService.cancelAppointment(id, 'admin');
+      const result = await cancellationService.cancelAppointment(id, 'admin', null, notifyClient);
 
       if (!result.success) {
         return sendResponse(res, 400, null, result.message);

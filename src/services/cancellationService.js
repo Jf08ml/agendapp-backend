@@ -1067,9 +1067,14 @@ const cancellationService = {
   /**
    * Cancela un appointment directamente (para admin)
    */
-  async cancelAppointment(appointmentId, cancelledBy = 'admin', reason = null) {
+  async cancelAppointment(appointmentId, cancelledBy = 'admin', reason = null, notifyClient = false) {
     try {
-      const appointment = await Appointment.findById(appointmentId);
+      const appointment = await Appointment.findById(appointmentId)
+        .populate('client')
+        .populate('service')
+        .populate('employee')
+        .populate('organizationId');
+        
       if (!appointment) {
         return {
           success: false,
@@ -1079,7 +1084,7 @@ const cancellationService = {
 
       // Verificar que sea futura (si es cliente)
       if (cancelledBy === 'customer') {
-        const org = await organizationService.getOrganizationById(appointment.organizationId);
+        const org = await organizationService.getOrganizationById(appointment.organizationId._id || appointment.organizationId);
         const timezone = org.timezone || 'America/Bogota';
         const now = moment.tz(timezone);
         const appointmentTime = moment.tz(appointment.startDate, timezone);
@@ -1104,6 +1109,45 @@ const cancellationService = {
         reservation.cancelledAt = new Date();
         reservation.cancelledBy = cancelledBy;
         await reservation.save();
+      }
+
+      // 📩 Enviar WhatsApp al cliente si se solicitó
+      if (notifyClient && appointment.client && appointment.organizationId) {
+        try {
+          const org = appointment.organizationId;
+          const client = appointment.client;
+          const timezone = org.timezone || 'America/Bogota';
+          const organizationId = org._id || org;
+          
+          // Formatear la cita cancelada
+          const appointmentDate = moment.tz(appointment.startDate, timezone);
+          const appointmentsList = `• ${appointment.service?.name || 'Servicio'} - ${appointmentDate.format('DD/MM/YYYY HH:mm')}`;
+          
+          // Usar plantilla personalizada si existe, sino la por defecto
+          const message = await whatsappTemplates.getRenderedTemplate(
+            organizationId.toString(),
+            'clientCancellationAck',
+            {
+              names: client.name || 'Cliente',
+              appointments_list: appointmentsList,
+              organization: org.name,
+            }
+          );
+
+          // Enviar el mensaje
+          const phoneNumber = client.phone_e164 || client.phoneNumber;
+          if (phoneNumber) {
+            await whatsappService.sendMessage(
+              organizationId.toString(),
+              phoneNumber,
+              message
+            );
+            console.log(`✅ Mensaje de cancelación enviado al cliente: ${client.name} (${phoneNumber})`);
+          }
+        } catch (whatsappError) {
+          console.error('[cancelAppointment] Error al enviar WhatsApp:', whatsappError);
+          // No fallar la cancelación si falla el WhatsApp
+        }
       }
 
       return {
