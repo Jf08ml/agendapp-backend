@@ -261,6 +261,9 @@ function validateDateTime(datetime, organization, employee = null) {
 
 /**
  * Genera slots de tiempo disponibles para un día específico
+ * Divide el horario en segmentos (separados por descansos) y genera slots en cada segmento
+ * manteniendo el intervalo configurado. Esto permite aprovechar todo el tiempo disponible.
+ * 
  * @param {Date} date - Fecha para la cual generar slots
  * @param {Object} organization - Documento de organización
  * @param {Object} employee - Documento de empleado (opcional)
@@ -317,7 +320,7 @@ function generateAvailableSlots(date, organization, employee = null, durationMin
     effectiveBreaks = [...effectiveBreaks, ...(empSchedule.breaks || [])];
   }
 
-  // Obtener el intervalo de minutos
+  // Obtener el intervalo de minutos configurado
   const stepMinutes = organization.weeklySchedule?.stepMinutes || 
                       organization.openingHours?.stepMinutes || 
                       30;
@@ -327,63 +330,98 @@ function generateAvailableSlots(date, organization, employee = null, durationMin
     ? appointments.filter(a => a.employee && a.employee.toString() === employee._id.toString())
     : appointments;
 
-  // Generar slots
+  // Convertir tiempos a minutos
   const startMin = timeToMinutes(effectiveStart);
   const endMin = timeToMinutes(effectiveEnd);
 
-  for (let currentMin = startMin; currentMin < endMin; currentMin += stepMinutes) {
-    const slotTime = minutesToTime(currentMin);
-    const slotEndMin = currentMin + durationMinutes;
-    
-    // Verificar si el slot completo está dentro del horario
-    if (slotEndMin > endMin) break;
-    
-    // Verificar si el slot se solapa con algún break (pasamos el día para validar breaks por día)
-    const overlapsBreak = isSlotInBreak(slotTime, durationMinutes, effectiveBreaks, dayOfWeek);
-    
-    // 👥 Contar citas simultáneas en lugar de solo verificar conflictos
-    // Esto permite que un empleado atienda múltiples clientes si maxConcurrentAppointments > 1
-    let simultaneousAppointmentCount = 0;
-    relevantAppointments.forEach(appt => {
-      // Convertir las fechas de la cita a la timezone de la organización
-      const apptStartInTz = moment.tz(appt.startDate, timezone);
-      const apptEndInTz = moment.tz(appt.endDate, timezone);
-      
-      // Verificar que la cita es del mismo día que estamos generando slots
-      const apptDateStr = apptStartInTz.format('YYYY-MM-DD');
-      const currentDateStr = dateInTz.format('YYYY-MM-DD');
-      
-      // Si la cita no es del día que estamos generando, ignorarla
-      if (apptDateStr !== currentDateStr) {
-        return;
-      }
-      
-      const apptStart = apptStartInTz.hours() * 60 + apptStartInTz.minutes();
-      const apptEnd = apptEndInTz.hours() * 60 + apptEndInTz.minutes();
-      
-      // Hay solapamiento si el slot empieza antes de que termine la cita
-      // Y el slot termina después de que empieza la cita
-      if (currentMin < apptEnd && slotEndMin > apptStart) {
-        simultaneousAppointmentCount++;
-      }
+  // Ordenar breaks por tiempo de inicio y filtrar los del día actual
+  const sortedBreaks = [...effectiveBreaks]
+    .filter(b => b.day === undefined || b.day === null || b.day === dayOfWeek)
+    .map(b => ({
+      startMin: timeToMinutes(b.start),
+      endMin: timeToMinutes(b.end)
+    }))
+    .sort((a, b) => a.startMin - b.startMin);
+
+  // Crear segmentos de tiempo (periodos sin breaks)
+  // Cada segmento reinicia la generación de slots desde su inicio
+  const segments = [];
+  let currentSegmentStart = startMin;
+
+  for (const breakPeriod of sortedBreaks) {
+    // Si hay tiempo antes del break, crear un segmento
+    if (currentSegmentStart < breakPeriod.startMin) {
+      segments.push({
+        start: currentSegmentStart,
+        end: breakPeriod.startMin
+      });
+    }
+    // Siguiente segmento empieza después del break
+    currentSegmentStart = Math.max(currentSegmentStart, breakPeriod.endMin);
+  }
+
+  // Agregar el último segmento (desde el último break hasta el final)
+  if (currentSegmentStart < endMin) {
+    segments.push({
+      start: currentSegmentStart,
+      end: endMin
     });
-    
-    // Slot disponible si no se solapa con breaks y no excede el límite concurrente
-    const overlapsAppointment = simultaneousAppointmentCount >= maxConcurrentAppointments;
-    
-    // Crear datetime usando moment-timezone con la zona horaria de la organización
-    const hours = Math.floor(currentMin / 60);
-    const minutes = currentMin % 60;
-    const datetime = moment.tz(
-      `${dateInTz.format('YYYY-MM-DD')} ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`,
-      timezone
-    ).toDate();
-    
-    slots.push({
-      time: slotTime,
-      available: !overlapsBreak && !overlapsAppointment,
-      datetime,
-    });
+  }
+
+  // Generar slots en cada segmento usando el intervalo configurado
+  // Cada segmento empieza desde su inicio, permitiendo aprovechar todo el tiempo
+  for (const segment of segments) {
+    // Generar slots en este segmento con el intervalo configurado
+    for (let currentMin = segment.start; currentMin < segment.end; currentMin += stepMinutes) {
+      const slotTime = minutesToTime(currentMin);
+      const slotEndMin = currentMin + durationMinutes;
+      
+      // Verificar si el slot completo está dentro del segmento
+      if (slotEndMin > segment.end) break;
+      
+      // 👥 Contar citas simultáneas en lugar de solo verificar conflictos
+      let simultaneousAppointmentCount = 0;
+      relevantAppointments.forEach(appt => {
+        // Convertir las fechas de la cita a la timezone de la organización
+        const apptStartInTz = moment.tz(appt.startDate, timezone);
+        const apptEndInTz = moment.tz(appt.endDate, timezone);
+        
+        // Verificar que la cita es del mismo día que estamos generando slots
+        const apptDateStr = apptStartInTz.format('YYYY-MM-DD');
+        const currentDateStr = dateInTz.format('YYYY-MM-DD');
+        
+        // Si la cita no es del día que estamos generando, ignorarla
+        if (apptDateStr !== currentDateStr) {
+          return;
+        }
+        
+        const apptStart = apptStartInTz.hours() * 60 + apptStartInTz.minutes();
+        const apptEnd = apptEndInTz.hours() * 60 + apptEndInTz.minutes();
+        
+        // Hay solapamiento si el slot empieza antes de que termine la cita
+        // Y el slot termina después de que empieza la cita
+        if (currentMin < apptEnd && slotEndMin > apptStart) {
+          simultaneousAppointmentCount++;
+        }
+      });
+      
+      // Slot disponible si no excede el límite concurrente
+      const overlapsAppointment = simultaneousAppointmentCount >= maxConcurrentAppointments;
+      
+      // Crear datetime usando moment-timezone con la zona horaria de la organización
+      const hours = Math.floor(currentMin / 60);
+      const minutes = currentMin % 60;
+      const datetime = moment.tz(
+        `${dateInTz.format('YYYY-MM-DD')} ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`,
+        timezone
+      ).toDate();
+      
+      slots.push({
+        time: slotTime,
+        available: !overlapsAppointment,
+        datetime,
+      });
+    }
   }
 
   // Filtrar horarios pasados si la fecha es hoy
@@ -468,7 +506,7 @@ function isEmployeeAvailableOnDay(employee, dayOfWeek, organization) {
  * @returns {Object|null} Empleado asignado o null si ninguno disponible
  */
 function assignBestEmployeeForSlot(opts) {
-  const { candidateEmployees, date, startTime, duration, existingAppointments, dayOfWeek, organization } = opts;
+  const { candidateEmployees, date, startTime, duration, existingAppointments, dayOfWeek, organization, skipOrgBreaks = false } = opts;
   const timezone = organization.timezone || 'America/Bogota';
   
   // Filtrar por disponibilidad de horario
@@ -485,8 +523,9 @@ function assignBestEmployeeForSlot(opts) {
     if (!orgSchedule) return false;
     
     let effectiveStart = orgSchedule.start;
-    let effectiveEnd = orgSchedule.end;
-    let effectiveBreaks = [...(orgSchedule.breaks || [])];
+let effectiveEnd = orgSchedule.end;
+    // 🔧 Solo incluir breaks de organización si NO skipOrgBreaks
+    let effectiveBreaks = skipOrgBreaks ? [] : [...(orgSchedule.breaks || [])];
     
     if (!empSchedule.useOrgSchedule) {
       // Calcular intersección
@@ -503,6 +542,7 @@ function assignBestEmployeeForSlot(opts) {
         return false;
       }
       
+      // Agregar breaks del empleado
       effectiveBreaks = [...effectiveBreaks, ...(empSchedule.breaks || [])];
     }
     
@@ -514,8 +554,8 @@ function assignBestEmployeeForSlot(opts) {
       return false;
     }
     
-    // Verificar que no esté en break (CORREGIDO: ahora verifica todo el slot)
-    if (isSlotInBreak(startTime, duration, effectiveBreaks)) {
+    // 🔧 Verificar breaks (solo del empleado si skipOrgBreaks=true)
+    if (effectiveBreaks.length > 0 && isSlotInBreak(startTime, duration, effectiveBreaks, dayOfWeek)) {
       return false;
     }
     
@@ -599,13 +639,108 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
                       organization.openingHours?.stepMinutes || 30;
   const totalDuration = services.reduce((sum, s) => sum + s.duration, 0);
   
-  const startMin = timeToMinutes(orgSchedule.start);
-  const endMin = timeToMinutes(orgSchedule.end);
+  let startMin = timeToMinutes(orgSchedule.start);
+  let endMin = timeToMinutes(orgSchedule.end);
+  
+  // 🔧 Si hay empleado asignado, calcular intersección de horarios
+  // para que los segmentos empiecen desde el horario efectivo
+  for (const service of services) {
+    if (service.employeeId) {
+      const employee = allEmployees.find(e => e._id.toString() === service.employeeId);
+      if (employee) {
+        const empSchedule = getEmployeeDaySchedule(employee, dayOfWeek);
+        if (empSchedule && !empSchedule.useOrgSchedule) {
+          const empStartMin = timeToMinutes(empSchedule.start);
+          const empEndMin = timeToMinutes(empSchedule.end);
+          
+          // Calcular intersección (el rango más restrictivo)
+          startMin = Math.max(startMin, empStartMin);
+          endMin = Math.min(endMin, empEndMin);
+        }
+      }
+    }
+  }
+  
+  console.log(`[DEBUG] Rango efectivo calculado: ${minutesToTime(startMin)} - ${minutesToTime(endMin)}`);
+  
+  // 🔧 Recopilar TODOS los breaks relevantes (org + empleados asignados)
+  const allBreaksSet = new Set();
+  
+  // Agregar breaks de la organización
+  (orgSchedule.breaks || [])
+    .filter(b => b.day === undefined || b.day === null || b.day === dayOfWeek)
+    .forEach(b => {
+      const key = `${b.start}-${b.end}`;
+      allBreaksSet.add(key);
+    });
+  
+  // 🔧 Agregar breaks de empleados específicamente asignados en los servicios
+  for (const service of services) {
+    if (service.employeeId) {
+      const employee = allEmployees.find(e => e._id.toString() === service.employeeId);
+      if (employee) {
+        const empSchedule = getEmployeeDaySchedule(employee, dayOfWeek);
+        if (empSchedule && !empSchedule.useOrgSchedule) {
+          (empSchedule.breaks || [])
+            .filter(b => b.day === undefined || b.day === null || b.day === dayOfWeek)
+            .forEach(b => {
+              const key = `${b.start}-${b.end}`;
+              allBreaksSet.add(key);
+            });
+        }
+      }
+    }
+  }
+  
+  // Convertir a array y ordenar
+  const sortedBreaks = Array.from(allBreaksSet)
+    .map(key => {
+      const [start, end] = key.split('-');
+      return {
+        startMin: timeToMinutes(start),
+        endMin: timeToMinutes(end)
+      };
+    })
+    .sort((a, b) => a.startMin - b.startMin);
+
+  console.log(`[DEBUG] Horario org: ${orgSchedule.start} - ${orgSchedule.end}`);
+  console.log(`[DEBUG] Breaks combinados (org + empleados):`, sortedBreaks.map(b => `${minutesToTime(b.startMin)}-${minutesToTime(b.endMin)}`));
+
+  // 🔧 Crear segmentos de tiempo (periodos sin breaks)
+  const segments = [];
+  let currentSegmentStart = startMin;
+
+  for (const breakPeriod of sortedBreaks) {
+    // Si hay tiempo antes del break, crear un segmento
+    if (currentSegmentStart < breakPeriod.startMin) {
+      segments.push({
+        start: currentSegmentStart,
+        end: breakPeriod.startMin
+      });
+    }
+    // Siguiente segmento empieza después del break
+    currentSegmentStart = Math.max(currentSegmentStart, breakPeriod.endMin);
+  }
+
+  // Agregar el último segmento (desde el último break hasta el final)
+  if (currentSegmentStart < endMin) {
+    segments.push({
+      start: currentSegmentStart,
+      end: endMin
+    });
+  }
+
+  console.log(`[DEBUG] Segmentos creados:`, segments.map(s => `${minutesToTime(s.start)}-${minutesToTime(s.end)}`));
+  console.log(`[DEBUG] Step: ${stepMinutes}min, TotalDuration: ${totalDuration}min`);
   
   const blocks = [];
   
-  // Iterar sobre posibles horarios de inicio
-  for (let currentMin = startMin; currentMin <= endMin - totalDuration; currentMin += stepMinutes) {
+  // 🔧 Iterar sobre cada segmento y generar bloques
+  for (const segment of segments) {
+    console.log(`[DEBUG] Procesando segmento ${minutesToTime(segment.start)}-${minutesToTime(segment.end)}`);
+    // Generar bloques en este segmento
+    for (let currentMin = segment.start; currentMin <= segment.end - totalDuration; currentMin += stepMinutes) {
+    console.log(`[DEBUG]   Intentando bloque: ${minutesToTime(currentMin)} - ${minutesToTime(currentMin + totalDuration)}`);
     let blockValid = true;
     const intervals = [];
     
@@ -633,7 +768,9 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
         // Determinar horario efectivo (intersección org + empleado)
         let effectiveStart = orgSchedule.start;
         let effectiveEnd = orgSchedule.end;
-        let effectiveBreaks = [...(orgSchedule.breaks || [])];
+        // 🔧 Solo verificar breaks del empleado, no de la organización
+        // porque los breaks de la organización ya están manejados en los segmentos
+        let employeeBreaks = [];
         
         if (!empSchedule.useOrgSchedule) {
           const empStartMin = timeToMinutes(empSchedule.start);
@@ -650,19 +787,23 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
             break;
           }
           
-          effectiveBreaks = [...effectiveBreaks, ...(empSchedule.breaks || [])];
+          // Solo agregar los breaks específicos del empleado
+          employeeBreaks = [...(empSchedule.breaks || [])];
         }
         
         // Verificar rango horario
         // El inicio debe estar dentro del rango, el fin puede coincidir exactamente con el cierre
         if (!isTimeInRange(slotStart, effectiveStart, effectiveEnd) ||
             !isTimeInRangeInclusive(slotEnd, effectiveStart, effectiveEnd)) {
+          console.log(`[DEBUG]       ❌ Fuera de rango empleado (${effectiveStart}-${effectiveEnd})`);
           blockValid = false;
           break;
         }
         
-        // Verificar breaks (CORREGIDO: ahora verifica todo el slot)
-        if (isSlotInBreak(slotStart, service.duration, effectiveBreaks)) {
+        // 🔧 Solo verificar breaks del empleado (no de la organización)
+        // Los breaks de la organización ya están excluidos en los segmentos
+        if (employeeBreaks.length > 0 && isSlotInBreak(slotStart, service.duration, employeeBreaks, dayOfWeek)) {
+          console.log(`[DEBUG]       ❌ En break del empleado`);
           blockValid = false;
           break;
         }
@@ -682,6 +823,7 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
         });
         
         if (hasOverlap) {
+          console.log(`[DEBUG]       ❌ Conflicto con cita existente`);
           blockValid = false;
           break;
         }
@@ -706,10 +848,12 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
           duration: service.duration,
           existingAppointments: appointments,
           dayOfWeek,
-          organization
+          organization,
+          skipOrgBreaks: true // Ya manejados en los segmentos
         });
         
         if (!assigned) {
+          console.log(`[DEBUG]       ❌ No se pudo asignar empleado automáticamente`);
           blockValid = false;
           break;
         }
@@ -731,13 +875,17 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
       const blockStart = `${dateInTz.format('YYYY-MM-DD')}T${minutesToTime(currentMin)}:00`;
       const blockEnd = `${dateInTz.format('YYYY-MM-DD')}T${minutesToTime(slotMin)}:00`;
       
+      console.log(`[DEBUG]     ✅ Bloque ACEPTADO`);
       blocks.push({
         start: blockStart,
         end: blockEnd,
         intervals
       });
+    } else {
+      console.log(`[DEBUG]     ❌ Bloque RECHAZADO`);
     }
-  }
+    } // Cierre del loop de bloques dentro del segmento
+  } // Cierre del loop de segmentos
   
   // Filtrar bloques pasados si la fecha es hoy
   const nowInTz = moment.tz(timezone);

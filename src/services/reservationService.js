@@ -1,9 +1,11 @@
 // src/services/reservationService.js
 import Reservation from "../models/reservationModel.js";
 import Client from "../models/clientModel.js";
+import Organization from "../models/organizationModel.js";
 import appointmentService from "./appointmentService.js";
 import whatsappService from "./sendWhatsappService.js";
 import cancellationService from "./cancellationService.js";
+import { normalizePhoneNumber } from "../utils/phoneUtils.js";
 import { RES_STATUS } from "../constants/reservationStatus.js";
 
 const reservationService = {
@@ -239,13 +241,37 @@ const reservationService = {
     organizationId,
     birthDate,
   }) => {
+    // 🌍 Obtener país por defecto de la organización
+    const org = await Organization.findById(organizationId).select('default_country');
+    const defaultCountry = org?.default_country || 'CO';
+
+    // 🌍 Normalizar teléfono a E.164
+    const phoneResult = normalizePhoneNumber(phoneNumber, defaultCountry);
+    if (!phoneResult.isValid) {
+      throw new Error(phoneResult.error || 'Número de teléfono inválido');
+    }
+
+    // 🔍 Buscar cliente por phone_e164 O phoneNumber (compatibilidad con datos antiguos)
     const existingClient = await Client.findOne({
-      phoneNumber,
       organizationId,
+      $or: [
+        { phone_e164: phoneResult.phone_e164 },
+        { phoneNumber: phoneResult.phone_national_clean }
+      ]
     });
 
     if (existingClient) {
+      // 🔄 Actualizar campos si han cambiado
       let isUpdated = false;
+      
+      // Migración automática: actualizar campos de teléfono si faltan
+      if (!existingClient.phone_e164) {
+        existingClient.phone_e164 = phoneResult.phone_e164;
+        existingClient.phone_country = phoneResult.phone_country;
+        existingClient.phoneNumber = phoneResult.phone_national_clean;
+        isUpdated = true;
+      }
+      
       if (name && existingClient.name !== name) {
         existingClient.name = name;
         isUpdated = true;
@@ -258,18 +284,31 @@ const reservationService = {
         existingClient.birthDate = birthDate;
         isUpdated = true;
       }
+      
       if (isUpdated) await existingClient.save();
       return existingClient;
     }
 
+    // 🆕 Crear nuevo cliente con campos normalizados
     const newClient = new Client({
       name,
-      phoneNumber,
+      phoneNumber: phoneResult.phone_national_clean, // 🆕 Solo dígitos locales
+      phone_e164: phoneResult.phone_e164, // Con código de país en formato E.164
+      phone_country: phoneResult.phone_country,
       email,
       organizationId,
       birthDate,
     });
-    return await newClient.save();
+    
+    try {
+      return await newClient.save();
+    } catch (error) {
+      // Capturar error de duplicado del índice único de MongoDB
+      if (error.code === 11000) {
+        throw new Error('Ya existe un cliente con este número de teléfono en esta organización');
+      }
+      throw error;
+    }
   },
 };
 

@@ -100,7 +100,7 @@ const clientService = {
 
   // Actualizar un cliente
   updateClient: async (id, clientData) => {
-    const { name, email, phoneNumber, organizationId, birthDate } = clientData;
+    const { name, email, phoneNumber, phone_country, organizationId, birthDate } = clientData;
     const client = await Client.findById(id);
 
     if (!client) {
@@ -122,16 +122,24 @@ const clientService = {
       }
     }
 
-    // 🌍 Si se actualiza el teléfono, normalizar a E.164
-    if (phoneNumber !== undefined && phoneNumber !== client.phoneNumber) {
-      const phoneResult = normalizePhoneNumber(phoneNumber, defaultCountry);
+    // 🌍 Determinar si necesitamos re-normalizar el teléfono
+    const phoneChanged = phoneNumber !== undefined && phoneNumber !== client.phoneNumber;
+    const countryChanged = phone_country !== undefined && phone_country !== client.phone_country;
+    
+    if (phoneChanged || countryChanged) {
+      // Usar el nuevo número si se proporcionó, sino el actual
+      const numberToNormalize = phoneChanged ? phoneNumber : client.phoneNumber;
+      // Usar el nuevo país si se proporcionó, sino el defaultCountry
+      const countryToUse = phone_country !== undefined ? phone_country : defaultCountry;
+      
+      const phoneResult = normalizePhoneNumber(numberToNormalize, countryToUse);
       if (!phoneResult.isValid) {
         throw new Error(phoneResult.error);
       }
 
-      // Actualizar campos de teléfono (índice único previene duplicados)
-      client.phoneNumber = phoneResult.phone_national_clean; // 🆕 Solo dígitos locales
-      client.phone_e164 = phoneResult.phone_e164; // Con código de país
+      // Actualizar campos de teléfono
+      client.phoneNumber = phoneResult.phone_national_clean;
+      client.phone_e164 = phoneResult.phone_e164;
       client.phone_country = phoneResult.phone_country;
     }
 
