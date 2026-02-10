@@ -7,6 +7,7 @@ import organizationService from './organizationService.js';
 import whatsappService from './sendWhatsappService.js';
 import notificationService from './notificationService.js';
 import whatsappTemplates from '../utils/whatsappTemplates.js';
+import packageService from './packageService.js';
 
 const cancellationService = {
   /**
@@ -788,6 +789,16 @@ const cancellationService = {
       appointment.cancelledBy = 'customer';
       await appointment.save();
 
+      // 📦 Reembolsar sesión del paquete si aplica
+      if (appointment.clientPackageId) {
+        try {
+          await packageService.refundSession(appointment.clientPackageId, appointment.service, appointment._id);
+          console.log(`📦 Sesión reembolsada para cita ${appointment._id}`);
+        } catch (refundErr) {
+          console.error(`⚠️ Error reembolsando sesión:`, refundErr.message);
+        }
+      }
+
       return {
         success: true,
         message: 'Cita cancelada exitosamente',
@@ -883,6 +894,18 @@ const cancellationService = {
         }
       );
       console.log(`✅ Citas actualizadas exitosamente`);
+
+      // 📦 Reembolsar sesiones de paquetes para citas canceladas que usaban paquete
+      for (const apt of appointments) {
+        if (cancellableIds.some(id => id.toString() === apt._id.toString()) && apt.clientPackageId) {
+          try {
+            await packageService.refundSession(apt.clientPackageId, apt.service?._id || apt.service, apt._id);
+            console.log(`📦 Sesión reembolsada para cita ${apt._id}`);
+          } catch (refundErr) {
+            console.error(`⚠️ Error reembolsando sesión para cita ${apt._id}:`, refundErr.message);
+          }
+        }
+      }
 
       // 3️⃣ OPTIMIZACIÓN: Actualizar TODAS las reservas asociadas en UNA SOLA operación
       console.log(`🔍 Actualizando reservas asociadas...`);

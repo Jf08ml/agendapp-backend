@@ -8,6 +8,7 @@ import clientService from "../services/clientService.js";
 import employeeService from "../services/employeeService.js";
 import { waIntegrationService } from "../services/waIntegrationService.js";
 import cancellationService from "./cancellationService.js";
+import packageService from "./packageService.js";
 import { generateCancellationLink } from "../utils/cancellationUtils.js";
 import notificationService from "./notificationService.js";
 import mongoose from "mongoose";
@@ -271,6 +272,8 @@ const appointmentService = {
       sharedGroupId = null, // 🔗 GroupId compartido (opcional)
       sharedTokenHash = null, // 🔗 Token hash compartido (opcional)
       customDurations = {}, // 🕐 Duraciones personalizadas por servicio (en minutos)
+      clientPackageId = null, // 📦 Paquete de sesiones del cliente
+      usePackageForServices = {}, // 📦 Mapeo serviceId -> clientPackageId
     } = payload;
     
     if (!Array.isArray(services) || services.length === 0) {
@@ -422,6 +425,11 @@ const appointmentService = {
         );
         const totalPrice = basePrice + additionalCost;
 
+        // 📦 Determinar si usar paquete de sesiones para este servicio
+        const pkgIdForService = usePackageForServices[serviceId] || clientPackageId;
+        const usingPackage = !!pkgIdForService;
+        const finalTotalPrice = usingPackage ? 0 : totalPrice;
+
         // 🔗 Usar el mismo token hash para TODAS las citas del grupo
         const doc = new appointmentModel({
           groupId,
@@ -432,16 +440,27 @@ const appointmentService = {
           startDate: currentStart,
           endDate: serviceEnd,
           organizationId,
-          advancePayment,
-          customPrice: customPrices[serviceId],
-          additionalItems,
-          totalPrice,
+          advancePayment: usingPackage ? 0 : advancePayment,
+          customPrice: usingPackage ? 0 : customPrices[serviceId],
+          additionalItems: usingPackage ? [] : additionalItems,
+          totalPrice: finalTotalPrice,
           status: "pending",
           cancelTokenHash: groupCancelTokenHash, // 🔗 Mismo hash para todo el grupo
           cancellationLink: groupCancellationLink || undefined,
+          clientPackageId: pkgIdForService || undefined,
         });
 
         const saved = await doc.save({ session });
+
+        // 📦 Consumir sesión del paquete si aplica
+        if (pkgIdForService) {
+          await packageService.consumeSession(
+            pkgIdForService,
+            serviceId,
+            saved._id,
+            { session }
+          );
+        }
         created.push({
           saved,
           svc,

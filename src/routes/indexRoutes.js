@@ -27,6 +27,7 @@ import debugRoutes from "./debugRoutes.js";
 import publicRoutes from "./publicRoutes.js";
 import membershipBillingRoutes from "./membershipBillingRoutes.js";
 import campaignRoutes from "./campaignRoutes.js";
+import packageRoutes from "./packageRoutes.js";
 import { organizationResolver } from "../middleware/organizationResolver";
 import { verifyToken } from "../middleware/authMiddleware.js";
 
@@ -96,6 +97,7 @@ router.use("/employees", employeeRoutes); // Maneja auth internamente (consulta 
 router.use("/schedule", scheduleRoutes); // Maneja auth internamente (consulta de disponibilidad pública)
 router.use("/clients", clientRoutes); // Maneja auth internamente (búsqueda por teléfono pública)
 router.use("/reservations", reservationRoutes); // Maneja auth internamente (creación de reserva pública)
+router.use("/packages", packageRoutes); // Maneja auth internamente (consulta pública para reservas)
 
 // 🔒 Rutas que requieren organizaciónResolver y autenticación
 router.use("/appointments", organizationResolver, verifyToken, appointmentRoutes);

@@ -90,6 +90,11 @@ const appointmentModelSchema = new mongoose.Schema(
       type: Number,
       required: true,
     },
+    clientPackageId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ClientPackage",
+      default: null,
+    },
     groupId: { type: mongoose.Schema.Types.ObjectId, index: true },
     // 🔁 Campos para citas recurrentes
     seriesId: { 

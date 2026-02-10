@@ -226,7 +226,7 @@ const reservationController = {
 
   // POST /api/reservations/multi
   createMultipleReservations: async (req, res) => {
-    const { services, startDate, customerDetails, organizationId } = req.body;
+    const { services, startDate, customerDetails, organizationId, clientPackageId } = req.body;
 
     if (!services || !Array.isArray(services) || services.length === 0) {
       return sendResponse(res, 400, null, "Debe enviar al menos un servicio.");
@@ -344,6 +344,7 @@ const reservationController = {
               skipNotification: true, // 🔇 No enviar mensaje aún
               sharedGroupId, // 🔗 Mismo groupId para todas las citas
               sharedTokenHash, // 🔗 Mismo token hash para todas las citas
+              ...(clientPackageId ? { clientPackageId } : {}), // 📦 Paquete de sesiones
             });
 
             // Mapear las citas creadas a sus índices originales
