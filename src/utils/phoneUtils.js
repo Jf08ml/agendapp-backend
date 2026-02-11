@@ -197,6 +197,14 @@ export function toWhatsappFormat(phoneE164) {
     console.log(`[toWhatsappFormat] México: insertado "1" → ${digits}`);
   }
 
+  // 🇦🇷 Argentina: si empieza con 54 y NO tiene el "9" extra, insertarlo
+  // Formato correcto para WhatsApp: 549 + 10 dígitos nacionales
+  // E.164 estándar sin "9": 54 + 10 dígitos = 12 dígitos
+  if (digits.startsWith('54') && !digits.startsWith('549') && digits.length === 12) {
+    digits = '549' + digits.slice(2);
+    console.log(`[toWhatsappFormat] Argentina: insertado "9" → ${digits}`);
+  }
+
   return digits;
 }
 
