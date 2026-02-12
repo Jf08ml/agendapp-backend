@@ -518,7 +518,12 @@ const scheduleController = {
       if (!orgSchedule) {
         return sendResponse(res, 200, { blocks: [] }, "La organización está cerrada ese día");
       }
-      
+
+      // Verificar si es un festivo bloqueado para reservas online
+      if (scheduleService.isBlockedHoliday(date, organization)) {
+        return sendResponse(res, 200, { blocks: [] }, "Día festivo bloqueado para reservas");
+      }
+
       // Obtener empleados necesarios
       const allEmployeeIds = new Set();
       for (const svc of services) {

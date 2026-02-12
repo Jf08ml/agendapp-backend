@@ -131,6 +131,8 @@ const organizationService = {
       timezone,
       currency,
       cancellationPolicy,
+      blockHolidaysForReservations,
+      allowedHolidayDates,
     } = organizationData;
 
     const organization = await Organization.findById(id);
@@ -264,6 +266,15 @@ const organizationService = {
         ...organization.cancellationPolicy,
         ...cancellationPolicy,
       };
+    }
+
+    // 📅 Bloqueo de festivos para reservas online
+    if (blockHolidaysForReservations !== undefined) {
+      organization.blockHolidaysForReservations = blockHolidaysForReservations;
+    }
+
+    if (allowedHolidayDates !== undefined) {
+      organization.allowedHolidayDates = allowedHolidayDates;
     }
 
     // Encriptar la contraseña solo si se proporciona una nueva

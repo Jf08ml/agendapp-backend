@@ -4,6 +4,24 @@
  */
 
 import moment from 'moment-timezone';
+import Holidays from 'date-holidays';
+
+/**
+ * Verifica si una fecha es un festivo bloqueado para reservas online.
+ * Retorna true si el día es festivo Y no está en las excepciones permitidas.
+ * @param {string} dateStr - Fecha en formato "YYYY-MM-DD"
+ * @param {Object} organization - Documento de organización
+ * @param {Object} [holidayChecker] - Instancia de Holidays (para reutilizar en loops)
+ * @returns {boolean}
+ */
+function isBlockedHoliday(dateStr, organization, holidayChecker = null) {
+  if (!organization.blockHolidaysForReservations) return false;
+  const hd = holidayChecker || new Holidays(organization.default_country || 'CO');
+  const result = hd.isHoliday(new Date(dateStr + 'T12:00:00'));
+  if (!result) return false;
+  if ((organization.allowedHolidayDates || []).includes(dateStr)) return false;
+  return true;
+}
 
 /**
  * Obtiene el día de la semana de una fecha en formato "YYYY-MM-DD"
@@ -634,8 +652,11 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
   // Verificar que la organización esté abierta ese día
   const orgSchedule = getOrganizationDaySchedule(organization, dayOfWeek);
   if (!orgSchedule) return [];
-  
-  const stepMinutes = organization.weeklySchedule?.stepMinutes || 
+
+  // Verificar si es un festivo bloqueado para reservas
+  if (isBlockedHoliday(date, organization)) return [];
+
+  const stepMinutes = organization.weeklySchedule?.stepMinutes ||
                       organization.openingHours?.stepMinutes || 30;
   const totalDuration = services.reduce((sum, s) => sum + s.duration, 0);
   
@@ -917,6 +938,11 @@ function checkMultipleDaysAvailability(dateStrings, organization, services, allE
   const timezone = organization.timezone || 'America/Bogota';
   const result = {};
 
+  // Instanciar holiday checker una sola vez para todo el loop
+  const holidayChecker = organization.blockHolidaysForReservations
+    ? new Holidays(organization.default_country || 'CO')
+    : null;
+
   for (const dateStr of dateStrings) {
     const dateInTz = moment.tz(dateStr, timezone);
     const dayOfWeek = dateInTz.day();
@@ -924,6 +950,12 @@ function checkMultipleDaysAvailability(dateStrings, organization, services, allE
     // Verificar que la organización esté abierta ese día
     const orgSchedule = getOrganizationDaySchedule(organization, dayOfWeek);
     if (!orgSchedule) {
+      result[dateStr] = false;
+      continue;
+    }
+
+    // Verificar si es un festivo bloqueado
+    if (holidayChecker && isBlockedHoliday(dateStr, organization, holidayChecker)) {
       result[dateStr] = false;
       continue;
     }
@@ -957,6 +989,7 @@ export default {
   isTimeInRange,
   isTimeInBreak,
   isSlotInBreak,
+  isBlockedHoliday,
   getOrganizationDaySchedule,
   getEmployeeDaySchedule,
   validateDateTime,

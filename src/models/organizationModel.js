@@ -254,6 +254,14 @@ const organizationSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  blockHolidaysForReservations: {
+    type: Boolean,
+    default: false,
+  },
+  allowedHolidayDates: {
+    type: [String],
+    default: [],
+  },
   paymentMethods: {
     type: [PaymentMethodSchema],
     default: [],
