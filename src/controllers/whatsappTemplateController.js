@@ -34,6 +34,7 @@ const whatsappTemplateController = {
         statusReservationRejected: whatsappTemplates.getDefaultTemplate('statusReservationRejected'),
         clientConfirmationAck: whatsappTemplates.getDefaultTemplate('clientConfirmationAck'),
         clientCancellationAck: whatsappTemplates.getDefaultTemplate('clientCancellationAck'),
+        clientNoShowAck: whatsappTemplates.getDefaultTemplate('clientNoShowAck'),
       };
 
       // Plantillas personalizadas (si existen)
@@ -86,6 +87,11 @@ const whatsappTemplateController = {
           isCustom: !!customTemplates.clientCancellationAck,
           variables: ['{{names}}', '{{appointments_list}}'],
         },
+        clientNoShowAck: {
+          content: customTemplates.clientNoShowAck || defaultTemplates.clientNoShowAck,
+          isCustom: !!customTemplates.clientNoShowAck,
+          variables: ['{{names}}', '{{service}}', '{{date}}', '{{organization}}'],
+        },
       };
 
       // También enviar los templates por defecto para el botón "Restaurar"
@@ -118,6 +124,7 @@ const whatsappTemplateController = {
         'statusReservationRejected',
         'clientConfirmationAck',
         'clientCancellationAck',
+        'clientNoShowAck',
       ];
 
       if (!validTypes.includes(templateType)) {
@@ -182,6 +189,7 @@ const whatsappTemplateController = {
         'statusReservationRejected',
         'clientConfirmationAck',
         'clientCancellationAck',
+        'clientNoShowAck',
       ];
 
       if (!validTypes.includes(templateType)) {
@@ -243,6 +251,7 @@ const whatsappTemplateController = {
         'statusReservationRejected',
         'clientConfirmationAck',
         'clientCancellationAck',
+        'clientNoShowAck',
       ];
 
       for (const key in templates) {
@@ -355,6 +364,7 @@ const whatsappTemplateController = {
           statusReservationRejected: false,
           clientConfirmationAck: true,
           clientCancellationAck: true,
+          clientNoShowAck: true,
         };
         return sendResponse(res, 200, defaults, "Configuración por defecto");
       }
@@ -369,6 +379,7 @@ const whatsappTemplateController = {
         statusReservationRejected: false,
         clientConfirmationAck: true,
         clientCancellationAck: true,
+        clientNoShowAck: true,
       };
 
       sendResponse(res, 200, settings, "Configuración obtenida correctamente");
@@ -401,6 +412,7 @@ const whatsappTemplateController = {
         'statusReservationRejected',
         'clientConfirmationAck',
         'clientCancellationAck',
+        'clientNoShowAck',
       ];
 
       for (const key of Object.keys(enabledTypes)) {

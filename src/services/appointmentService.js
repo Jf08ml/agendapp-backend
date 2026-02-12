@@ -1440,7 +1440,73 @@ const appointmentService = {
       console.error('Error en autoConfirmTodayAppointments:', error);
       throw error;
     }
-  }
+  },
+  /**
+   * Marca la asistencia de una cita (attended / no_show).
+   * Solo aplica a citas no canceladas.
+   */
+  async markAttendance(appointmentId, status, organizationId, notifyClient = false) {
+    const validStatuses = ['attended', 'no_show'];
+    if (!validStatuses.includes(status)) {
+      const error = new Error('Estado de asistencia inválido. Use "attended" o "no_show".');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const appointment = await appointmentModel.findOne({
+      _id: appointmentId,
+      organizationId,
+    }).populate('client').populate('service').populate('organizationId');
+
+    if (!appointment) {
+      const error = new Error('Cita no encontrada.');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (appointment.status.includes('cancelled')) {
+      const error = new Error('No se puede marcar asistencia en una cita cancelada.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    appointment.status = status;
+    await appointment.save();
+
+    // Enviar WhatsApp de no asistencia si se solicita
+    if (status === 'no_show' && notifyClient && appointment.client && appointment.organizationId) {
+      try {
+        const org = appointment.organizationId;
+        const client = appointment.client;
+        const timezone = org.timezone || 'America/Bogota';
+        const orgId = org._id || org;
+
+        const appointmentDate = moment.tz(appointment.startDate, timezone);
+
+        const message = await whatsappTemplates.getRenderedTemplate(
+          orgId.toString(),
+          'clientNoShowAck',
+          {
+            names: client.name || 'Cliente',
+            service: appointment.service?.name || 'Servicio',
+            date: appointmentDate.format('DD/MM/YYYY HH:mm'),
+            organization: org.name,
+          }
+        );
+
+        const phoneNumber = client.phone_e164 || client.phoneNumber;
+        if (phoneNumber) {
+          await whatsappService.sendMessage(orgId.toString(), phoneNumber, message);
+          console.log(`✅ Mensaje de no asistencia enviado al cliente: ${client.name}`);
+        }
+      } catch (whatsappError) {
+        console.error('[markAttendance] Error al enviar WhatsApp de no asistencia:', whatsappError);
+        // No fallar la operación si falla el envío de WhatsApp
+      }
+    }
+
+    return appointment;
+  },
 };
 
 export default appointmentService;

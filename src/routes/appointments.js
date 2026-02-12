@@ -36,6 +36,9 @@ router.get("/:id", appointmentController.getAppointmentById);
 // Actualizar una cita específica por ID
 router.put("/:id", appointmentController.updateAppointment);
 
+// Marcar asistencia (attended / no_show)
+router.patch("/:appointmentId/attendance", appointmentController.markAttendance);
+
 // Cancelar una cita (cambia estado a cancelled_by_admin, mantiene historial)
 router.patch("/:id/cancel", appointmentController.cancelAppointment);
 

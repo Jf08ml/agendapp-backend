@@ -36,7 +36,7 @@ const appointmentModelSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "confirmed", "cancelled", "cancelled_by_customer", "cancelled_by_admin"],
+      enum: ["pending", "confirmed", "cancelled", "cancelled_by_customer", "cancelled_by_admin", "attended", "no_show"],
       default: "pending",
     },
     // ✅ Confirmación del cliente (independiente del status administrativo)

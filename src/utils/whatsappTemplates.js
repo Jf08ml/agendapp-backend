@@ -143,6 +143,16 @@ Hemos registrado la cancelación de tu(s) cita(s):
 {{appointments_list}}
 
 Gracias por avisarnos. Si deseas reprogramar, responde a este mensaje y te ayudamos con un nuevo horario.`,
+
+  // 🆕 Aviso de no asistencia al cliente
+  clientNoShowAck: `¡Hola, {{names}}! 👋
+
+Notamos que no pudiste asistir a tu cita:
+• {{service}} - {{date}}
+
+📍 {{organization}}
+
+Si deseas reprogramar tu cita, responde a este mensaje y con gusto te ayudamos a encontrar un nuevo horario. ¡Te esperamos pronto!`,
     };
 
     return templates[templateType] || '';

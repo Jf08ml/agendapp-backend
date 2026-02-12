@@ -49,6 +49,10 @@ const whatsappTemplateSchema = new mongoose.Schema(
           type: Boolean,
           default: true,
         },
+        clientNoShowAck: {
+          type: Boolean,
+          default: true,
+        },
       },
       default: () => ({
         scheduleAppointment: true,
@@ -60,6 +64,7 @@ const whatsappTemplateSchema = new mongoose.Schema(
         statusReservationRejected: false,
         clientConfirmationAck: true,
         clientCancellationAck: true,
+        clientNoShowAck: true,
       }),
     },
     scheduleAppointment: {
@@ -96,6 +101,10 @@ const whatsappTemplateSchema = new mongoose.Schema(
       default: null,
     },
     clientCancellationAck: {
+      type: String,
+      default: null,
+    },
+    clientNoShowAck: {
       type: String,
       default: null,
     },

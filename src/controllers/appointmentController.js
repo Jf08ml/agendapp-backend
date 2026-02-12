@@ -468,6 +468,27 @@ const appointmentController = {
       sendResponse(res, 500, null, error.message);
     }
   },
+  // Marcar asistencia de una cita (attended / no_show)
+  markAttendance: async (req, res) => {
+    try {
+      const { appointmentId } = req.params;
+      const { status, notifyClient } = req.body;
+      const organizationId = req.organization._id;
+
+      const appointment = await appointmentService.markAttendance(
+        appointmentId,
+        status,
+        organizationId,
+        notifyClient
+      );
+
+      sendResponse(res, 200, appointment, "Asistencia registrada correctamente.");
+    } catch (error) {
+      console.error("Error en markAttendance:", error);
+      const statusCode = error.statusCode || 500;
+      sendResponse(res, statusCode, null, error.message);
+    }
+  },
 };
 
 export default appointmentController;
