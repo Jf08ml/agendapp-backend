@@ -133,6 +133,7 @@ const organizationService = {
       cancellationPolicy,
       blockHolidaysForReservations,
       allowedHolidayDates,
+      hasAccessBlocked,
     } = organizationData;
 
     const organization = await Organization.findById(id);
@@ -275,6 +276,11 @@ const organizationService = {
 
     if (allowedHolidayDates !== undefined) {
       organization.allowedHolidayDates = allowedHolidayDates;
+    }
+
+    // 🔒 Bloqueo de acceso (superadmin)
+    if (hasAccessBlocked !== undefined) {
+      organization.hasAccessBlocked = hasAccessBlocked;
     }
 
     // Encriptar la contraseña solo si se proporciona una nueva

@@ -231,7 +231,7 @@ const organizationSchema = new mongoose.Schema({
   },
   hasAccessBlocked: {
     type: Boolean,
-    default: false,
+    default: true, // Bloqueado por defecto hasta que compre un plan
   },
 
   // DEPRECATED: Mantener temporalmente para migración
