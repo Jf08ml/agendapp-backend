@@ -366,6 +366,28 @@ const membershipService = {
 
     return membership.populate('organizationId planId');
   },
+
+  /**
+   * Obtiene los límites del plan activo de una organización.
+   * Retorna el objeto limits del plan, o null si no hay membresía/plan.
+   */
+  getPlanLimits: async (organizationId) => {
+    try {
+      const membership = await membershipModel
+        .findOne({
+          organizationId,
+          status: { $in: ["active", "trial", "grace_period"] },
+        })
+        .populate("planId", "limits slug name displayName")
+        .sort({ createdAt: -1 })
+        .lean();
+
+      return membership?.planId?.limits || null;
+    } catch (error) {
+      console.error("[getPlanLimits] Error:", error.message);
+      return null;
+    }
+  },
 };
 
 export default membershipService;

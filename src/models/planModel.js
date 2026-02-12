@@ -68,6 +68,7 @@ const planSchema = new mongoose.Schema(
       prioritySupport: { type: Boolean, default: false },
       autoReminders: { type: Boolean, default: false },
       autoConfirmations: { type: Boolean, default: false },
+      servicePackages: { type: Boolean, default: false },
     },
     
     isActive: {

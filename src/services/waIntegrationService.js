@@ -1,5 +1,6 @@
 // services/waIntegrationService.js
 import Organization from "../models/organizationModel.js";
+import membershipService from "./membershipService.js";
 import {
   waStartSession,
   waGetStatus,
@@ -58,6 +59,13 @@ export const waIntegrationService = {
 
   // ⬇️ NUEVO: enviar mensaje vía wa-backend
   async sendMessage({ orgId, clientId, phone, message, image }) {
+    // Verificar si el plan permite WhatsApp
+    const planLimits = await membershipService.getPlanLimits(orgId);
+    if (planLimits && planLimits.whatsappIntegration === false) {
+      console.log(`[waIntegrationService] WhatsApp bloqueado por plan para org ${orgId}`);
+      return { blocked: true, reason: "plan_limit" };
+    }
+
     const org = await Organization.findById(orgId);
     console.log("sendMessage", { orgId, clientId, phone, message, image });
     if (!org) throw new Error("Organización no encontrada");

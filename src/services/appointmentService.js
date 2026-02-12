@@ -1,5 +1,6 @@
 import appointmentModel from "../models/appointmentModel.js";
 import organizationService from "./organizationService.js";
+import membershipService from "./membershipService.js";
 import serviceService from "./serviceService.js";
 import whatsappService from "./sendWhatsappService.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
@@ -182,6 +183,11 @@ const appointmentService = {
 
     // Enviar confirmación por WhatsApp (solo si está habilitado)
     try {
+      // Verificar si el plan permite confirmaciones automáticas
+      const planLimits = await membershipService.getPlanLimits(organizationId);
+      if (planLimits && planLimits.autoConfirmations === false) {
+        console.log(`⏭️  Confirmación bloqueada por plan para org ${organizationId}`);
+      } else {
       // 🆕 Verificar si el envío de confirmación está habilitado
       const whatsappTemplate = await WhatsappTemplate.findOne({ organizationId });
       const isConfirmationEnabled = whatsappTemplate?.enabledTypes?.scheduleAppointment !== false;
@@ -205,6 +211,7 @@ const appointmentService = {
       } else if (!isConfirmationEnabled) {
         console.log(`⏭️  Confirmación deshabilitada para cita ${newAppointment._id}`);
       }
+      } // cierre del else (planLimits check)
     } catch (error) {
       console.error(
         `Error enviando la confirmación para ${client?.phoneNumber}:`,
@@ -598,11 +605,15 @@ const appointmentService = {
           cancellationLink: groupCancellationLink, // 🔗 Un solo enlace para todo el grupo
         };
 
+        // Verificar si el plan permite confirmaciones automáticas
+        const batchPlanLimits = await membershipService.getPlanLimits(organizationId);
+        const planAllowsConfirmations = !(batchPlanLimits && batchPlanLimits.autoConfirmations === false);
+
         // 🆕 Verificar si el envío de confirmación batch está habilitado
         const whatsappTemplate = await WhatsappTemplate.findOne({ organizationId });
         const isBatchConfirmationEnabled = whatsappTemplate?.enabledTypes?.scheduleAppointmentBatch !== false;
 
-        if (isBatchConfirmationEnabled) {
+        if (planAllowsConfirmations && isBatchConfirmationEnabled) {
           // Usar template personalizado de la organización
           const msg = await whatsappTemplates.getRenderedTemplate(
             organizationId,
@@ -976,9 +987,20 @@ const appointmentService = {
     try {
       // Obtener todas las organizaciones con recordatorios habilitados
       const organizations = await organizationService.getOrganizations();
-      const orgsWithReminders = organizations.filter(
+      const orgsWithRemindersBase = organizations.filter(
         (org) => org.reminderSettings?.enabled !== false
       );
+
+      // Filtrar por plan: excluir organizaciones cuyo plan no permite autoReminders
+      const orgsWithReminders = [];
+      for (const org of orgsWithRemindersBase) {
+        const planLimits = await membershipService.getPlanLimits(org._id);
+        if (planLimits && planLimits.autoReminders === false) {
+          console.log(`[Reminders] Org ${org.name}: recordatorios bloqueados por plan`);
+          continue;
+        }
+        orgsWithReminders.push(org);
+      }
 
       if (!orgsWithReminders.length) {
         console.log("[Reminders] No hay organizaciones con recordatorios habilitados.");

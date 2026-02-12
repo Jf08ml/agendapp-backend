@@ -1,4 +1,5 @@
 import organizationService from "../services/organizationService.js";
+import membershipService from "../services/membershipService.js";
 import sendResponse from "../utils/sendResponse.js";
 
 const organizationController = {
@@ -27,7 +28,13 @@ const organizationController = {
     const { id } = req.params;
     try {
       const organization = await organizationService.getOrganizationById(id);
-      sendResponse(res, 200, organization, "Organización encontrada");
+      const orgData = organization.toObject();
+
+      // Adjuntar límites del plan activo
+      const planLimits = await membershipService.getPlanLimits(id);
+      orgData.planLimits = planLimits;
+
+      sendResponse(res, 200, orgData, "Organización encontrada");
     } catch (error) {
       sendResponse(res, 404, null, error.message);
     }
@@ -38,7 +45,13 @@ const organizationController = {
     const { id } = req.params;
     try {
       const updatedOrganization = await organizationService.updateOrganization(id, req.body);
-      sendResponse(res, 200, updatedOrganization, "Organización actualizada exitosamente");
+      const orgData = updatedOrganization.toObject();
+
+      // Adjuntar límites del plan activo
+      const planLimits = await membershipService.getPlanLimits(id);
+      orgData.planLimits = planLimits;
+
+      sendResponse(res, 200, orgData, "Organización actualizada exitosamente");
     } catch (error) {
       sendResponse(res, 404, null, error.message);
     }

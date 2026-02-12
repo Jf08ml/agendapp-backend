@@ -3,6 +3,7 @@ import axiosBase from "axios";
 import http from "http";
 import https from "https";
 import organizationService from "./organizationService.js";
+import membershipService from "./membershipService.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
 import { normalizePhoneNumber, toWhatsappFormat } from "../utils/phoneUtils.js";
 
@@ -190,6 +191,13 @@ const whatsappService = {
    * @param {string} [image] url o base64
    */
   async sendMessage(organizationId, phone, message, image, opts = {}) {
+    // Verificar si el plan permite WhatsApp
+    const planLimits = await membershipService.getPlanLimits(organizationId);
+    if (planLimits && planLimits.whatsappIntegration === false) {
+      console.log(`[whatsappService] WhatsApp bloqueado por plan para org ${organizationId}`);
+      return { blocked: true, reason: "plan_limit" };
+    }
+
     const org = await organizationService.getOrganizationById(organizationId);
     if (!org || !org.clientIdWhatsapp) {
       throw new Error(
@@ -220,6 +228,13 @@ const whatsappService = {
       throw new Error(
         "La organización no tiene sesión de WhatsApp configurada"
       );
+    }
+
+    // Verificar si el plan permite WhatsApp
+    const planLimits = await membershipService.getPlanLimits(org._id);
+    if (planLimits && planLimits.whatsappIntegration === false) {
+      console.log(`[whatsappService] WhatsApp bloqueado por plan para org ${org._id}`);
+      return { blocked: true, reason: "plan_limit" };
     }
 
     // Usar template personalizado si existe, o el por defecto

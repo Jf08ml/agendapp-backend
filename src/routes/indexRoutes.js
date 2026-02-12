@@ -34,7 +34,7 @@ import { verifyToken } from "../middleware/authMiddleware.js";
 const router = Router();
 
 // *** NUEVO ENDPOINT: config visual público según dominio ***
-router.get("/organization-config", organizationResolver, (req, res) => {
+router.get("/organization-config", organizationResolver, async (req, res) => {
   const { organization } = req;
   if (!organization) {
     return res.status(404).json({ error: "Organización no encontrada" });
@@ -45,6 +45,14 @@ router.get("/organization-config", organizationResolver, (req, res) => {
   // Elimina campos peligrosos/sensibles del objeto antes de enviar
   delete orgObj.password;
   delete orgObj.__v;
+
+  // Adjuntar límites del plan activo
+  try {
+    const { default: membershipService } = await import("../services/membershipService.js");
+    orgObj.planLimits = await membershipService.getPlanLimits(organization._id);
+  } catch (e) {
+    orgObj.planLimits = null;
+  }
 
   res.json(orgObj);
 });
