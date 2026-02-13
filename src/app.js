@@ -15,6 +15,10 @@ import { dynamicCorsOptions } from "./middleware/corsMiddleware.js";
 
 const app = express();
 
+// Confiar en el primer proxy (Vercel) para que express-rate-limit
+// use correctamente X-Forwarded-For para identificar IPs de clientes
+app.set('trust proxy', 1);
+
 // Configura web-push con las claves VAPID
 webPush.setVapidDetails(
   "mailto:lassojuanfe@gmail.com",
