@@ -10,6 +10,7 @@ import organizationService from './organizationService.js';
 import employeeService from './employeeService.js';
 import serviceService from './serviceService.js';
 import clientService from './clientService.js';
+import WhatsappTemplate from '../models/whatsappTemplateModel.js';
 import whatsappTemplates from '../utils/whatsappTemplates.js';
 import { waIntegrationService } from './waIntegrationService.js';
 import cancellationService from './cancellationService.js';
@@ -607,7 +608,6 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
           };
           
           // 🆕 Verificar si el envío de confirmación de series está habilitado
-          const WhatsappTemplate = (await import('../models/whatsappTemplateModel.js')).default;
           const whatsappTemplate = await WhatsappTemplate.findOne({ organizationId: baseAppointment.organizationId });
           const isRecurringConfirmationEnabled = whatsappTemplate?.enabledTypes?.recurringAppointmentSeries !== false;
 
