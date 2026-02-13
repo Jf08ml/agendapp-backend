@@ -28,6 +28,7 @@ import publicRoutes from "./publicRoutes.js";
 import membershipBillingRoutes from "./membershipBillingRoutes.js";
 import campaignRoutes from "./campaignRoutes.js";
 import packageRoutes from "./packageRoutes.js";
+import membershipService from "../services/membershipService.js";
 import { organizationResolver } from "../middleware/organizationResolver";
 import { verifyToken } from "../middleware/authMiddleware.js";
 
@@ -48,9 +49,9 @@ router.get("/organization-config", organizationResolver, async (req, res) => {
 
   // Adjuntar límites del plan activo
   try {
-    const { default: membershipService } = await import("../services/membershipService.js");
     orgObj.planLimits = await membershipService.getPlanLimits(organization._id);
   } catch (e) {
+    console.error("[organization-config] Error al obtener planLimits:", e.message);
     orgObj.planLimits = null;
   }
 
