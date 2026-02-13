@@ -4,23 +4,21 @@
  */
 
 import moment from 'moment-timezone';
+import organizationModel from '../models/organizationModel.js';
+import employeeModel from '../models/employeeModel.js';
+import appointmentModel from '../models/appointmentModel.js';
+import serviceModel from '../models/serviceModel.js';
+import scheduleService from '../services/scheduleService.js';
 
 export default {
   debugSlots: async (req, res) => {
     const { organizationId, date, employeeId, serviceDuration = 30, serviceId } = req.query;
-    
+
     try {
       const debug = {
         input: { organizationId, date, employeeId, serviceDuration },
         steps: []
       };
-
-      // Importar modelos
-      const organizationModel = (await import('../models/organizationModel.js')).default;
-      const employeeModel = (await import('../models/employeeModel.js')).default;
-      const appointmentModel = (await import('../models/appointmentModel.js')).default;
-      const serviceModel = (await import('../models/serviceModel.js')).default;
-      const scheduleService = (await import('../services/scheduleService.js')).default;
 
       // 1. Buscar organización
       const organization = await organizationModel.findById(organizationId);

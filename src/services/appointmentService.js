@@ -1341,9 +1341,6 @@ const appointmentService = {
       alreadyConfirmed: [],
     };
 
-    // Cargar clientes service
-    const { default: clientService } = await import("./clientService.js");
-
     for (const appointmentId of appointmentIds) {
       try {
         // Obtener la cita

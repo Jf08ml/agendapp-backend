@@ -3,11 +3,13 @@ import bcrypt from 'bcryptjs';
 import moment from 'moment-timezone';
 import Reservation from '../models/reservationModel.js';
 import Appointment from '../models/appointmentModel.js';
+import WhatsappTemplate from '../models/whatsappTemplateModel.js';
 import organizationService from './organizationService.js';
 import whatsappService from './sendWhatsappService.js';
 import notificationService from './notificationService.js';
 import whatsappTemplates from '../utils/whatsappTemplates.js';
 import packageService from './packageService.js';
+import clientService from './clientService.js';
 
 const cancellationService = {
   /**
@@ -488,7 +490,6 @@ const cancellationService = {
       const results = [];
       const confirmedIds = [];
       const confirmedAppointments = [];
-      let clientService;
 
       for (const appointment of appointments) {
         const start = moment.tz(appointment.startDate, timezone);
@@ -527,10 +528,6 @@ const cancellationService = {
 
         if (appointment.client) {
           try {
-            if (!clientService) {
-              const mod = await import('./clientService.js');
-              clientService = mod.default;
-            }
             await clientService.registerService(appointment.client);
           } catch (clientError) {
             console.warn('[confirmByToken] No se pudo registrar servicio en cliente:', clientError.message);
@@ -554,7 +551,6 @@ const cancellationService = {
             // Verificar si el envío está habilitado para clientConfirmationAck
             let isEnabled = true;
             try {
-              const { default: WhatsappTemplate } = await import('../models/whatsappTemplateModel.js');
               const tpl = await WhatsappTemplate.findOne({ organizationId });
               if (tpl && tpl.enabledTypes && typeof tpl.enabledTypes.clientConfirmationAck === 'boolean') {
                 isEnabled = tpl.enabledTypes.clientConfirmationAck;
@@ -950,7 +946,6 @@ const cancellationService = {
           // Verificar si el envío está habilitado para clientCancellationAck
           let isEnabled = true;
           try {
-            const { default: WhatsappTemplate } = await import('../models/whatsappTemplateModel.js');
             const tpl = await WhatsappTemplate.findOne({ organizationId });
             if (tpl && tpl.enabledTypes && typeof tpl.enabledTypes.clientCancellationAck === 'boolean') {
               isEnabled = tpl.enabledTypes.clientCancellationAck;
