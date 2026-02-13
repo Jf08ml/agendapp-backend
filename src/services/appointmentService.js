@@ -1027,11 +1027,11 @@ const appointmentService = {
         const nowInOrgTz = moment.tz(timezone);
         const currentHourOrg = nowInOrgTz.hour();
 
-        // Calcular ventana de tiempo objetivo
+        // Calcular ventana de tiempo objetivo (normal: ahora + hoursBefore)
         const targetTimeStart = moment.tz(timezone).add(hoursBefore, 'hours').startOf('hour').toDate();
         const targetTimeEnd = moment.tz(timezone).add(hoursBefore, 'hours').endOf('hour').toDate();
 
-        // Buscar citas en la ventana que NO tengan este recordatorio enviado
+        // Buscar citas en la ventana normal
         const appointmentsInWindow = await appointmentModel
           .find({
             organizationId: orgId,
@@ -1044,23 +1044,55 @@ const appointmentService = {
           .populate("employee")
           .populate("organizationId");
 
-        if (!appointmentsInWindow.length) {
+        // Catch-up: buscar citas cuyo recordatorio ideal cayó fuera de la ventana horaria
+        // Estas son citas entre ahora y ahora+hoursBefore que aún no tienen recordatorio
+        const catchupStart = moment.tz(timezone).toDate();
+        const catchupAppointments = await appointmentModel
+          .find({
+            organizationId: orgId,
+            startDate: { $gt: catchupStart, $lt: targetTimeStart },
+            [sentField]: { $ne: true },
+            status: { $nin: ['cancelled', 'cancelled_by_customer', 'cancelled_by_admin'] },
+          })
+          .populate("client")
+          .populate("service")
+          .populate("employee")
+          .populate("organizationId");
+
+        if (catchupAppointments.length > 0) {
+          console.log(`[${org.name}] [${label}] Catch-up: ${catchupAppointments.length} citas pendientes de recordatorio`);
+        }
+
+        // Combinar ambas búsquedas sin duplicados
+        const seenIds = new Set();
+        const allAppointmentsInWindow = [];
+        for (const appt of [...appointmentsInWindow, ...catchupAppointments]) {
+          const id = appt._id.toString();
+          if (!seenIds.has(id)) {
+            seenIds.add(id);
+            allAppointmentsInWindow.push(appt);
+          }
+        }
+
+        if (!allAppointmentsInWindow.length) {
           return { ok: 0, skipped: 0 };
         }
 
         // Obtener todos los clientes únicos
         const clientIds = [...new Set(
-          appointmentsInWindow
+          allAppointmentsInWindow
             .map(appt => appt.client?._id?.toString())
             .filter(Boolean)
         )];
 
-        // Rango del día completo para consolidar citas del mismo cliente
+        // Rango para consolidar citas del mismo cliente
+        // Cubrir desde hoy hasta el día del target (puede ser el mismo día o el siguiente)
+        const todayStr = moment.tz(timezone).format('YYYY-MM-DD');
         const targetDateStr = moment.tz(targetTimeStart, timezone).format('YYYY-MM-DD');
-        const dayStart = moment.tz(targetDateStr, timezone).startOf('day').toDate();
+        const dayStart = moment.tz(todayStr, timezone).startOf('day').toDate();
         const dayEnd = moment.tz(targetDateStr, timezone).endOf('day').toDate();
 
-        // Buscar TODAS las citas del día para estos clientes
+        // Buscar TODAS las citas en el rango para estos clientes
         const appointments = await appointmentModel
           .find({
             organizationId: orgId,
