@@ -79,6 +79,7 @@ export const dynamicCorsOptions = {
   allowedHeaders: [
     "Content-Type",
     "Authorization",
+    "X-Tenant-Domain",
     "X-Dev-Tenant-Slug", // Solo funciona en dev (backend ignora en prod)
   ],
 };

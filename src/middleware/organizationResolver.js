@@ -57,9 +57,9 @@ export async function organizationResolver(req, res, next) {
     }
   }
 
-  // 2. Resolver hostname
+  // 2. Resolver hostname (prioridad: X-Tenant-Domain > x-forwarded-host > host)
   const hostname = normalizeHostname(
-    req.headers["x-forwarded-host"] || req.headers.host
+    req.headers["x-tenant-domain"] || req.headers["x-forwarded-host"] || req.headers.host
   );
 
   if (!hostname) {
