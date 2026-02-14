@@ -34,7 +34,7 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'"],
       scriptSrc: ["'self'"],
       imgSrc: ["'self'", "data:", "https:", "https://ik.imagekit.io"],
-      connectSrc: ["'self'", "https://sandbox-api.polar.sh", "https://api.polar.sh"],
+      connectSrc: ["'self'"],
     },
   },
   crossOriginEmbedderPolicy: false, // Para permitir ImageKit
@@ -54,10 +54,9 @@ const generalLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  // Excluir webhooks y cron jobs del rate limiting
+  // Excluir cron jobs del rate limiting
   skip: (req) => {
-    return req.path.startsWith('/api/payments/webhook') || 
-           req.path.startsWith('/api/cron/');
+    return req.path.startsWith('/api/cron/');
   }
 });
 
@@ -83,18 +82,7 @@ if (process.env.NODE_ENV !== "production") {
     next();
   });
 }
-// Importante: preservar el body crudo para la verificación de firmas de webhooks.
-// Si express.json parsea primero, se pierde el body exacto y la firma nunca va a coincidir.
-app.use(
-  express.json({
-    limit: "5mb", // 🔒 Reducido de 10mb a 5mb para prevenir ataques
-    verify: (req, _res, buf) => {
-      if (req.originalUrl === "/api/payments/webhook") {
-        req.rawBody = buf;
-      }
-    },
-  })
-);
+app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true }));
 
 // 🔒 Aplicar rate limiting general a todas las rutas de API

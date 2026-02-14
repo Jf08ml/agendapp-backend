@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 
 const paymentEventSchema = new mongoose.Schema(
   {
-    provider: { type: String, default: "polar" },
+    provider: { type: String },
     eventId: { type: String, required: true, index: true, unique: true },
     type: { type: String, index: true },
     sessionId: { type: String, index: true },

@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 
 const paymentSessionSchema = new mongoose.Schema(
   {
-    provider: { type: String, default: "polar" },
+    provider: { type: String },
     sessionId: { type: String, required: true, index: true, unique: true },
     checkoutUrl: { type: String },
 

@@ -18,14 +18,14 @@ import cronRoutes from "./cronRoutes";
 import reservationRoutes from "./reservation";
 import notificationRoutes from "./notification";
 import planRoutes from "./planRoutes";
-import paymentRoutes from "./paymentRoutes.js";
+
 import waRoutes from "./waRoutes";
 import reminderRoutes from "./reminderRoutes";
 import membershipRoutes from "./membershipRoutes";
 import scheduleRoutes from "./scheduleRoutes.js";
 import debugRoutes from "./debugRoutes.js";
 import publicRoutes from "./publicRoutes.js";
-import membershipBillingRoutes from "./membershipBillingRoutes.js";
+
 import campaignRoutes from "./campaignRoutes.js";
 import packageRoutes from "./packageRoutes.js";
 import membershipService from "../services/membershipService.js";
@@ -131,9 +131,7 @@ router.use(subscriptionRoutes); // Push notifications - considerar
 router.use(whatsappRoutes); // Webhooks - debe ser público
 router.use("/cron", cronRoutes); // Cron jobs - debe ser público
 router.use("/plans", planRoutes); // Planes - considerar según uso
-router.use("/payments", paymentRoutes); // Webhooks de pago - debe ser público
 router.use("/debug", debugRoutes); // Debug - considerar proteger en producción
 router.use("/public", publicRoutes); // Rutas públicas - debe ser público
-router.use("/billing", membershipBillingRoutes); // Billing público
 
 export default router;

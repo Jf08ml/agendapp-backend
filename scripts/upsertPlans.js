@@ -107,6 +107,39 @@ const plans = [
       "Para negocios que quieren reforzar su marca y presencia digital. Incluye dominio propio y soporte prioritario.",
     isActive: true,
   },
+  {
+    name: "Plan Demo",
+    slug: "plan-demo",
+    displayName: "Plan Demo (Interno)",
+    price: 0,
+    prices: { USD: 0, COP: 0 },
+    billingCycle: "monthly",
+    domainType: "custom_domain",
+    characteristics: [
+      "Acceso completo a todas las funcionalidades",
+      "Sin límites de empleados, servicios o citas",
+      "Branding personalizado y dominio propio",
+      "Recordatorios y confirmaciones automáticas",
+      "Analíticas avanzadas y soporte prioritario",
+      "Paquetes de sesiones",
+    ],
+    limits: {
+      maxEmployees: null,
+      maxServices: null,
+      maxAppointmentsPerMonth: null,
+      maxStorageGB: null,
+      customBranding: true,
+      whatsappIntegration: true,
+      analyticsAdvanced: true,
+      prioritySupport: true,
+      autoReminders: true,
+      autoConfirmations: true,
+      servicePackages: true,
+    },
+    description:
+      "Plan interno para demostraciones y pruebas. Acceso total sin restricciones.",
+    isActive: true,
+  },
 ];
 
 async function upsertPlans() {

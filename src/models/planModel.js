@@ -75,12 +75,6 @@ const planSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
-    
-    // Integración con proveedor de pagos (Polar)
-    payment: {
-      provider: { type: String, default: "polar" },
-      productId: { type: String, default: null },
-    },
   },
   {
     timestamps: true,

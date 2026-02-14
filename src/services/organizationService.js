@@ -117,6 +117,7 @@ const organizationService = {
       clientIdWhatsapp,
       branding,
       domain,
+      domains,
       reservationPolicy,
       showLoyaltyProgram,
       enableOnlineBooking,
@@ -196,7 +197,9 @@ const organizationService = {
       };
     }
 
-    if (domain !== undefined) {
+    if (domains !== undefined) {
+      organization.domains = Array.isArray(domains) ? domains : [domains];
+    } else if (domain !== undefined) {
       organization.domains = Array.isArray(domain) ? domain : [domain];
     }
 
