@@ -1,5 +1,6 @@
 // controllers/membershipController.js
 import membershipService from "../services/membershipService.js";
+import planModel from "../models/planModel.js";
 import sendResponse from "../utils/sendResponse.js";
 import { runMembershipCheck } from "../cron/membershipCheckJob.js";
 
@@ -200,6 +201,88 @@ const membershipController = {
       return sendResponse(res, 200, membership, "Membresía actualizada exitosamente");
     } catch (error) {
       console.error("Error actualizando membresía:", error);
+      return sendResponse(res, 500, null, error.message);
+    }
+  },
+
+  /**
+   * POST /api/memberships/upgrade
+   * Self-service: org admin solicita upgrade a plan pago.
+   * Reutiliza activatePaidPlan() — la lógica central de activación.
+   */
+  upgrade: async (req, res) => {
+    try {
+      const organizationId = req.organization?._id;
+      if (!organizationId) {
+        return sendResponse(res, 400, null, "Organización no identificada");
+      }
+
+      const { planId } = req.body;
+      if (!planId) {
+        return sendResponse(res, 400, null, "planId es requerido");
+      }
+
+      const plan = await planModel.findById(planId);
+      if (!plan || !plan.isActive) {
+        return sendResponse(res, 404, null, "Plan no encontrado o no disponible");
+      }
+
+      // No permitir "upgrade" al plan-demo
+      if (plan.slug === "plan-demo") {
+        return sendResponse(res, 400, null, "No se puede seleccionar el plan demo");
+      }
+
+      const membership = await membershipService.activatePaidPlan({
+        organizationId,
+        planId: plan._id,
+        paymentAmount: 0, // Pago manual — se registrará después
+      });
+
+      return sendResponse(res, 200, membership, "Plan activado exitosamente");
+    } catch (error) {
+      console.error("Error en upgrade:", error);
+      return sendResponse(res, 500, null, error.message);
+    }
+  },
+
+  /**
+   * POST /api/memberships/superadmin/:membershipId/activate
+   * Superadmin: Activar plan pago para una membresía (trial → active con nuevo plan).
+   * Reutiliza activatePaidPlan() que resetea notificaciones, sincroniza org, etc.
+   */
+  activatePlan: async (req, res) => {
+    try {
+      const { membershipId } = req.params;
+      const { planId, paymentAmount } = req.body;
+
+      if (!planId) {
+        return sendResponse(res, 400, null, "planId es requerido");
+      }
+
+      const plan = await planModel.findById(planId);
+      if (!plan || !plan.isActive) {
+        return sendResponse(res, 404, null, "Plan no encontrado o no disponible");
+      }
+
+      if (plan.slug === "plan-demo") {
+        return sendResponse(res, 400, null, "No se puede activar el plan demo como plan pago");
+      }
+
+      // Obtener organizationId desde la membresía
+      const existingMembership = await membershipService.getMembershipById(membershipId);
+      if (!existingMembership) {
+        return sendResponse(res, 404, null, "Membresía no encontrada");
+      }
+
+      const membership = await membershipService.activatePaidPlan({
+        organizationId: existingMembership.organizationId._id || existingMembership.organizationId,
+        planId: plan._id,
+        paymentAmount: paymentAmount || 0,
+      });
+
+      return sendResponse(res, 200, membership, "Plan activado exitosamente");
+    } catch (error) {
+      console.error("Error activando plan:", error);
       return sendResponse(res, 500, null, error.message);
     }
   },

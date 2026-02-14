@@ -1,5 +1,7 @@
 import Organization from "../models/organizationModel.js";
 import bcrypt from "bcryptjs";
+import membershipService from "./membershipService.js";
+import Plan from "../models/planModel.js";
 
 const organizationService = {
   // Crear una nueva organización
@@ -67,6 +69,21 @@ const organizationService = {
     });
 
     const savedOrganization = await newOrganization.save();
+
+    // Crear trial automático de 7 días
+    try {
+      const trialPlan = await Plan.findOne({ slug: "plan-demo", isActive: true });
+      if (trialPlan) {
+        await membershipService.createMembership({
+          organizationId: savedOrganization._id,
+          planId: trialPlan._id,
+          trialDays: 7,
+        });
+      }
+    } catch (err) {
+      console.error("[createOrganization] Error creando trial automático:", err.message);
+      // No fallar la creación de org si el trial falla
+    }
 
     // Ocultar el campo password antes de devolver la organización creada
     savedOrganization.password = undefined;

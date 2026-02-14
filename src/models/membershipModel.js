@@ -13,7 +13,7 @@ const membershipSchema = new mongoose.Schema(
       ref: "Plan",
       required: true,
     },
-    
+
     // Estado de la membresía
     status: {
       type: String,
@@ -21,7 +21,7 @@ const membershipSchema = new mongoose.Schema(
         "active",        // Activa y pagada
         "trial",         // Período de prueba
         "pending",       // Pendiente de pago
-        "grace_period",  // Período de gracia (2 días después de vencer)
+        "past_due",      // Vencida, read-only (3 días antes de suspender)
         "suspended",     // Suspendida por falta de pago
         "cancelled",     // Cancelada por el usuario
         "expired",       // Expirada
@@ -29,7 +29,7 @@ const membershipSchema = new mongoose.Schema(
       default: "trial",
       index: true,
     },
-    
+
     // Fechas importantes
     startDate: {
       type: Date,
@@ -44,22 +44,22 @@ const membershipSchema = new mongoose.Schema(
     currentPeriodEnd: {
       type: Date,
       required: true,
-      index: true, // Para buscar membresías que van a vencer
+      index: true,
     },
     trialEnd: {
       type: Date,
       default: null,
     },
-    
+
     // Control de notificaciones
     notifications: {
       threeDaysSent: { type: Boolean, default: false },
       oneDaySent: { type: Boolean, default: false },
       expirationSent: { type: Boolean, default: false },
-      gracePeriodDay1Sent: { type: Boolean, default: false },
-      gracePeriodDay2Sent: { type: Boolean, default: false },
+      pastDueDay1Sent: { type: Boolean, default: false },
+      pastDueDay2Sent: { type: Boolean, default: false },
     },
-    
+
     // Historial de pagos (referencia)
     lastPaymentDate: {
       type: Date,
@@ -73,19 +73,19 @@ const membershipSchema = new mongoose.Schema(
       type: Date,
       index: true,
     },
-    
+
     // Auto-renovación
     autoRenew: {
       type: Boolean,
       default: false,
     },
-    
+
     // Notas administrativas
     adminNotes: {
       type: String,
       default: "",
     },
-    
+
     // Rastreo de suspensiones
     suspendedAt: {
       type: Date,
@@ -95,7 +95,7 @@ const membershipSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
-    
+
     // Cancelación
     cancelledAt: {
       type: Date,
@@ -104,6 +104,12 @@ const membershipSchema = new mongoose.Schema(
     cancellationReason: {
       type: String,
       default: "",
+    },
+
+    // Idempotencia del cron
+    lastCheckedAt: {
+      type: Date,
+      default: null,
     },
   },
   {
@@ -115,29 +121,30 @@ const membershipSchema = new mongoose.Schema(
 membershipSchema.index({ organizationId: 1, status: 1 });
 membershipSchema.index({ currentPeriodEnd: 1, status: 1 });
 
-// Método para verificar si está en período de gracia
-membershipSchema.methods.isInGracePeriod = function() {
-  if (this.status !== "grace_period") return false;
+// Método para verificar si está en período past_due
+membershipSchema.methods.isInPastDue = function() {
+  if (this.status !== "past_due") return false;
   const now = new Date();
-  const gracePeriodEnd = new Date(this.currentPeriodEnd);
-  gracePeriodEnd.setDate(gracePeriodEnd.getDate() + 2); // 2 días de gracia
-  return now <= gracePeriodEnd;
+  const pastDueEnd = new Date(this.currentPeriodEnd);
+  pastDueEnd.setDate(pastDueEnd.getDate() + 3); // 3 días de past_due
+  return now <= pastDueEnd;
 };
 
 // Método para verificar si debe ser suspendida
 membershipSchema.methods.shouldBeSuspended = function() {
   if (this.status === "suspended" || this.status === "cancelled") return false;
+  if (this.status !== "past_due") return false;
   const now = new Date();
-  const gracePeriodEnd = new Date(this.currentPeriodEnd);
-  gracePeriodEnd.setDate(gracePeriodEnd.getDate() + 2);
-  return now > gracePeriodEnd && this.status !== "active";
+  const pastDueEnd = new Date(this.currentPeriodEnd);
+  pastDueEnd.setDate(pastDueEnd.getDate() + 3);
+  return now > pastDueEnd;
 };
 
 // Método para calcular días hasta vencimiento
 membershipSchema.methods.daysUntilExpiration = function() {
   const now = new Date();
   const diff = this.currentPeriodEnd - now;
-  return Math.ceil(diff / (1000 * 60 * 60 * 24));
+  return Math.floor(diff / (1000 * 60 * 60 * 24));
 };
 
 export default mongoose.model("Membership", membershipSchema);

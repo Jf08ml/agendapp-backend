@@ -2,8 +2,8 @@ import mongoose from "mongoose";
 
 const paymentEventSchema = new mongoose.Schema(
   {
-    provider: { type: String },
-    eventId: { type: String, required: true, index: true, unique: true },
+    provider: { type: String, required: true },
+    eventId: { type: String, required: true, index: true },
     type: { type: String, index: true },
     sessionId: { type: String, index: true },
 
@@ -20,6 +20,9 @@ const paymentEventSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Idempotencia: un eventId por provider (distintos providers pueden coincidir IDs)
+paymentEventSchema.index({ provider: 1, eventId: 1 }, { unique: true });
 
 const PaymentEvent = mongoose.models.PaymentEvent || mongoose.model("PaymentEvent", paymentEventSchema);
 export default PaymentEvent;

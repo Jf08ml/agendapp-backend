@@ -78,6 +78,10 @@ const organizationSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  ownerName: {
+    type: String,
+    required: false,
+  },
   iconUrl: {
     type: String,
     required: false,
@@ -212,11 +216,20 @@ const organizationSchema = new mongoose.Schema({
     type: BrandingSchema,
     default: {},
   },
+  // Slug para subdominio wildcard: {slug}.agenditapp.com
+  // Pre-migration: unique + sparse; Post-migration: unique + required (remove sparse)
+  slug: {
+    type: String,
+    unique: true,
+    sparse: true,
+    lowercase: true,
+    trim: true,
+  },
   domains: {
     type: [String],
     required: true,
     default: [],
-  }, // Ej: "agenda.zybizobazar.com" o "salonmaria.com"
+  }, // Solo para dominios custom (NO guardar {slug}.agenditapp.com aquí)
 
   // Sistema de membresías
   currentMembershipId: {

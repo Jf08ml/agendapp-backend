@@ -1,106 +1,84 @@
 import organizationModel from "../models/organizationModel.js";
 
-// Cache de dominios válidos para mejorar performance
-let validDomainsCache = new Set();
-let lastCacheUpdate = 0;
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutos
+const MAIN_DOMAIN = "agenditapp.com";
+// Regex: cualquier subdominio de agenditapp.com (http o https)
+const WILDCARD_REGEX = /^https?:\/\/([a-z0-9][a-z0-9-]*[a-z0-9])?\.?agenditapp\.com$/;
 
 /**
- * Actualiza el cache de dominios válidos desde la base de datos
+ * Verifica si un origin pertenece a *.agenditapp.com
  */
-async function updateValidDomainsCache() {
-  const now = Date.now();
-  
-  // Si el cache es reciente, no actualizar
-  if (now - lastCacheUpdate < CACHE_TTL) {
-    return;
-  }
-
-  try {
-    // Obtener todos los dominios de todas las organizaciones
-    const organizations = await organizationModel.find({}, 'domains').lean();
-    
-    validDomainsCache = new Set();
-    
-    organizations.forEach(org => {
-      if (org.domains && Array.isArray(org.domains)) {
-        org.domains.forEach(domain => {
-          validDomainsCache.add(domain);
-          // También agregar con https://
-          validDomainsCache.add(`https://${domain}`);
-          validDomainsCache.add(`http://${domain}`);
-        });
-      }
-    });
-    
-    lastCacheUpdate = now;
-    console.log(`✅ CORS cache actualizado: ${validDomainsCache.size} dominios válidos`);
-  } catch (error) {
-    console.error('❌ Error actualizando cache de dominios CORS:', error);
-  }
+function isAgenditappOrigin(origin) {
+  if (!origin) return false;
+  return WILDCARD_REGEX.test(origin);
 }
 
 /**
- * Verifica si un origin es válido para CORS
+ * Verifica si un origin es un dominio custom registrado en la BD.
+ * Consulta por request (serverless-safe, sin caché en memoria).
  */
-function isValidOrigin(origin) {
-  if (!origin) return true; // Permitir requests sin origin (mobile apps, Postman, webhooks)
-  
-  // Extraer solo el hostname del origin
+async function isCustomDomainOrigin(origin) {
+  if (!origin) return false;
   try {
     const url = new URL(origin);
     const hostname = url.hostname;
-    
-    // Verificar si el hostname está en el cache
-    if (validDomainsCache.has(hostname)) {
-      return true;
-    }
-    
-    // Verificar si el origin completo está en el cache
-    if (validDomainsCache.has(origin)) {
-      return true;
-    }
-    
-    // En desarrollo, permitir localhost
-    if (process.env.NODE_ENV === 'development') {
-      if (hostname.includes('localhost') || hostname.includes('127.0.0.1')) {
-        return true;
-      }
-    }
-    
-    return false;
-  } catch (error) {
-    console.error('Error parseando origin:', origin, error);
+    const org = await organizationModel
+      .findOne({ domains: hostname })
+      .select("_id")
+      .lean();
+    return !!org;
+  } catch {
     return false;
   }
 }
 
 /**
- * Middleware de CORS dinámico para plataforma multitenant
+ * Middleware de CORS dinámico para plataforma multitenant (serverless-safe).
+ *
+ * - *.agenditapp.com → permitido por regex (sin BD)
+ * - Custom domains → consulta BD por request
+ * - localhost → permitido en dev
+ * - Sin origin → permitido (mobile, Postman, webhooks)
+ * - Refleja origin exacto (no *), con Vary: Origin
  */
 export const dynamicCorsOptions = {
   origin: async (origin, callback) => {
-    // Actualizar cache si es necesario
-    await updateValidDomainsCache();
-    
-    // Verificar si el origin es válido
-    if (isValidOrigin(origin)) {
-      callback(null, true);
-    } else {
-      console.warn(`⚠️ CORS bloqueado para origin: ${origin}`);
-      callback(new Error(`Origin ${origin} no permitido por CORS`));
+    // Sin origin → permitir (mobile apps, Postman, webhooks, server-to-server)
+    if (!origin) {
+      return callback(null, true);
     }
+
+    // *.agenditapp.com → permitir por regex (sin BD lookup)
+    if (isAgenditappOrigin(origin)) {
+      return callback(null, origin); // Reflejar origin exacto
+    }
+
+    // Localhost en desarrollo
+    if (process.env.NODE_ENV !== "production") {
+      try {
+        const url = new URL(origin);
+        if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+          return callback(null, origin);
+        }
+      } catch {
+        // Ignore parse error
+      }
+    }
+
+    // Custom domains → consulta BD
+    const isCustom = await isCustomDomainOrigin(origin);
+    if (isCustom) {
+      return callback(null, origin); // Reflejar origin exacto
+    }
+
+    console.warn(`⚠️ CORS bloqueado para origin: ${origin}`);
+    callback(new Error(`Origin ${origin} no permitido por CORS`));
   },
   credentials: true,
   optionsSuccessStatus: 200,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-Domain'],
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "X-Dev-Tenant-Slug", // Solo funciona en dev (backend ignora en prod)
+  ],
 };
-
-/**
- * Función para forzar actualización del cache (útil cuando se agregan organizaciones)
- */
-export async function refreshCorsCache() {
-  lastCacheUpdate = 0;
-  await updateValidDomainsCache();
-}
