@@ -8,16 +8,13 @@ import whatsappTemplates from "../utils/whatsappTemplates.js";
 import { normalizePhoneNumber, toWhatsappFormat } from "../utils/phoneUtils.js";
 
 /** ===================== CONFIG ===================== */
-const BASE_URL =
-  process.env.WHATSAPP_API_URL || process.env.VITE_API_URL_WHATSAPP;
-const API_KEY = process.env.WHATSAPP_API_KEY || process.env.VITE_API_KEY;
+const BASE_URL = process.env.WA_API_URL;
+const API_KEY = process.env.WA_API_KEY;
 
 if (!BASE_URL)
-  console.warn(
-    "[whatsappService] WHATSAPP_API_URL / VITE_API_URL_WHATSAPP no definido"
-  );
+  console.warn("[whatsappService] WA_API_URL no definido");
 if (!API_KEY)
-  console.warn("[whatsappService] WHATSAPP_API_KEY / VITE_API_KEY no definido");
+  console.warn("[whatsappService] WA_API_KEY no definido");
 
 // Reutiliza conexiones (evita TIME_WAIT y latencias)
 const keepAliveHttp = new http.Agent({ keepAlive: true, maxSockets: 50 });
@@ -61,68 +58,7 @@ const whatsappService = {
     return toWhatsappFormat(cleaned);
   },
 
-  /** ===================== TWILIO (opcional en servidor) ===================== */
-  async sendWhatsappReminder(phone, appointmentDetails) {
-    try {
-      const accountSid = process.env.TWILIO_ACCOUNT_SID;
-      const authToken = process.env.TWILIO_AUTH_TOKEN;
-      const client = require("twilio")(accountSid, authToken);
-
-      await client.messages.create({
-        contentSid: "HXc1cdd029c3eba4a1f303fd922ee74da6",
-        contentVariables: JSON.stringify({ ...appointmentDetails }),
-        from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
-        to: `whatsapp:+${this.normalizePhoneForWhatsapp(phone)}`,
-      });
-      return { message: "Mensaje enviado correctamente" };
-    } catch (error) {
-      throw new Error(error.message);
-    }
-  },
-
-  async sendWhatsappStatusReservationTwilo(status, phone, reservationDetails) {
-    try {
-      const accountSid = process.env.TWILIO_ACCOUNT_SID;
-      const authToken = process.env.TWILIO_AUTH_TOKEN;
-      const client = require("twilio")(accountSid, authToken);
-
-      await client.messages.create({
-        contentSid:
-          status === "approved"
-            ? "HX1b3c37e9450f9af80702eae7a01ecc41"
-            : "HX3c8a17fed3dc853f82d4eaabdb115857",
-        contentVariables: JSON.stringify({ ...reservationDetails }),
-        from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
-        to: `whatsapp:+${this.normalizePhoneForWhatsapp(phone)}`,
-      });
-
-      return { message: "Mensaje enviado correctamente" };
-    } catch (error) {
-      throw new Error(error.message);
-    }
-  },
-
-  async sendWhatsappScheduleAppointment(phone, appointmentDetails) {
-    try {
-      const accountSid = process.env.TWILIO_ACCOUNT_SID;
-      const authToken = process.env.TWILIO_AUTH_TOKEN;
-      const client = require("twilio")(accountSid, authToken);
-
-      await client.messages.create({
-        contentSid: "HX78a056237b71cb5f3232722cbf09b63d",
-        contentVariables: JSON.stringify({ ...appointmentDetails }),
-        from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
-        to: `whatsapp:+${this.normalizePhoneForWhatsapp(phone)}`,
-      });
-
-      return { message: "Mensaje enviado correctamente" };
-    } catch (error) {
-      throw new Error(error.message);
-    }
-  },
-  /** ======================================================================== */
-
-  /** ===================== Multi-sesión (wwebjs) ===================== */
+  /** ===================== Multi-sesión (Baileys) ===================== */
 
   // Idempotente: asegura que la sesión exista en el backend
   async ensureSession(clientId) {

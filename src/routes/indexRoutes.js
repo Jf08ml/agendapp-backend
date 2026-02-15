@@ -12,7 +12,6 @@ import organizationRoutes from "./organizationRoutes";
 import organizationRoutesPublic from "./organizationRoutesPublic";
 import authRoutes from "./authRoutes";
 import subscriptionRoutes from "./subscriptionRoutes";
-import whatsappRoutes from "./whatsappRoutes";
 import whatsappTemplateRoutes from "./whatsappTemplateRoutes";
 import cronRoutes from "./cronRoutes";
 import reservationRoutes from "./reservation";
@@ -102,7 +101,6 @@ router.get("/favicon.ico", organizationResolver, (req, res) => {
 router.use(organizationRoutesPublic);
 router.use(authRoutes);
 router.use(subscriptionRoutes);
-router.use(whatsappRoutes);
 router.use("/cron", cronRoutes);
 router.use("/plans", planRoutes);
 router.use("/debug", debugRoutes);
