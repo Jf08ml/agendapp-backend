@@ -42,12 +42,13 @@ export const reminderService = {
       ({ dayStartUTC, dayEndUTC } = getBogotaDayWindowUTC(targetDate));
     }
 
-    // 1) Traer citas de ese día aún no notificadas
+    // 1) Traer citas de ese día aún no notificadas (excluir canceladas)
     const appointments = await appointmentModel
       .find({
         ...(orgId ? { organizationId: orgId } : {}),
         startDate: { $gte: dayStartUTC, $lt: dayEndUTC },
         reminderSent: false,
+        status: { $nin: ['cancelled', 'cancelled_by_customer', 'cancelled_by_admin'] },
       })
       .populate("client service employee organizationId");
 
@@ -143,11 +144,16 @@ export const reminderService = {
             employees: new Set(),
             apptIds: new Set(),
             actionLink: null,
+            recommendations: new Set(),
           });
         }
 
         const bucket = byPhone.get(phone);
         bucket.services.push({ name: serviceName, time: timeLabel });
+        // Agregar recomendaciones del servicio si existen
+        if (a?.service?.recommendations) {
+          bucket.recommendations.add(a.service.recommendations);
+        }
         if (start < bucket.firstStart) bucket.firstStart = start;
         if ((end || start) > bucket.lastEnd) bucket.lastEnd = end || start;
         if (a?.employee?.names) bucket.employees.add(a.employee.names);
@@ -188,6 +194,12 @@ export const reminderService = {
         const countNum = bucket.services.length;
         const isSingle = countNum === 1;
 
+        // Construir bloque de recomendaciones si existen
+        const recommendationsArr = Array.from(bucket.recommendations).filter(Boolean);
+        const recommendationsBlock = recommendationsArr.length > 0
+          ? `\n\n📝 *Recomendaciones:*\n${recommendationsArr.map(r => `• ${r}`).join('\n')}`
+          : "";
+
         const vars = {
           names: bucket.names,
           date_range: dateRange,
@@ -201,6 +213,7 @@ export const reminderService = {
           manage_block: bucket.actionLink
             ? `${bucket.actionLink.replace('source=confirmation', 'source=reminder')}\n\n`
             : "",
+          recommendations: recommendationsBlock,
         };
 
         console.log(`[${_orgId}] 📋 Vars para ${bucket.names}:`, vars);
