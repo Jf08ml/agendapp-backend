@@ -14,6 +14,7 @@ import cancellationService from "../services/cancellationService.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
 import { waIntegrationService } from "../services/waIntegrationService.js";
 import { generateCancellationLink } from "../utils/cancellationUtils.js";
+import appointmentSeriesService from "../services/appointmentSeriesService.js";
 
 // ---------------------- helpers de notificación ----------------------
 async function notifyNewBooking(org, customerDetails, { isAuto, multi }) {
@@ -53,6 +54,308 @@ async function notifyNewBooking(org, customerDetails, { isAuto, multi }) {
       e?.message || e
     );
   }
+}
+
+// ========== 🔁 Helper: Manejar reservas recurrentes ==========
+async function _handleRecurringReservation(req, res, ctx) {
+  const {
+    services, startDate, customerDetails, organizationId, clientPackageId,
+    recurrencePattern, org, policy, timezone, customer, normalizeId,
+  } = ctx;
+
+  try {
+    // 1) Generar ocurrencias
+    const occurrenceDates = appointmentSeriesService.generateWeeklyOccurrences(
+      startDate,
+      recurrencePattern,
+      timezone
+    );
+
+    if (occurrenceDates.length === 0) {
+      return sendResponse(res, 400, null, "No se generaron ocurrencias con los parámetros seleccionados.");
+    }
+
+    // 2) Calcular duración total de servicios
+    let totalDuration = 0;
+    const serviceDetails = [];
+    for (const item of services) {
+      const svc = await serviceModel.findById(item.serviceId);
+      if (!svc) return sendResponse(res, 404, null, `Servicio ${item.serviceId} no encontrado`);
+      totalDuration += Number(svc.duration || 0);
+      serviceDetails.push({ ...item, duration: Number(svc.duration || 0), serviceDoc: svc });
+    }
+
+    // 3) Validar disponibilidad y filtrar ocurrencias
+    const primaryEmployeeId = services.find(s => s.employeeId)?.employeeId;
+    if (!primaryEmployeeId) {
+      return sendResponse(res, 400, null, "Se requiere al menos un empleado para reservas recurrentes.");
+    }
+
+    const validatedOccurrences = await Promise.all(
+      occurrenceDates.map(async ({ date, dayOfWeek }) => {
+        const validation = await appointmentSeriesService.validateOccurrenceAvailability(
+          date, totalDuration, primaryEmployeeId, organizationId, timezone
+        );
+        return { date, dayOfWeek, ...validation };
+      })
+    );
+
+    const availableOccurrences = validatedOccurrences.filter(o => o.status === 'available');
+
+    if (availableOccurrences.length === 0) {
+      return sendResponse(res, 409, null, "No hay horarios disponibles para las fechas seleccionadas.");
+    }
+
+    // 4) IDs compartidos para toda la serie
+    const seriesId = new mongoose.Types.ObjectId();
+    const sharedGroupId = new mongoose.Types.ObjectId();
+    const { token: sharedToken, hash: sharedTokenHash } = cancellationService.generateCancelToken();
+    const cancellationLink = generateCancellationLink(sharedToken, org);
+
+    // === AUTO PATH ===
+    if (policy === "auto_if_available") {
+      // Verificar que cada servicio tenga empleado
+      if (services.some(s => !s.employeeId)) {
+        return sendResponse(res, 400, null, "Para auto-reserva recurrente, cada servicio debe tener un empleado asignado.");
+      }
+
+      const allAppointments = [];
+      const session = await mongoose.startSession();
+
+      try {
+        session.startTransaction();
+
+        let occurrenceNumber = 0;
+        for (const occ of availableOccurrences) {
+          occurrenceNumber++;
+          let cursorMoment = moment.tz(occ.date, timezone);
+
+          // Agrupar servicios por empleado para este occurrence
+          const employeeGroups = new Map();
+          serviceDetails.forEach((sd, idx) => {
+            const empId = normalizeId(sd.employeeId);
+            if (!employeeGroups.has(empId)) employeeGroups.set(empId, []);
+            const itemStart = cursorMoment.format('YYYY-MM-DDTHH:mm:ss');
+            cursorMoment = cursorMoment.clone().add(sd.duration, 'minutes');
+            employeeGroups.get(empId).push({
+              serviceId: sd.serviceId,
+              startDate: itemStart,
+              duration: sd.duration,
+              originalIndex: idx,
+            });
+          });
+
+          // Crear citas por grupo de empleado
+          const occAppointments = new Array(serviceDetails.length);
+          for (const [employeeId, group] of employeeGroups.entries()) {
+            const batch = await appointmentService.createAppointmentsBatch({
+              services: group.map(g => g.serviceId),
+              employee: employeeId,
+              employeeRequestedByClient: true,
+              client: normalizeId(customer),
+              startDate: group[0].startDate,
+              organizationId: normalizeId(organizationId),
+              skipNotification: true,
+              sharedGroupId,
+              sharedTokenHash,
+              ...(clientPackageId ? { clientPackageId } : {}),
+            });
+
+            group.forEach((item, idx) => {
+              occAppointments[item.originalIndex] = batch[idx];
+            });
+          }
+
+          // Asignar campos de serie a cada cita creada
+          for (let i = 0; i < occAppointments.length; i++) {
+            const apt = occAppointments[i];
+            if (apt) {
+              await apt.updateOne({
+                seriesId,
+                occurrenceNumber,
+                ...(occurrenceNumber === 1 ? { recurrencePattern } : {}),
+                cancellationLink,
+              });
+              apt.seriesId = seriesId;
+              apt.occurrenceNumber = occurrenceNumber;
+            }
+          }
+
+          allAppointments.push(...occAppointments.filter(Boolean));
+        }
+
+        await session.commitTransaction();
+        session.endSession();
+      } catch (err) {
+        await session.abortTransaction();
+        session.endSession();
+        throw err;
+      }
+
+      // Crear reservations auto-aprobadas
+      const reservationGroupId = new mongoose.Types.ObjectId();
+      const createdReservations = [];
+      for (const apt of allAppointments) {
+        const reservationData = {
+          serviceId: apt.service,
+          employeeId: apt.employee,
+          startDate: apt.startDate,
+          customer: normalizeId(customer),
+          customerDetails,
+          organizationId: normalizeId(organizationId),
+          status: "auto_approved",
+          auto: true,
+          appointmentId: apt._id,
+          groupId: reservationGroupId,
+        };
+        const newRes = await reservationService.createReservation(reservationData);
+        createdReservations.push(newRes);
+      }
+
+      // Enviar WhatsApp con TODAS las citas
+      try {
+        await _sendRecurringWhatsApp({
+          allAppointments, customerDetails, org, organizationId, timezone,
+          cancellationLink, serviceDetails,
+        });
+      } catch (err) {
+        console.error('[recurring auto] Error enviando WhatsApp:', err);
+      }
+
+      await notifyNewBooking(org, customerDetails, { isAuto: true, multi: true });
+
+      return sendResponse(res, 201, {
+        policy,
+        outcome: "approved_and_appointed",
+        seriesId,
+        appointments: allAppointments,
+        reservations: createdReservations,
+        totalOccurrences: occurrenceDates.length,
+        createdOccurrences: availableOccurrences.length,
+      }, "Citas recurrentes auto-aprobadas creadas correctamente");
+    }
+
+    // === MANUAL PATH ===
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      const reservationGroupId = new mongoose.Types.ObjectId();
+      const createdReservations = [];
+
+      let occurrenceNumber = 0;
+      for (const occ of availableOccurrences) {
+        occurrenceNumber++;
+        let currentStart = moment.tz(occ.date, timezone).toDate();
+
+        for (const sd of serviceDetails) {
+          const reservationData = {
+            serviceId: sd.serviceId,
+            employeeId: sd.employeeId || null,
+            startDate: new Date(currentStart),
+            customer: customer._id,
+            customerDetails,
+            organizationId,
+            status: "pending",
+            groupId: reservationGroupId,
+            // Guardar info de serie para vincular al aprobar
+            ...(occurrenceNumber === 1 && sd === serviceDetails[0]
+              ? { recurrenceInfo: { seriesId, recurrencePattern, totalOccurrences: availableOccurrences.length } }
+              : {}),
+          };
+
+          const newRes = await reservationService.createReservation(reservationData, session);
+          createdReservations.push(newRes);
+
+          currentStart = new Date(currentStart.getTime() + sd.duration * 60000);
+        }
+      }
+
+      await session.commitTransaction();
+      session.endSession();
+
+      await notifyNewBooking(org, customerDetails, { isAuto: false, multi: true });
+
+      return sendResponse(res, 201, {
+        policy,
+        outcome: "pending",
+        seriesId,
+        reservations: createdReservations,
+        totalOccurrences: occurrenceDates.length,
+        createdOccurrences: availableOccurrences.length,
+      }, "Reservas recurrentes pendientes creadas exitosamente");
+    } catch (err) {
+      await session.abortTransaction();
+      session.endSession();
+      throw err;
+    }
+  } catch (error) {
+    return sendResponse(res, 500, null, `Error al crear reservas recurrentes: ${error.message}`);
+  }
+}
+
+// Helper: enviar WhatsApp con TODAS las citas de la serie recurrente
+async function _sendRecurringWhatsApp({ allAppointments, customerDetails, org, organizationId, timezone, cancellationLink, serviceDetails }) {
+  if (!customerDetails.phone) return;
+
+  const fmtTime = (d, tz) =>
+    new Intl.DateTimeFormat("es-ES", {
+      hour: "2-digit", minute: "2-digit", hour12: true, timeZone: tz,
+    }).format(new Date(d));
+
+  // Agrupar citas por occurrenceNumber
+  const citasPorOcurrencia = {};
+  for (const cita of allAppointments) {
+    const occNum = cita.occurrenceNumber;
+    if (!citasPorOcurrencia[occNum]) citasPorOcurrencia[occNum] = [];
+    citasPorOcurrencia[occNum].push(cita);
+  }
+
+  // Formatear lista de citas por fecha
+  const appointmentsList = [];
+  for (const [occNum, citas] of Object.entries(citasPorOcurrencia).sort((a, b) => a[0] - b[0])) {
+    const firstCita = citas[0];
+    const fecha = new Intl.DateTimeFormat('es-ES', {
+      weekday: 'long', day: 'numeric', month: 'long', timeZone: timezone,
+    }).format(new Date(firstCita.startDate));
+
+    const serviciosTexto = [];
+    for (const cita of citas) {
+      const svcDetail = serviceDetails.find(sd => sd.serviceId === (cita.service?.toString() || cita.service));
+      const svcName = svcDetail?.serviceDoc?.name || 'Servicio';
+      serviciosTexto.push(`     • ${svcName} (${fmtTime(cita.startDate, timezone)} - ${fmtTime(cita.endDate, timezone)})`);
+    }
+
+    appointmentsList.push(`\n${occNum}. ${fecha}\n${serviciosTexto.join('\n')}`);
+  }
+
+  // Obtener empleado principal
+  const firstEmpId = allAppointments[0]?.employee?.toString();
+  const empDoc = firstEmpId ? await employeeModel.findById(firstEmpId) : null;
+
+  const templateData = {
+    names: customerDetails.name || 'Estimado cliente',
+    organization: org.name,
+    address: org.address || '',
+    employee: empDoc?.names || 'Nuestro equipo',
+    appointmentsList: appointmentsList.join('\n'),
+    cancellationLink,
+  };
+
+  const msg = await whatsappTemplates.getRenderedTemplate(
+    organizationId,
+    'recurringAppointmentSeries',
+    templateData
+  );
+
+  await waIntegrationService.sendMessage({
+    orgId: organizationId,
+    phone: customerDetails.phone,
+    message: msg,
+    image: null,
+  });
+
+  console.log(`✅ WhatsApp recurrente enviado: ${Object.keys(citasPorOcurrencia).length} ocurrencias`);
 }
 
 const reservationController = {
@@ -226,7 +529,7 @@ const reservationController = {
 
   // POST /api/reservations/multi
   createMultipleReservations: async (req, res) => {
-    const { services, startDate, customerDetails, organizationId, clientPackageId } = req.body;
+    const { services, startDate, customerDetails, organizationId, clientPackageId, recurrencePattern } = req.body;
 
     if (!services || !Array.isArray(services) || services.length === 0) {
       return sendResponse(res, 400, null, "Debe enviar al menos un servicio.");
@@ -267,6 +570,14 @@ const reservationController = {
       // === AUTO: crear citas batch (una sola transacción/mensaje)
       const normalizeId = (v) =>
         typeof v === "object" && v !== null ? v._id?.toString() : v?.toString();
+
+      // ========== 🔁 RECURRENCIA: crear serie de citas/reservas ==========
+      if (recurrencePattern && recurrencePattern.type === 'weekly') {
+        return await _handleRecurringReservation(req, res, {
+          services, startDate, customerDetails, organizationId, clientPackageId,
+          recurrencePattern, org, policy, timezone, customer, normalizeId,
+        });
+      }
 
       // === AUTO: crear citas batch por empleado (grupos contiguos) y reservas auto-aprobadas
       if (policy === "auto_if_available") {
@@ -529,6 +840,7 @@ const reservationController = {
             status: "pending",
             groupId: reservationGroupId, // 👥 Asignar el mismo groupId a todas
             errorMessage: errorToSave, // ⚠️ Guardar el error si vino del flujo auto
+            ...(clientPackageId ? { clientPackageId } : {}), // 📦 Paquete de sesiones
           };
 
           const newReservation = await reservationService.createReservation(
@@ -612,19 +924,104 @@ const reservationController = {
     }
   },
 
-  // Eliminar una reserva
+  // POST /api/reservations/multi/preview — Preview de reservas recurrentes (público)
+  previewRecurringReservations: async (req, res) => {
+    const { services, startDate, recurrencePattern, organizationId } = req.body;
+
+    if (!services || !Array.isArray(services) || services.length === 0) {
+      return sendResponse(res, 400, null, "Debe enviar al menos un servicio.");
+    }
+    if (!startDate || !recurrencePattern || !organizationId) {
+      return sendResponse(res, 400, null, "Datos incompletos para preview.");
+    }
+    if (recurrencePattern.type !== 'weekly') {
+      return sendResponse(res, 400, null, "Solo se soporta recurrencia semanal.");
+    }
+
+    try {
+      const org = await organizationService.getOrganizationById(organizationId);
+      if (!org) return sendResponse(res, 404, null, "Organización no encontrada");
+
+      const timezone = org.timezone || 'America/Bogota';
+
+      // Calcular duración total de todos los servicios encadenados
+      let totalDuration = 0;
+      for (const item of services) {
+        if (item.duration) {
+          totalDuration += Number(item.duration);
+        } else {
+          const svc = await serviceModel.findById(item.serviceId);
+          if (!svc) return sendResponse(res, 404, null, `Servicio ${item.serviceId} no encontrado`);
+          totalDuration += Number(svc.duration || 0);
+        }
+      }
+
+      // Determinar empleado principal para validación (el primero con empleado asignado)
+      const primaryEmployeeId = services.find(s => s.employeeId)?.employeeId;
+      if (!primaryEmployeeId) {
+        return sendResponse(res, 400, null, "Se requiere al menos un empleado para el preview.");
+      }
+
+      // Generar ocurrencias
+      const occurrenceDates = appointmentSeriesService.generateWeeklyOccurrences(
+        startDate,
+        recurrencePattern,
+        timezone
+      );
+
+      // Validar cada ocurrencia
+      const validations = await Promise.all(
+        occurrenceDates.map(async ({ date, dayOfWeek }) => {
+          const validation = await appointmentSeriesService.validateOccurrenceAvailability(
+            date,
+            totalDuration,
+            primaryEmployeeId,
+            organizationId,
+            timezone
+          );
+
+          return {
+            startDate: date.toISOString(),
+            dayOfWeek,
+            status: validation.status,
+            reason: validation.reason,
+          };
+        })
+      );
+
+      const availableCount = validations.filter(v => v.status === 'available').length;
+
+      return sendResponse(res, 200, {
+        totalOccurrences: validations.length,
+        availableCount,
+        occurrences: validations,
+      }, "Preview generado exitosamente");
+    } catch (error) {
+      return sendResponse(res, 500, null, `Error al generar preview: ${error.message}`);
+    }
+  },
+
+  // Cancelar una reserva (soft: cambia status + cancela citas vinculadas)
+  cancelReservation: async (req, res) => {
+    const { id } = req.params;
+    const notifyClient = req.body?.notifyClient === true;
+    try {
+      const result = await reservationService.cancelReservation(id, { notifyClient });
+      sendResponse(res, 200, result, "Reserva cancelada exitosamente");
+    } catch (error) {
+      sendResponse(res, 500, null, `Error al cancelar la reserva: ${error.message}`);
+    }
+  },
+
+  // Eliminar una reserva (hard delete: borra de la DB + opcionalmente elimina citas)
   deleteReservation: async (req, res) => {
     const { id } = req.params;
+    const deleteAppointments = req.query.deleteAppointments === "true";
     try {
-      await reservationService.deleteReservation(id);
-      sendResponse(res, 200, null, "Reserva eliminada exitosamente");
+      const result = await reservationService.deleteReservation(id, { deleteAppointments });
+      sendResponse(res, 200, result, "Reserva eliminada exitosamente");
     } catch (error) {
-      sendResponse(
-        res,
-        500,
-        null,
-        `Error al eliminar la reserva: ${error.message}`
-      );
+      sendResponse(res, 500, null, `Error al eliminar la reserva: ${error.message}`);
     }
   },
 };

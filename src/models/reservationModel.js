@@ -70,6 +70,18 @@ const reservationSchema = new mongoose.Schema(
       type: String,
       required: false,
     },
+    // 📦 Paquete de sesiones del cliente (para descontar al aprobar)
+    clientPackageId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ClientPackage",
+      default: null,
+    },
+    // 🔁 Info de recurrencia (solo en la primera reserva del grupo recurrente)
+    recurrenceInfo: {
+      seriesId: { type: String },
+      recurrencePattern: { type: mongoose.Schema.Types.Mixed },
+      totalOccurrences: { type: Number },
+    },
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now },
   },
