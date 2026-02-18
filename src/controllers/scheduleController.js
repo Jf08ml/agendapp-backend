@@ -566,11 +566,22 @@ const scheduleController = {
         status: { $nin: ['cancelled_by_customer', 'cancelled_by_admin'] } // ✅ Excluir canceladas
       });
       
+      // Obtener maxConcurrentAppointments de cada servicio
+      const serviceIds = [...new Set(services.map(s => s.serviceId).filter(Boolean))];
+      const serviceModels = serviceIds.length > 0
+        ? await serviceModel.find({ _id: { $in: serviceIds } })
+        : [];
+      const servicesModelMap = new Map(serviceModels.map(s => [s._id.toString(), s]));
+      const servicesEnriched = services.map(s => ({
+        ...s,
+        maxConcurrentAppointments: servicesModelMap.get(s.serviceId)?.maxConcurrentAppointments ?? 1
+      }));
+
       // Calcular bloques disponibles
       const blocks = scheduleService.findAvailableMultiServiceBlocks(
         date, // Pasar el string de fecha
         organization,
-        services,
+        servicesEnriched,
         employees,
         appointments
       );
@@ -838,11 +849,22 @@ const scheduleController = {
         status: { $nin: ['cancelled_by_customer', 'cancelled_by_admin'] }
       });
 
+      // Obtener maxConcurrentAppointments de cada servicio
+      const serviceIdsForCheck = [...new Set(services.map(s => s.serviceId).filter(Boolean))];
+      const serviceModelsForCheck = serviceIdsForCheck.length > 0
+        ? await serviceModel.find({ _id: { $in: serviceIdsForCheck } })
+        : [];
+      const servicesModelMapForCheck = new Map(serviceModelsForCheck.map(s => [s._id.toString(), s]));
+      const servicesEnrichedForCheck = services.map(s => ({
+        ...s,
+        maxConcurrentAppointments: servicesModelMapForCheck.get(s.serviceId)?.maxConcurrentAppointments ?? 1
+      }));
+
       // Verificar disponibilidad de cada día
       const availability = scheduleService.checkMultipleDaysAvailability(
         dateStrings,
         organization,
-        services,
+        servicesEnrichedForCheck,
         allEmployees,
         appointments
       );

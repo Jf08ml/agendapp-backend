@@ -524,7 +524,7 @@ function isEmployeeAvailableOnDay(employee, dayOfWeek, organization) {
  * @returns {Object|null} Empleado asignado o null si ninguno disponible
  */
 function assignBestEmployeeForSlot(opts) {
-  const { candidateEmployees, date, startTime, duration, existingAppointments, dayOfWeek, organization, skipOrgBreaks = false } = opts;
+  const { candidateEmployees, date, startTime, duration, existingAppointments, dayOfWeek, organization, skipOrgBreaks = false, maxConcurrentAppointments = 1 } = opts;
   const timezone = organization.timezone || 'America/Bogota';
   
   // Filtrar por disponibilidad de horario
@@ -582,34 +582,36 @@ let effectiveEnd = orgSchedule.end;
   
   if (available.length === 0) return null;
   
-  // Filtrar por citas (sin overlap)
+  // Filtrar por citas (considerando citas simultáneas)
   const free = available.filter(emp => {
-    const empAppts = existingAppointments.filter(a => 
+    const empAppts = existingAppointments.filter(a =>
       a.employee && a.employee.toString() === emp._id.toString()
     );
-    
+
     const startMin = timeToMinutes(startTime);
     const endMin = startMin + duration;
-    
-    return !empAppts.some(appt => {
+
+    const overlapCount = empAppts.filter(appt => {
       // Convertir las fechas de la cita a la timezone de la organización
       const apptStartInTz = moment.tz(appt.startDate, timezone);
       const apptEndInTz = moment.tz(appt.endDate, timezone);
-      
+
       // Verificar que la cita es del mismo día
       const dateInTz = moment.tz(date, timezone);
       const apptDateStr = apptStartInTz.format('YYYY-MM-DD');
       const currentDateStr = dateInTz.format('YYYY-MM-DD');
-      
+
       // Si la cita no es del día que estamos evaluando, ignorarla
       if (apptDateStr !== currentDateStr) {
         return false;
       }
-      
+
       const apptStart = apptStartInTz.hours() * 60 + apptStartInTz.minutes();
       const apptEnd = apptEndInTz.hours() * 60 + apptEndInTz.minutes();
       return (startMin < apptEnd && endMin > apptStart);
-    });
+    }).length;
+
+    return overlapCount < maxConcurrentAppointments;
   });
   
   if (free.length === 0) return null;
@@ -829,22 +831,23 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
           break;
         }
         
-        // Verificar citas
-        const empAppts = appointments.filter(a => 
+        // Verificar citas (considerando citas simultáneas)
+        const maxConcurrent = service.maxConcurrentAppointments || 1;
+        const empAppts = appointments.filter(a =>
           a.employee && a.employee.toString() === service.employeeId
         );
-        const hasOverlap = empAppts.some(appt => {
+        const overlapCount = empAppts.filter(appt => {
           // Convertir las fechas de la cita a la timezone de la organización
           const apptStartInTz = moment.tz(appt.startDate, timezone);
           const apptEndInTz = moment.tz(appt.endDate, timezone);
-          
+
           const apptStart = apptStartInTz.hours() * 60 + apptStartInTz.minutes();
           const apptEnd = apptEndInTz.hours() * 60 + apptEndInTz.minutes();
           return (slotMin < apptEnd && (slotMin + service.duration) > apptStart);
-        });
-        
-        if (hasOverlap) {
-          console.log(`[DEBUG]       ❌ Conflicto con cita existente`);
+        }).length;
+
+        if (overlapCount >= maxConcurrent) {
+          console.log(`[DEBUG]       ❌ Conflicto con cita existente (${overlapCount}/${maxConcurrent} simultáneas)`);
           blockValid = false;
           break;
         }
@@ -870,7 +873,8 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
           existingAppointments: appointments,
           dayOfWeek,
           organization,
-          skipOrgBreaks: true // Ya manejados en los segmentos
+          skipOrgBreaks: true, // Ya manejados en los segmentos
+          maxConcurrentAppointments: service.maxConcurrentAppointments || 1
         });
         
         if (!assigned) {
