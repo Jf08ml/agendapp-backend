@@ -91,10 +91,16 @@ async function _handleRecurringReservation(req, res, ctx) {
       return sendResponse(res, 400, null, "Se requiere al menos un empleado para reservas recurrentes.");
     }
 
+    // Calcular mínimo de citas simultáneas de los servicios asignados al empleado principal
+    const primaryServices = serviceDetails.filter(s => s.employeeId === primaryEmployeeId);
+    const minMaxConcurrent = primaryServices.length > 0
+      ? Math.min(...primaryServices.map(s => s.serviceDoc.maxConcurrentAppointments ?? 1))
+      : 1;
+
     const validatedOccurrences = await Promise.all(
       occurrenceDates.map(async ({ date, dayOfWeek }) => {
         const validation = await appointmentSeriesService.validateOccurrenceAvailability(
-          date, totalDuration, primaryEmployeeId, organizationId, timezone
+          date, totalDuration, primaryEmployeeId, organizationId, timezone, minMaxConcurrent
         );
         return { date, dayOfWeek, ...validation };
       })

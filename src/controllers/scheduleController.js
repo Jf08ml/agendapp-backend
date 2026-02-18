@@ -324,7 +324,7 @@ const scheduleController = {
 
       // 👥 Si se proporciona serviceId, obtener maxConcurrentAppointments del servicio
       let maxConcurrentAppointments = 1;
-      const { serviceId } = req.query;
+      const { serviceId } = req.body;
       if (serviceId) {
         const service = await serviceModel.findById(serviceId);
         if (service) {

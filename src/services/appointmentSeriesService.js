@@ -234,7 +234,8 @@ async function validateOccurrenceAvailability(
   durationMinutes,
   employeeId,
   organizationId,
-  timezone = 'America/Bogota'
+  timezone = 'America/Bogota',
+  maxConcurrentAppointments = 1
 ) {
   try {
     // Obtener datos necesarios
@@ -284,10 +285,10 @@ async function validateOccurrenceAvailability(
       ],
     });
 
-    if (overlappingAppointments.length > 0) {
-      return { 
-        status: 'conflict', 
-        reason: `Conflicto con ${overlappingAppointments.length} cita(s) existente(s)` 
+    if (overlappingAppointments.length >= maxConcurrentAppointments) {
+      return {
+        status: 'conflict',
+        reason: `Conflicto con ${overlappingAppointments.length} cita(s) existente(s) (máximo ${maxConcurrentAppointments} simultáneas)`
       };
     }
 
@@ -344,6 +345,9 @@ async function previewSeriesAppointments(baseAppointment, recurrencePattern, opt
   // Calcular duración total (suma de todos los servicios)
   const durationMinutes = servicesDetails.reduce((total, s) => total + (s.duration || 60), 0);
 
+  // Calcular mínimo de citas simultáneas permitidas entre todos los servicios
+  const minMaxConcurrent = Math.min(...servicesDetails.map(s => s.maxConcurrentAppointments ?? 1));
+
   // Generar fechas de ocurrencias
   const occurrenceDates = generateWeeklyOccurrences(
     startDate,
@@ -361,7 +365,8 @@ async function previewSeriesAppointments(baseAppointment, recurrencePattern, opt
         durationMinutes,
         employee,
         organizationId,
-        timezone
+        timezone,
+        minMaxConcurrent
       );
 
       return {
