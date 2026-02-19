@@ -21,6 +21,19 @@ const exchangeCodeSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+
+  // ─── Campos de impersonación (opcionales, null en flujo normal) ───
+  // Si impersonatedBy está presente, este code fue generado por un superadmin.
+  impersonatedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "AdminUser",
+    default: null,
+  },
+  impersonationReason: {
+    type: String,
+    default: null,
+  },
+
   createdAt: {
     type: Date,
     default: Date.now,

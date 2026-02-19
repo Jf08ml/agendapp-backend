@@ -69,6 +69,11 @@ const authController = {
         return sendResponse(res, 401, null, "Token inválido o corrupto");
       }
 
+      // Los tokens de impersonación no son renovables (deben expirar naturalmente)
+      if (decoded.impersonated) {
+        return sendResponse(res, 403, null, "Los tokens de impersonación no se pueden renovar");
+      }
+
       // Verificar que el token no sea muy antiguo (máx 30 días)
       const tokenPayload = jwt.decode(token);
       const issuedAt = tokenPayload.iat * 1000; // Convertir a ms

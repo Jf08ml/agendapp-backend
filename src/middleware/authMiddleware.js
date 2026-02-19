@@ -30,10 +30,15 @@ export const verifyToken = (req, res, next) => {
     // Verificar y decodificar el token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
-    // Agregar información del usuario al request
+    // Agregar información del usuario al request.
+    // adminId solo existe en tokens de superadmin (userType: 'superadmin').
     req.user = {
       userId: decoded.userId,
       userType: decoded.userType,
+      adminId: decoded.adminId || null,
+      // Claims de impersonación (presentes cuando userType=admin e impersonated=true)
+      impersonated: decoded.impersonated || false,
+      impersonatedBy: decoded.impersonatedBy || null,
     };
     
     next();
@@ -107,6 +112,29 @@ export const requireAdmin = (req, res, next) => {
     return res.status(403).json({ 
       result: "error",
       message: "Acceso denegado. Se requieren permisos de administrador" 
+    });
+  }
+
+  next();
+};
+
+/**
+ * Middleware para verificar que el JWT pertenece a un superadmin de plataforma.
+ * Debe usarse DESPUÉS de verifyToken.
+ * El token debe tener userType: 'superadmin' y adminId.
+ */
+export const requireSuperAdmin = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({
+      result: "error",
+      message: "Autenticación requerida",
+    });
+  }
+
+  if (req.user.userType !== "superadmin" || !req.user.adminId) {
+    return res.status(403).json({
+      result: "error",
+      message: "Acceso denegado. Solo superadmins de plataforma.",
     });
   }
 

@@ -29,6 +29,7 @@ import campaignRoutes from "./campaignRoutes.js";
 import packageRoutes from "./packageRoutes.js";
 import paymentRoutes from "./paymentRoutes.js";
 import registrationRoutes from "./registrationRoutes.js";
+import adminRoutes from "./adminRoutes.js";
 import membershipService from "../services/membershipService.js";
 import { organizationResolver } from "../middleware/organizationResolver";
 import { verifyToken } from "../middleware/authMiddleware.js";
@@ -112,6 +113,9 @@ router.use("/payments", paymentRoutes);
 
 // Registro público: signup, exchange code, check slug
 router.use(registrationRoutes);
+
+// Superadmin de plataforma: login + impersonation (endpoints propios manejan auth)
+router.use(adminRoutes);
 
 // ═══════════════════════════════════════════════════
 // 2. SEMI-PÚBLICAS (manejan auth internamente)

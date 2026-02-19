@@ -54,6 +54,10 @@ export async function organizationResolver(req, res, next) {
         return next();
       }
       // Si el slug dev no existe, fallback a resolución normal
+    } else {
+      // En dev sin slug: superadmin o signup domain → continuar sin org
+      // Los endpoints protegidos validan el token por su cuenta (requireSuperAdmin)
+      return next();
     }
   }
 

@@ -152,15 +152,33 @@ const registrationController = {
         return sendResponse(res, 400, null, "Código inválido, expirado o ya utilizado");
       }
 
-      // Generar JWT
-      const token = jwt.sign(
-        { userId: exchangeDoc.userId, userType: exchangeDoc.role },
-        process.env.JWT_SECRET,
-        { expiresIn: "7d" }
-      );
+      // ── Determinar si es un exchange de impersonación ─────────────────────
+      const isImpersonation = !!exchangeDoc.impersonatedBy;
 
-      const expiresIn = 7 * 24 * 60 * 60 * 1000;
-      const expiresAt = new Date(Date.now() + expiresIn).toISOString();
+      // JWT más corto para impersonación (60 min) vs. login normal (7 días)
+      const jwtTTL = isImpersonation ? "60m" : "7d";
+      const jwtExpiresMs = isImpersonation
+        ? 60 * 60 * 1000
+        : 7 * 24 * 60 * 60 * 1000;
+
+      // Claims base; agregar claims de impersonación si aplica
+      const tokenPayload = {
+        userId: exchangeDoc.userId,
+        userType: exchangeDoc.role,
+        ...(isImpersonation && {
+          impersonated: true,
+          impersonatedBy: exchangeDoc.impersonatedBy.toString(),
+        }),
+      };
+
+      const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: jwtTTL });
+      const expiresAt = new Date(Date.now() + jwtExpiresMs).toISOString();
+
+      if (isImpersonation) {
+        console.log(
+          `[exchange] Impersonation consumida: adminId=${exchangeDoc.impersonatedBy} → org=${exchangeDoc.organizationId}`
+        );
+      }
 
       // Obtener permisos del usuario
       const org = await Organization.findById(exchangeDoc.organizationId).populate("role");
@@ -173,7 +191,9 @@ const registrationController = {
         organizationId: exchangeDoc.organizationId,
         userPermissions,
         expiresAt,
-      }, "Login exitoso");
+        // Señal para el frontend de que es una sesión impersonada
+        isImpersonated: isImpersonation,
+      }, isImpersonation ? "Impersonación exitosa" : "Login exitoso");
     } catch (error) {
       console.error("[exchange] Error:", error);
       sendResponse(res, 500, null, "Error al intercambiar código");
