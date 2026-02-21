@@ -37,7 +37,7 @@ const paymentService = {
       planId,
       membershipId,
       amount,
-      currency: currency || "COP",
+      currency: currency || "USD",
       status: "created",
       rawCreateResponse: result.rawResponse,
     });
