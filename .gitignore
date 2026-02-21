@@ -1,6 +1,9 @@
 # Dependencias
 /node_modules
 
+# Scripts
+/scripts
+
 # Archivos de compilación
 /lib
 /dist

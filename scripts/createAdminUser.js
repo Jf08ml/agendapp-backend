@@ -20,7 +20,7 @@ dotenv.config({ path: join(__dirname, `../.env.${env}`) });
 
 // ─── Configuración ───────────────────────────────────────────────────────────
 const ADMIN_EMAIL = "superadmin@agenditapp.com"; // Cambiar
-const ADMIN_PASSWORD = "superadmin2026"; // Cambiar
+const ADMIN_PASSWORD = ""; // Cambiar
 const ADMIN_NAME = "Super Admin";
 // ─────────────────────────────────────────────────────────────────────────────
 
