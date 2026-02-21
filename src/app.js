@@ -82,7 +82,13 @@ if (process.env.NODE_ENV !== "production") {
     next();
   });
 }
-app.use(express.json({ limit: "5mb" }));
+app.use(express.json({
+  limit: "5mb",
+  // Captura el body crudo para validar firmas de webhooks (ej. Lemon Squeezy HMAC)
+  verify: (req, _res, buf) => {
+    req.rawBody = buf.toString("utf8");
+  },
+}));
 app.use(express.urlencoded({ extended: true }));
 
 // 🔒 Aplicar rate limiting general a todas las rutas de API

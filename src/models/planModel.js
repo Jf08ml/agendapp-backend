@@ -71,6 +71,12 @@ const planSchema = new mongoose.Schema(
       servicePackages: { type: Boolean, default: false },
     },
     
+    // Lemon Squeezy variant ID for checkout (one per plan, USD)
+    lsVariantId: {
+      type: String,
+      default: null,
+    },
+
     isActive: {
       type: Boolean,
       default: true,

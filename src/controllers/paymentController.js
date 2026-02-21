@@ -1,5 +1,6 @@
 // controllers/paymentController.js
 import paymentService from "../services/paymentService.js";
+import Plan from "../models/planModel.js";
 import sendResponse from "../utils/sendResponse.js";
 
 const paymentController = {
@@ -16,6 +17,19 @@ const paymentController = {
         return sendResponse(res, 400, null, "Faltan campos: provider, planId, organizationId");
       }
 
+      // Para Lemon Squeezy, obtener el variantId del plan
+      let variantId;
+      if (provider === "lemonsqueezy") {
+        const plan = await Plan.findById(planId).select("lsVariantId");
+        if (!plan) {
+          return sendResponse(res, 404, null, "Plan no encontrado");
+        }
+        if (!plan.lsVariantId) {
+          return sendResponse(res, 400, null, "Este plan no tiene Lemon Squeezy configurado");
+        }
+        variantId = plan.lsVariantId;
+      }
+
       const session = await paymentService.createCheckoutSession({
         provider,
         organizationId,
@@ -25,6 +39,7 @@ const paymentController = {
         currency,
         successUrl,
         cancelUrl,
+        variantId,
       });
 
       sendResponse(res, 201, session, "Sesión de pago creada");
@@ -87,7 +102,8 @@ const paymentController = {
 
       let parsed;
       try {
-        parsed = provider.parseWebhook(req.headers, req.body);
+        // req.rawBody capturado en app.js via express.json({ verify })
+        parsed = provider.parseWebhook(req.headers, req.body, req.rawBody);
       } catch (parseError) {
         // Firma inválida o payload malformado → 400, no reintentar
         console.error(`[Payment] Error parseando webhook ${providerName}:`, parseError.message);
