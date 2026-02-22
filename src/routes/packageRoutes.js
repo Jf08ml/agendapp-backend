@@ -19,6 +19,11 @@ router.get(
   verifyToken,
   packageController.getServicePackages
 );
+router.get(
+  "/organization/:organizationId/assigned",
+  verifyToken,
+  packageController.getAllOrgClientPackages
+);
 router.get("/:id", verifyToken, packageController.getServicePackageById);
 router.put("/:id", verifyToken, packageController.updateServicePackage);
 router.delete("/:id", verifyToken, packageController.deleteServicePackage);

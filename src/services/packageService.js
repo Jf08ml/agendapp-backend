@@ -311,6 +311,22 @@ const packageService = {
   },
 
   // =============================================
+  // Listado global de paquetes asignados (para la vista admin)
+  // =============================================
+
+  getAllOrgClientPackages: async (organizationId, { status = "" } = {}) => {
+    const filter = { organizationId };
+    if (status && status !== "all") {
+      filter.status = status;
+    }
+    return await ClientPackage.find(filter)
+      .populate("clientId", "name phoneNumber")
+      .populate("servicePackageId", "name description")
+      .populate("services.serviceId", "name price duration")
+      .sort({ createdAt: -1 });
+  },
+
+  // =============================================
   // Expiración
   // =============================================
 

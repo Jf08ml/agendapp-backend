@@ -136,6 +136,17 @@ const packageController = {
     }
   },
 
+  getAllOrgClientPackages: async (req, res) => {
+    try {
+      const { organizationId } = req.params;
+      const { status = "" } = req.query;
+      const result = await packageService.getAllOrgClientPackages(organizationId, { status });
+      sendResponse(res, 200, result, "Paquetes asignados obtenidos exitosamente");
+    } catch (error) {
+      sendResponse(res, 500, null, error.message);
+    }
+  },
+
   // =============================================
   // Público (reserva online)
   // =============================================
