@@ -40,7 +40,8 @@ const registrationController = {
    */
   register: async (req, res) => {
     try {
-      const { slug, businessName, ownerName, email, password, phone, turnstileToken } = req.body;
+      const { slug, businessName, ownerName, email, password, phone, turnstileToken,
+              default_country, timezone, currency } = req.body;
 
       // 1. Validar campos requeridos
       if (!slug || !businessName || !email || !password || !phone) {
@@ -88,6 +89,10 @@ const registrationController = {
         isActive: true,
         hasAccessBlocked: false,
         membershipStatus: "trial",
+        // Configuración regional (opcionales, con defaults en el modelo)
+        ...(default_country && { default_country: default_country.trim().toUpperCase().slice(0, 2) }),
+        ...(timezone && { timezone: timezone.trim() }),
+        ...(currency && { currency: currency.trim().toUpperCase().slice(0, 3) }),
         // domains[] queda vacío — solo para custom domains
       });
 
