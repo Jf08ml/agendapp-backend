@@ -201,7 +201,7 @@ const organizationSchema = new mongoose.Schema({
         ];
       },
     },
-    stepMinutes: { type: Number, default: 30, min: 5, max: 60 }, // Intervalo de tiempo para slots
+    stepMinutes: { type: Number, default: 30, min: 1, max: 1440 }, // Intervalo de tiempo para slots
   },
   // plan: {
   //   type: mongoose.Schema.Types.ObjectId,

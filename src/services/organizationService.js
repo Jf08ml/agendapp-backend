@@ -130,6 +130,7 @@ const organizationService = {
       serviceCount,
       serviceReward,
       openingHours,
+      weeklySchedule,
       plan,
       clientIdWhatsapp,
       branding,
@@ -198,6 +199,14 @@ const organizationService = {
         ...(organization.openingHours?.toObject?.() ??
           organization.openingHours),
         ...openingHours,
+      };
+    }
+
+    if (weeklySchedule !== undefined) {
+      organization.weeklySchedule = {
+        ...(organization.weeklySchedule?.toObject?.() ??
+          organization.weeklySchedule),
+        ...weeklySchedule,
       };
     }
 
