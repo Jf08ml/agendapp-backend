@@ -75,11 +75,16 @@ function getEffectiveSchedule(employee, organization, dayOfWeek) {
   if (organization.openingHours) {
     const isBusinessDay = organization.openingHours.businessDays?.includes(dayOfWeek) ?? true;
     if (isBusinessDay && organization.openingHours.start && organization.openingHours.end) {
+      // Filtrar breaks que aplican al día actual (igual que scheduleService.js)
+      const dayBreaks = (organization.openingHours.breaks || []).filter(breakPeriod => {
+        if (breakPeriod.day === undefined || breakPeriod.day === null) return true;
+        return breakPeriod.day === dayOfWeek;
+      });
       return {
         isAvailable: true,
         start: organization.openingHours.start,
         end: organization.openingHours.end,
-        breaks: organization.openingHours.breaks || []
+        breaks: dayBreaks
       };
     }
   }
