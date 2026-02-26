@@ -489,6 +489,35 @@ const appointmentController = {
       sendResponse(res, statusCode, null, error.message);
     }
   },
+
+  // 💰 Registrar un pago para una cita
+  addPayment: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { amount, method, date, note } = req.body;
+      if (!amount || amount <= 0) {
+        return sendResponse(res, 400, null, 'El monto del pago debe ser mayor a 0');
+      }
+      const registeredBy = req.user?._id || req.user?.id || undefined;
+      const appointment = await appointmentService.addPaymentToAppointment(id, { amount, method, date, note, registeredBy });
+      sendResponse(res, 200, appointment, 'Pago registrado correctamente');
+    } catch (error) {
+      console.error('Error en addPayment:', error);
+      sendResponse(res, error.statusCode || 500, null, error.message);
+    }
+  },
+
+  // 💰 Eliminar un pago de una cita
+  removePayment: async (req, res) => {
+    try {
+      const { id, paymentId } = req.params;
+      const appointment = await appointmentService.removePaymentFromAppointment(id, paymentId);
+      sendResponse(res, 200, appointment, 'Pago eliminado correctamente');
+    } catch (error) {
+      console.error('Error en removePayment:', error);
+      sendResponse(res, error.statusCode || 500, null, error.message);
+    }
+  },
 };
 
 export default appointmentController;

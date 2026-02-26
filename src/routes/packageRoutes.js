@@ -31,6 +31,8 @@ router.delete("/:id", verifyToken, packageController.deleteServicePackage);
 // Asignación, cancelación y consulta de paquetes de clientes
 router.post("/assign", verifyToken, packageController.assignPackageToClient);
 router.put("/client-package/:id/cancel", verifyToken, packageController.cancelClientPackage);
+router.post("/client-package/:id/payments", verifyToken, packageController.addPayment);
+router.delete("/client-package/:id/payments/:paymentId", verifyToken, packageController.removePayment);
 router.delete("/client-package/:id", verifyToken, packageController.deleteClientPackage);
 router.get(
   "/client/:clientId",

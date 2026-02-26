@@ -168,6 +168,35 @@ const packageController = {
       sendResponse(res, 500, null, error.message);
     }
   },
+
+  // 💰 Registrar un pago para un paquete de cliente
+  addPayment: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { amount, method, date, note } = req.body;
+      if (!amount || amount <= 0) {
+        return sendResponse(res, 400, null, 'El monto del pago debe ser mayor a 0');
+      }
+      const registeredBy = req.user?._id || req.user?.id || undefined;
+      const pkg = await packageService.addPaymentToPackage(id, { amount, method, date, note, registeredBy });
+      sendResponse(res, 200, pkg, 'Pago registrado correctamente');
+    } catch (error) {
+      console.error('Error en addPayment (package):', error);
+      sendResponse(res, error.statusCode || 500, null, error.message);
+    }
+  },
+
+  // 💰 Eliminar un pago de un paquete de cliente
+  removePayment: async (req, res) => {
+    try {
+      const { id, paymentId } = req.params;
+      const pkg = await packageService.removePaymentFromPackage(id, paymentId);
+      sendResponse(res, 200, pkg, 'Pago eliminado correctamente');
+    } catch (error) {
+      console.error('Error en removePayment (package):', error);
+      sendResponse(res, error.statusCode || 500, null, error.message);
+    }
+  },
 };
 
 export default packageController;

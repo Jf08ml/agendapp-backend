@@ -42,6 +42,10 @@ router.patch("/:appointmentId/attendance", appointmentController.markAttendance)
 // Cancelar una cita (cambia estado a cancelled_by_admin, mantiene historial)
 router.patch("/:id/cancel", appointmentController.cancelAppointment);
 
+// 💰 Registrar/eliminar pagos de una cita
+router.post("/:id/payments", appointmentController.addPayment);
+router.delete("/:id/payments/:paymentId", appointmentController.removePayment);
+
 // Eliminar una cita definitivamente (sin historial)
 router.delete("/:id", appointmentController.deleteAppointment);
 

@@ -342,6 +342,33 @@ const packageService = {
     );
     return result.modifiedCount;
   },
+
+  // 💰 Registrar un pago para un paquete de cliente
+  addPaymentToPackage: async (packageId, { amount, method, date, note, registeredBy }) => {
+    const pkg = await ClientPackage.findById(packageId);
+    if (!pkg) throw new Error('Paquete no encontrado');
+    pkg.payments.push({ amount, method: method || 'cash', date: date || new Date(), note: note || '', registeredBy: registeredBy || undefined });
+    // paymentStatus se recalcula en el pre-save middleware
+    await pkg.save();
+    return ClientPackage.findById(pkg._id)
+      .populate('clientId', 'name phoneNumber')
+      .populate('servicePackageId', 'name description')
+      .populate('services.serviceId', 'name price duration');
+  },
+
+  // 💰 Eliminar un pago de un paquete de cliente
+  removePaymentFromPackage: async (packageId, paymentId) => {
+    const pkg = await ClientPackage.findById(packageId);
+    if (!pkg) throw new Error('Paquete no encontrado');
+    const before = pkg.payments.length;
+    pkg.payments = pkg.payments.filter(p => p._id.toString() !== paymentId);
+    if (pkg.payments.length === before) throw new Error('Pago no encontrado');
+    await pkg.save();
+    return ClientPackage.findById(pkg._id)
+      .populate('clientId', 'name phoneNumber')
+      .populate('servicePackageId', 'name description')
+      .populate('services.serviceId', 'name price duration');
+  },
 };
 
 export default packageService;

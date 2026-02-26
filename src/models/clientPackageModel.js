@@ -1,5 +1,13 @@
 import mongoose from "mongoose";
 
+const packagePaymentRecordSchema = new mongoose.Schema({
+  amount: { type: Number, required: true, min: 0 },
+  method: { type: String, enum: ['cash', 'card', 'transfer', 'other'], default: 'cash' },
+  date: { type: Date, default: Date.now },
+  note: { type: String, default: '' },
+  registeredBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', required: false },
+}, { _id: true });
+
 const clientPackageServiceSchema = new mongoose.Schema({
   serviceId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -90,6 +98,13 @@ const clientPackageSchema = new mongoose.Schema(
       default: "",
     },
     consumptionHistory: [consumptionHistorySchema],
+    // 💰 Control de pagos del paquete
+    payments: { type: [packagePaymentRecordSchema], default: [] },
+    paymentStatus: {
+      type: String,
+      enum: ['unpaid', 'partial', 'paid'],
+      default: 'unpaid',
+    },
   },
   {
     timestamps: true,
@@ -98,5 +113,21 @@ const clientPackageSchema = new mongoose.Schema(
 
 clientPackageSchema.index({ clientId: 1, organizationId: 1, status: 1 });
 clientPackageSchema.index({ expirationDate: 1 });
+
+function computePackagePaymentStatus(pkg) {
+  const totalPaid = (pkg.payments || []).reduce((sum, p) => sum + (p.amount || 0), 0);
+  const total = pkg.totalPrice || 0;
+  if (total === 0) return totalPaid > 0 ? 'paid' : 'unpaid';
+  if (totalPaid >= total) return 'paid';
+  if (totalPaid > 0) return 'partial';
+  return 'unpaid';
+}
+
+clientPackageSchema.statics.computePaymentStatus = computePackagePaymentStatus;
+
+clientPackageSchema.pre('save', function (next) {
+  this.paymentStatus = computePackagePaymentStatus(this);
+  next();
+});
 
 export default mongoose.model("ClientPackage", clientPackageSchema);

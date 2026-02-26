@@ -5,6 +5,14 @@ const additionalItemSchema = new mongoose.Schema({
   price: { type: Number, required: true },
 });
 
+const paymentRecordSchema = new mongoose.Schema({
+  amount: { type: Number, required: true, min: 0 },
+  method: { type: String, enum: ['cash', 'card', 'transfer', 'other'], default: 'cash' },
+  date: { type: Date, default: Date.now },
+  note: { type: String, default: '' },
+  registeredBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', required: false },
+}, { _id: true });
+
 const appointmentModelSchema = new mongoose.Schema(
   {
     service: {
@@ -95,6 +103,13 @@ const appointmentModelSchema = new mongoose.Schema(
       ref: "ClientPackage",
       default: null,
     },
+    // 💰 Control de pagos
+    payments: { type: [paymentRecordSchema], default: [] },
+    paymentStatus: {
+      type: String,
+      enum: ['unpaid', 'partial', 'paid', 'free'],
+      default: 'unpaid',
+    },
     groupId: { type: mongoose.Schema.Types.ObjectId, index: true },
     // 🔁 Campos para citas recurrentes
     seriesId: { 
@@ -142,5 +157,26 @@ const appointmentModelSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+// 💰 Calcula paymentStatus a partir de los campos de pago
+function computePaymentStatus(appt) {
+  if (appt.clientPackageId && appt.totalPrice === 0) return 'free';
+  const totalPaid =
+    (appt.advancePayment || 0) +
+    (appt.payments || []).reduce((sum, p) => sum + (p.amount || 0), 0);
+  const total = appt.totalPrice || 0;
+  if (total === 0) return totalPaid > 0 ? 'paid' : 'unpaid';
+  if (totalPaid >= total) return 'paid';
+  if (totalPaid > 0) return 'partial';
+  return 'unpaid';
+}
+
+appointmentModelSchema.statics.computePaymentStatus = computePaymentStatus;
+
+// Recalcular paymentStatus automáticamente al guardar
+appointmentModelSchema.pre('save', function (next) {
+  this.paymentStatus = computePaymentStatus(this);
+  next();
+});
 
 export default mongoose.model("Appointment", appointmentModelSchema);

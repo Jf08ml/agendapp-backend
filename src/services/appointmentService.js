@@ -1559,6 +1559,33 @@ const appointmentService = {
 
     return appointment;
   },
+
+  // 💰 Registrar un pago para una cita
+  addPaymentToAppointment: async (appointmentId, { amount, method, date, note, registeredBy }) => {
+    const appt = await appointmentModel.findById(appointmentId);
+    if (!appt) throw new Error('Cita no encontrada');
+    appt.payments.push({ amount, method: method || 'cash', date: date || new Date(), note: note || '', registeredBy: registeredBy || undefined });
+    // paymentStatus se recalcula en el pre-save middleware
+    await appt.save();
+    return appointmentModel.findById(appt._id)
+      .populate('client')
+      .populate('service')
+      .populate('employee');
+  },
+
+  // 💰 Eliminar un pago de una cita
+  removePaymentFromAppointment: async (appointmentId, paymentId) => {
+    const appt = await appointmentModel.findById(appointmentId);
+    if (!appt) throw new Error('Cita no encontrada');
+    const before = appt.payments.length;
+    appt.payments = appt.payments.filter(p => p._id.toString() !== paymentId);
+    if (appt.payments.length === before) throw new Error('Pago no encontrado');
+    await appt.save();
+    return appointmentModel.findById(appt._id)
+      .populate('client')
+      .populate('service')
+      .populate('employee');
+  },
 };
 
 export default appointmentService;
