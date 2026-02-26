@@ -351,6 +351,8 @@ const appointmentService = {
       } else {
         throw new Error('startDate debe ser un Date o string');
       }
+      // ⏱️ Truncar a minuto exacto para evitar desfases de segundos
+      currentStart = new Date(Math.floor(currentStart.getTime() / 60000) * 60000);
 
       for (let i = 0; i < services.length; i++) {
         const serviceId = services[i];
@@ -389,21 +391,20 @@ const appointmentService = {
           serviceEnd = new Date(currentStart.getTime() + duration * 60000);
           console.log(`🕐 Servicio ${i + 1} (${svc.name}): usando duración estándar ${duration} min`);
         }
+        // ⏱️ Truncar serviceEnd a minuto exacto para consistencia
+        serviceEnd = new Date(Math.floor(serviceEnd.getTime() / 60000) * 60000);
 
-        // 🔍 VALIDACIÓN DE DISPONIBILIDAD - Verificar citas simultáneas
-        // Contar cuántas citas simultáneas tiene el empleado en ese horario
+        // 🔍 VALIDACIÓN DE DISPONIBILIDAD - Verificar citas simultáneas del mismo servicio
+        // Contar cuántas citas del MISMO servicio tiene el empleado en ese horario.
+        // maxConcurrentAppointments es un límite por servicio, no por empleado en total.
+        // Condición estándar de solapamiento: existente.inicio < nueva.fin Y existente.fin > nueva.inicio
         const simultaneousCount = await appointmentModel.countDocuments({
           employee: employeeForThisService,
+          service: serviceId,
           organizationId,
-          status: { $nin: ['cancelled_by_admin', 'cancelled_by_customer', 'cancelled', 'rejected'] },
-          $or: [
-            // La nueva cita empieza durante una cita existente
-            { startDate: { $lte: currentStart }, endDate: { $gt: currentStart } },
-            // La nueva cita termina durante una cita existente
-            { startDate: { $lt: serviceEnd }, endDate: { $gte: serviceEnd } },
-            // La nueva cita contiene completamente una cita existente
-            { startDate: { $gte: currentStart }, endDate: { $lte: serviceEnd } }
-          ]
+          status: { $nin: ['cancelled_by_admin', 'cancelled_by_customer', 'cancelled', 'rejected', 'attended', 'no_show'] },
+          startDate: { $lt: serviceEnd },
+          endDate: { $gt: currentStart },
         });
 
         // 👥 Verificar límite de citas simultáneas configurado en el servicio
