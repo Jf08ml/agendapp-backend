@@ -124,7 +124,7 @@ const clientController = {
   registerService: async (req, res) => {
     const { id } = req.params;
     try {
-      const client = await clientService.registerService(id);
+      const client = await clientService.registerService(id, req.organization);
       sendResponse(
         res,
         200,
@@ -140,7 +140,7 @@ const clientController = {
   registerReferral: async (req, res) => {
     const { id } = req.params;
     try {
-      const client = await clientService.registerReferral(id);
+      const client = await clientService.registerReferral(id, req.organization);
       sendResponse(
         res,
         200,
@@ -149,6 +149,60 @@ const clientController = {
       );
     } catch (error) {
       sendResponse(res, 404, null, error.message);
+    }
+  },
+
+  // Controlador para marcar una recompensa como canjeada
+  redeemReward: async (req, res) => {
+    const { id, rewardId } = req.params;
+    try {
+      const client = await clientService.redeemReward(id, rewardId);
+      sendResponse(res, 200, client, "Recompensa marcada como canjeada");
+    } catch (error) {
+      sendResponse(res, 400, null, error.message);
+    }
+  },
+
+  // Controlador para fusionar cliente origen en cliente destino
+  mergeClient: async (req, res) => {
+    const { id, sourceId } = req.params;
+    try {
+      const client = await clientService.mergeClient(id, sourceId);
+      sendResponse(res, 200, client, "Clientes fusionados correctamente");
+    } catch (error) {
+      sendResponse(res, 400, null, error.message);
+    }
+  },
+
+  // Controlador para eliminar un cliente y todos sus registros
+  forceDeleteClient: async (req, res) => {
+    const { id } = req.params;
+    try {
+      await clientService.forceDeleteClient(id);
+      sendResponse(res, 200, null, "Cliente eliminado con todos sus registros");
+    } catch (error) {
+      sendResponse(res, 404, null, error.message);
+    }
+  },
+
+  // Controlador para restablecer contadores de fidelidad de un cliente
+  resetClientLoyalty: async (req, res) => {
+    const { id } = req.params;
+    try {
+      const client = await clientService.resetClientLoyalty(id);
+      sendResponse(res, 200, client, "Contadores del cliente restablecidos a 0");
+    } catch (error) {
+      sendResponse(res, 404, null, error.message);
+    }
+  },
+
+  // Controlador para restablecer contadores de todos los clientes de la organización
+  resetAllClientsLoyalty: async (req, res) => {
+    try {
+      const count = await clientService.resetAllClientsLoyalty(req.organization._id.toString());
+      sendResponse(res, 200, { modifiedCount: count }, `${count} clientes restablecidos a 0`);
+    } catch (error) {
+      sendResponse(res, 500, null, error.message);
     }
   },
 

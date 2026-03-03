@@ -1,6 +1,12 @@
 import Client from "../models/clientModel.js";
 import Organization from "../models/organizationModel.js";
+import WhatsappTemplate from "../models/whatsappTemplateModel.js";
+import Appointment from "../models/appointmentModel.js";
+import ClientPackage from "../models/clientPackageModel.js";
+import Reservation from "../models/reservationModel.js";
 import { normalizePhoneNumber } from "../utils/phoneUtils.js";
+import whatsappTemplates from "../utils/whatsappTemplates.js";
+import whatsappService from "./sendWhatsappService.js";
 
 const clientService = {
   // Crear un nuevo cliente
@@ -83,15 +89,36 @@ const clientService = {
     phoneNumber,
     organizationId
   ) => {
-    // 🌍 Buscar por phoneNumber original O por phone_e164
-    const client = await Client.findOne({ 
-      $or: [
-        { phoneNumber, organizationId },
-        { phone_e164: phoneNumber, organizationId }
-      ]
-    })
+    const digitsOnly = phoneNumber.replace(/[^\d]/g, '');
+
+    // Condiciones base: exacto en phoneNumber y phone_e164
+    const orConditions = [
+      { phoneNumber, organizationId },
+      { phone_e164: phoneNumber, organizationId },
+    ];
+
+    if (digitsOnly && digitsOnly !== phoneNumber) {
+      orConditions.push({ phoneNumber: digitsOnly, organizationId });
+    }
+
+    // Normalizar con el país por defecto de la organización para generar E.164 correcto
+    // Ej: "3111234567" + país CO → "+573111234567"
+    try {
+      const org = await Organization.findById(organizationId).select('default_country');
+      const defaultCountry = org?.default_country || 'CO';
+      const phoneResult = normalizePhoneNumber(phoneNumber, defaultCountry);
+      if (phoneResult.isValid && phoneResult.phone_e164) {
+        orConditions.push({ phone_e164: phoneResult.phone_e164, organizationId });
+        orConditions.push({ phoneNumber: phoneResult.phone_national_clean, organizationId });
+      }
+    } catch (_) {
+      // Si falla la normalización, continuar con las condiciones base
+    }
+
+    const client = await Client.findOne({ $or: orConditions })
       .populate("organizationId")
       .exec();
+
     if (!client) {
       throw new Error("Cliente no encontrado");
     }
@@ -175,21 +202,183 @@ const clientService = {
   },
 
   // Registrar un servicio para un cliente
-  registerService: async (id) => {
+  registerService: async (id, organization) => {
     const client = await Client.findById(id);
     if (!client) {
       throw new Error("Cliente no encontrado");
     }
-    return await client.incrementServices();
+
+    const serviceCount = organization?.serviceCount || 7;
+    const serviceReward = organization?.serviceReward || "Descuento especial por servicios";
+
+    const { rewardEarned, rewardDetails } = await client.incrementServices(serviceCount, serviceReward);
+
+    // Enviar WhatsApp de felicitación si se ganó una recompensa
+    if (rewardEarned && client.phone_e164 && organization) {
+      try {
+        const whatsappDoc = await WhatsappTemplate.findOne({ organizationId: organization._id });
+        const isEnabled = whatsappDoc?.enabledTypes?.loyaltyServiceReward !== false;
+        if (isEnabled) {
+          const msg = await whatsappTemplates.getRenderedTemplate(
+            organization._id.toString(),
+            'loyaltyServiceReward',
+            { names: client.name, reward: rewardDetails, organization: organization.name }
+          );
+          await whatsappService.sendMessage(organization._id.toString(), client.phone_e164, msg);
+          console.log(`[registerService] WA de recompensa enviado a ${client.name}`);
+        }
+      } catch (waError) {
+        console.error('[registerService] Error enviando WA de recompensa:', waError.message);
+        // No falla el registro si el WA falla
+      }
+    }
+
+    return client;
   },
 
   // Registrar un referido para un cliente
-  registerReferral: async (id) => {
+  registerReferral: async (id, organization) => {
     const client = await Client.findById(id);
     if (!client) {
       throw new Error("Cliente no encontrado");
     }
-    return await client.incrementReferrals();
+
+    const referredCount = organization?.referredCount || 5;
+    const referredReward = organization?.referredReward || "Beneficio especial por referidos";
+    const serviceCount = organization?.serviceCount || 7;
+    const serviceReward = organization?.serviceReward || "Descuento especial por servicios";
+
+    const { referralRewardEarned, referralRewardDetails, serviceRewardEarned, serviceRewardDetails } =
+      await client.incrementReferrals(referredCount, referredReward, serviceCount, serviceReward);
+
+    // Enviar WA de felicitación por referidos
+    if (referralRewardEarned && client.phone_e164 && organization) {
+      try {
+        const whatsappDoc = await WhatsappTemplate.findOne({ organizationId: organization._id });
+        const isEnabled = whatsappDoc?.enabledTypes?.loyaltyReferralReward !== false;
+        if (isEnabled) {
+          const msg = await whatsappTemplates.getRenderedTemplate(
+            organization._id.toString(),
+            'loyaltyReferralReward',
+            { names: client.name, reward: referralRewardDetails, organization: organization.name }
+          );
+          await whatsappService.sendMessage(organization._id.toString(), client.phone_e164, msg);
+          console.log(`[registerReferral] WA de recompensa de referido enviado a ${client.name}`);
+        }
+      } catch (waError) {
+        console.error('[registerReferral] Error enviando WA de recompensa de referido:', waError.message);
+      }
+    }
+
+    // También enviar WA si se ganó recompensa de servicios al mismo tiempo
+    if (serviceRewardEarned && client.phone_e164 && organization) {
+      try {
+        const whatsappDoc = await WhatsappTemplate.findOne({ organizationId: organization._id });
+        const isEnabled = whatsappDoc?.enabledTypes?.loyaltyServiceReward !== false;
+        if (isEnabled) {
+          const msg = await whatsappTemplates.getRenderedTemplate(
+            organization._id.toString(),
+            'loyaltyServiceReward',
+            { names: client.name, reward: serviceRewardDetails, organization: organization.name }
+          );
+          await whatsappService.sendMessage(organization._id.toString(), client.phone_e164, msg);
+          console.log(`[registerReferral] WA de recompensa de servicio enviado a ${client.name}`);
+        }
+      } catch (waError) {
+        console.error('[registerReferral] Error enviando WA de recompensa de servicio:', waError.message);
+      }
+    }
+
+    return client;
+  },
+
+  // Marcar una recompensa como canjeada
+  redeemReward: async (clientId, rewardId) => {
+    const client = await Client.findById(clientId);
+    if (!client) {
+      throw new Error("Cliente no encontrado");
+    }
+
+    const reward = client.rewardHistory.id(rewardId);
+    if (!reward) {
+      throw new Error("Recompensa no encontrada");
+    }
+
+    if (reward.redeemed) {
+      throw new Error("Esta recompensa ya fue canjeada");
+    }
+
+    reward.redeemed = true;
+    reward.redeemedAt = new Date();
+    await client.save();
+    return client;
+  },
+
+  // Restablecer contadores de fidelidad de un cliente
+  resetClientLoyalty: async (clientId) => {
+    const client = await Client.findById(clientId);
+    if (!client) throw new Error("Cliente no encontrado");
+    client.servicesTaken = 0;
+    client.referralsMade = 0;
+    return await client.save();
+  },
+
+  // Restablecer contadores de fidelidad de todos los clientes de una organización
+  resetAllClientsLoyalty: async (organizationId) => {
+    const result = await Client.updateMany(
+      { organizationId },
+      { $set: { servicesTaken: 0, referralsMade: 0 } }
+    );
+    return result.modifiedCount;
+  },
+
+  // Fusionar cliente origen (source) en cliente destino (target)
+  mergeClient: async (targetId, sourceId) => {
+    if (targetId === sourceId) {
+      throw new Error("No puedes fusionar un cliente consigo mismo");
+    }
+
+    const [target, source] = await Promise.all([
+      Client.findById(targetId),
+      Client.findById(sourceId),
+    ]);
+
+    if (!target) throw new Error("Cliente destino no encontrado");
+    if (!source) throw new Error("Cliente origen no encontrado");
+    if (target.organizationId.toString() !== source.organizationId.toString()) {
+      throw new Error("Los clientes deben pertenecer a la misma organización");
+    }
+
+    // Reasignar citas, paquetes y reservaciones del origen al destino
+    await Appointment.updateMany({ client: sourceId }, { client: targetId });
+    await ClientPackage.updateMany({ clientId: sourceId }, { clientId: targetId });
+    await Reservation.updateMany({ customer: sourceId }, { customer: targetId });
+
+    // Sumar contadores y combinar historial de recompensas
+    target.servicesTaken += source.servicesTaken;
+    target.referralsMade += source.referralsMade;
+    target.rewardHistory.push(...source.rewardHistory);
+    await target.save();
+
+    // Eliminar cliente origen
+    await Client.deleteOne({ _id: sourceId });
+
+    return target;
+  },
+
+  // Eliminar cliente y todos sus registros relacionados
+  forceDeleteClient: async (id) => {
+    const client = await Client.findById(id);
+    if (!client) {
+      throw new Error("Cliente no encontrado");
+    }
+
+    await Appointment.deleteMany({ client: id });
+    await ClientPackage.deleteMany({ clientId: id });
+    await Reservation.updateMany({ customer: id }, { $set: { customer: null } });
+    await Client.deleteOne({ _id: id });
+
+    return { message: "Cliente y sus registros eliminados correctamente" };
   },
 
   // Carga masiva de clientes desde Excel

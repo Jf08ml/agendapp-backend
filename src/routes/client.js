@@ -36,6 +36,11 @@ router.post(
   verifyToken,
   clientController.registerReferral
 );
+router.put("/:id/rewards/:rewardId/redeem", organizationResolver, verifyToken, clientController.redeemReward);
+router.post("/:id/merge/:sourceId", organizationResolver, verifyToken, clientController.mergeClient);
+router.delete("/:id/force", organizationResolver, verifyToken, clientController.forceDeleteClient);
+router.post("/reset-all", organizationResolver, verifyToken, clientController.resetAllClientsLoyalty);
+router.post("/:id/reset", organizationResolver, verifyToken, clientController.resetClientLoyalty);
 router.post("/bulk-upload", organizationResolver, verifyToken, clientController.bulkUploadClients);
 
 export default router;

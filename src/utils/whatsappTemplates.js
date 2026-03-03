@@ -153,6 +153,24 @@ Notamos que no pudiste asistir a tu cita:
 📍 {{organization}}
 
 Si deseas reprogramar tu cita, responde a este mensaje y con gusto te ayudamos a encontrar un nuevo horario. ¡Te esperamos pronto!`,
+
+      // 🏆 Premio por completar meta de servicios
+      loyaltyServiceReward: `🎉 ¡Felicitaciones, {{names}}!
+
+Has completado tu meta de servicios en *{{organization}}*.
+
+🏅 Tu recompensa: *{{reward}}*
+
+Preséntate en tu próxima visita y reclama tu beneficio. ¡Gracias por tu fidelidad!`,
+
+      // 🎁 Premio por completar meta de referidos
+      loyaltyReferralReward: `🎉 ¡Felicitaciones, {{names}}!
+
+Has alcanzado tu meta de referidos en *{{organization}}*.
+
+🎁 Tu recompensa: *{{reward}}*
+
+Preséntate en tu próxima visita y reclama tu beneficio. ¡Gracias por recomendar nuestros servicios!`,
     };
 
     return templates[templateType] || '';

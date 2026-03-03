@@ -35,6 +35,8 @@ const whatsappTemplateController = {
         clientConfirmationAck: whatsappTemplates.getDefaultTemplate('clientConfirmationAck'),
         clientCancellationAck: whatsappTemplates.getDefaultTemplate('clientCancellationAck'),
         clientNoShowAck: whatsappTemplates.getDefaultTemplate('clientNoShowAck'),
+        loyaltyServiceReward: whatsappTemplates.getDefaultTemplate('loyaltyServiceReward'),
+        loyaltyReferralReward: whatsappTemplates.getDefaultTemplate('loyaltyReferralReward'),
       };
 
       // Plantillas personalizadas (si existen)
@@ -92,6 +94,16 @@ const whatsappTemplateController = {
           isCustom: !!customTemplates.clientNoShowAck,
           variables: ['{{names}}', '{{service}}', '{{date}}', '{{organization}}'],
         },
+        loyaltyServiceReward: {
+          content: customTemplates.loyaltyServiceReward || defaultTemplates.loyaltyServiceReward,
+          isCustom: !!customTemplates.loyaltyServiceReward,
+          variables: ['{{names}}', '{{reward}}', '{{organization}}'],
+        },
+        loyaltyReferralReward: {
+          content: customTemplates.loyaltyReferralReward || defaultTemplates.loyaltyReferralReward,
+          isCustom: !!customTemplates.loyaltyReferralReward,
+          variables: ['{{names}}', '{{reward}}', '{{organization}}'],
+        },
       };
 
       // También enviar los templates por defecto para el botón "Restaurar"
@@ -125,6 +137,8 @@ const whatsappTemplateController = {
         'clientConfirmationAck',
         'clientCancellationAck',
         'clientNoShowAck',
+        'loyaltyServiceReward',
+        'loyaltyReferralReward',
       ];
 
       if (!validTypes.includes(templateType)) {
@@ -190,6 +204,8 @@ const whatsappTemplateController = {
         'clientConfirmationAck',
         'clientCancellationAck',
         'clientNoShowAck',
+        'loyaltyServiceReward',
+        'loyaltyReferralReward',
       ];
 
       if (!validTypes.includes(templateType)) {
@@ -252,6 +268,8 @@ const whatsappTemplateController = {
         'clientConfirmationAck',
         'clientCancellationAck',
         'clientNoShowAck',
+        'loyaltyServiceReward',
+        'loyaltyReferralReward',
       ];
 
       for (const key in templates) {
@@ -322,6 +340,7 @@ const whatsappTemplateController = {
         appointments_list: `  1. Corte de cabello – 15/01/2026 a las 03:00 PM\n  2. Tinte – 22/01/2026 a las 03:00 PM`,
         manage_block: "https://agenda.example.com/manage/abc123",
         recommendations: `\n\n📝 *Recomendaciones:*\n• Llegar 10 minutos antes\n• Traer el cabello limpio y seco`,
+        reward: "1 servicio gratis en tu próxima visita",
       };
 
       // Renderizar la plantilla con los datos de ejemplo
@@ -365,6 +384,8 @@ const whatsappTemplateController = {
           clientConfirmationAck: true,
           clientCancellationAck: true,
           clientNoShowAck: true,
+          loyaltyServiceReward: true,
+          loyaltyReferralReward: true,
         };
         return sendResponse(res, 200, defaults, "Configuración por defecto");
       }
@@ -380,6 +401,8 @@ const whatsappTemplateController = {
         clientConfirmationAck: true,
         clientCancellationAck: true,
         clientNoShowAck: true,
+        loyaltyServiceReward: true,
+        loyaltyReferralReward: true,
       };
 
       sendResponse(res, 200, settings, "Configuración obtenida correctamente");
@@ -413,6 +436,8 @@ const whatsappTemplateController = {
         'clientConfirmationAck',
         'clientCancellationAck',
         'clientNoShowAck',
+        'loyaltyServiceReward',
+        'loyaltyReferralReward',
       ];
 
       for (const key of Object.keys(enabledTypes)) {

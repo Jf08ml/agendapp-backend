@@ -50,6 +50,19 @@ const clientSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    // 🏆 Historial de recompensas ganadas
+    rewardHistory: {
+      type: [
+        {
+          type: { type: String, enum: ["service", "referral"], required: true },
+          reward: { type: String, required: true },
+          earnedAt: { type: Date, default: Date.now },
+          redeemed: { type: Boolean, default: false },
+          redeemedAt: { type: Date },
+        },
+      ],
+      default: [],
+    },
     organizationId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Organization",
@@ -69,9 +82,9 @@ const clientSchema = new mongoose.Schema(
 // Solo aplica a documentos donde phone_e164 existe y es string (ignora null/undefined)
 clientSchema.index(
   { phone_e164: 1, organizationId: 1 },
-  { 
+  {
     unique: true,
-    partialFilterExpression: { 
+    partialFilterExpression: {
       phone_e164: { $exists: true, $type: 'string' }
     },
     name: 'unique_phone_per_organization'
@@ -79,49 +92,80 @@ clientSchema.index(
 );
 
 // Método para incrementar los servicios tomados
-clientSchema.methods.incrementServices = function () {
+// Recibe los umbrales configurados por la organización
+clientSchema.methods.incrementServices = async function (serviceCount = 7, serviceReward = "Descuento especial por servicios") {
   this.servicesTaken += 1;
 
-  // Otorgar un descuento por cada 7 servicios tomados
-  if (this.servicesTaken > 7) {
+  let rewardEarned = false;
+  let rewardDetails = "";
+
+  if (this.servicesTaken >= serviceCount) {
+    rewardDetails = serviceReward || "Descuento especial por servicios";
     this.hasServiceDiscount = true;
-    this.serviceDiscountDetails = "Descuento especial por 7 servicios tomados";
-    this.servicesTaken = 1; // Reiniciar el conteo de servicios tomados a 1
+    this.serviceDiscountDetails = rewardDetails;
+    this.rewardHistory.push({
+      type: "service",
+      reward: rewardDetails,
+      earnedAt: new Date(),
+    });
+    this.servicesTaken = 0; // Reiniciar el conteo a 0 para el próximo ciclo
+    rewardEarned = true;
   } else {
     this.hasServiceDiscount = false;
     this.serviceDiscountDetails = "";
   }
 
-  return this.save();
+  await this.save();
+  return { rewardEarned, rewardDetails };
 };
 
 // Método para incrementar los referidos realizados
-clientSchema.methods.incrementReferrals = function () {
+// Recibe los umbrales configurados por la organización
+clientSchema.methods.incrementReferrals = async function (referredCount = 5, referredReward = "Beneficio especial por referidos", serviceCount = 7, serviceReward = "Descuento especial por servicios") {
   this.referralsMade += 1;
   this.servicesTaken += 1; // Cada referido cuenta también como un servicio
 
-  // Otorgar un beneficio por cada 5 referidos realizados
-  if (this.referralsMade > 5) {
+  let referralRewardEarned = false;
+  let referralRewardDetails = "";
+  let serviceRewardEarned = false;
+  let serviceRewardDetails = "";
+
+  // Verificar umbral de referidos
+  if (this.referralsMade >= referredCount) {
+    referralRewardDetails = referredReward || "Beneficio especial por referidos";
     this.hasReferralBenefit = true;
-    this.referralBenefitDetails =
-      "Beneficio especial por 5 referidos realizados";
-    this.referralsMade = 1; // Reiniciar el conteo de referidos realizados a 1
+    this.referralBenefitDetails = referralRewardDetails;
+    this.rewardHistory.push({
+      type: "referral",
+      reward: referralRewardDetails,
+      earnedAt: new Date(),
+    });
+    this.referralsMade = 0; // Reiniciar conteo a 0
+    referralRewardEarned = true;
   } else {
     this.hasReferralBenefit = false;
     this.referralBenefitDetails = "";
   }
 
-  // También revisar si los servicios tomados alcanzan un múltiplo de 7
-  if (this.servicesTaken > 7) {
+  // También revisar si los servicios tomados alcanzan el umbral configurado
+  if (this.servicesTaken >= serviceCount) {
+    serviceRewardDetails = serviceReward || "Descuento especial por servicios";
     this.hasServiceDiscount = true;
-    this.serviceDiscountDetails = "Descuento especial por 7 servicios tomados";
-    this.servicesTaken = 1; // Reiniciar el conteo de servicios tomados a 1
+    this.serviceDiscountDetails = serviceRewardDetails;
+    this.rewardHistory.push({
+      type: "service",
+      reward: serviceRewardDetails,
+      earnedAt: new Date(),
+    });
+    this.servicesTaken = 0;
+    serviceRewardEarned = true;
   } else {
     this.hasServiceDiscount = false;
     this.serviceDiscountDetails = "";
   }
 
-  return this.save();
+  await this.save();
+  return { referralRewardEarned, referralRewardDetails, serviceRewardEarned, serviceRewardDetails };
 };
 
 const Client = mongoose.model("Client", clientSchema);

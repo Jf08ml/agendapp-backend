@@ -53,6 +53,15 @@ const whatsappTemplateSchema = new mongoose.Schema(
           type: Boolean,
           default: true,
         },
+        // 🏆 Notificaciones de recompensas de fidelidad
+        loyaltyServiceReward: {
+          type: Boolean,
+          default: true,
+        },
+        loyaltyReferralReward: {
+          type: Boolean,
+          default: true,
+        },
       },
       default: () => ({
         scheduleAppointment: true,
@@ -65,6 +74,8 @@ const whatsappTemplateSchema = new mongoose.Schema(
         clientConfirmationAck: true,
         clientCancellationAck: true,
         clientNoShowAck: true,
+        loyaltyServiceReward: true,
+        loyaltyReferralReward: true,
       }),
     },
     scheduleAppointment: {
@@ -105,6 +116,15 @@ const whatsappTemplateSchema = new mongoose.Schema(
       default: null,
     },
     clientNoShowAck: {
+      type: String,
+      default: null,
+    },
+    // 🏆 Templates personalizables para recompensas de fidelidad
+    loyaltyServiceReward: {
+      type: String,
+      default: null,
+    },
+    loyaltyReferralReward: {
       type: String,
       default: null,
     },
