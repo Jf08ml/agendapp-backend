@@ -149,6 +149,7 @@ const organizationService = {
       default_country,
       timezone,
       currency,
+      timeFormat,
       cancellationPolicy,
       blockHolidaysForReservations,
       allowedHolidayDates,
@@ -288,6 +289,11 @@ const organizationService = {
     // 💱 Actualizar moneda si se proporciona
     if (currency !== undefined) {
       organization.currency = currency;
+    }
+
+    // 🕐 Actualizar formato de hora si se proporciona
+    if (timeFormat !== undefined) {
+      organization.timeFormat = timeFormat;
     }
 
     // 🚫 Actualizar política de cancelación si se proporciona

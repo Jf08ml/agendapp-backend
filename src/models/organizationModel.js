@@ -127,6 +127,13 @@ const organizationSchema = new mongoose.Schema({
     default: 'COP',
     maxlength: 3,
   },
+  // 🕐 Formato de hora (12h con AM/PM o 24h)
+  timeFormat: {
+    type: String,
+    enum: ['12h', '24h'],
+    required: false,
+    default: '12h',
+  },
   instagramUrl: {
     type: String,
     required: false,

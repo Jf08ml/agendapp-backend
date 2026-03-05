@@ -60,7 +60,7 @@ const cancellationService = {
         .select('service client organizationId startDate endDate status clientConfirmed groupId cancelTokenHash')
         .populate('service', 'name duration')
         .populate('client', 'name')
-        .populate('organizationId', 'name timezone cancellationPolicy')
+        .populate('organizationId', 'name timezone timeFormat cancellationPolicy')
         .lean();
 
       if (appointment) {
@@ -76,7 +76,7 @@ const cancellationService = {
           .select('+cancelTokenHash service client organizationId startDate endDate status clientConfirmed groupId')
           .populate('service', 'name duration')
           .populate('client', 'name')
-          .populate('organizationId', 'name timezone cancellationPolicy')
+          .populate('organizationId', 'name timezone timeFormat cancellationPolicy')
           .lean();
 
         console.log(`📋 Buscando en ${appointments.length} appointments con bcrypt...`);
@@ -116,7 +116,7 @@ const cancellationService = {
             .select('service client organizationId startDate endDate status clientConfirmed groupId')
             .populate('service', 'name duration')
             .populate('client', 'name')
-            .populate('organizationId', 'name timezone cancellationPolicy')
+            .populate('organizationId', 'name timezone timeFormat cancellationPolicy')
             .lean();
           
           console.log(`👥 Encontradas ${groupAppointments.length} citas en el grupo`);
@@ -219,6 +219,7 @@ const cancellationService = {
             customerName: appointment.client?.name,
             organizationName: org.name,
             timezone,
+            timeFormat: org.timeFormat || '12h',
           },
         };
       }
@@ -231,7 +232,7 @@ const cancellationService = {
       })
         .select('serviceId organizationId startDate status customerDetails appointmentId cancelTokenHash')
         .populate('serviceId', 'name duration')
-        .populate('organizationId', 'name timezone cancellationPolicy')
+        .populate('organizationId', 'name timezone timeFormat cancellationPolicy')
         .lean();
 
       if (reservation) {
@@ -245,7 +246,7 @@ const cancellationService = {
         })
           .select('+cancelTokenHash serviceId organizationId startDate status customerDetails appointmentId')
           .populate('serviceId', 'name duration')
-          .populate('organizationId', 'name timezone cancellationPolicy')
+          .populate('organizationId', 'name timezone timeFormat cancellationPolicy')
           .lean();
 
         for (const res of reservations) {
@@ -332,6 +333,7 @@ const cancellationService = {
             customerName: reservation.customerDetails?.name,
             organizationName: org.name,
             hasAppointment: !!reservation.appointmentId,
+            timeFormat: org.timeFormat || '12h',
           },
         };
       }
