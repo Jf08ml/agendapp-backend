@@ -28,6 +28,7 @@ import publicRoutes from "./publicRoutes.js";
 import campaignRoutes from "./campaignRoutes.js";
 import packageRoutes from "./packageRoutes.js";
 import paymentRoutes from "./paymentRoutes.js";
+import expenseRoutes from "./expenseRoutes.js";
 import registrationRoutes from "./registrationRoutes.js";
 import adminRoutes from "./adminRoutes.js";
 import membershipService from "../services/membershipService.js";
@@ -147,5 +148,6 @@ router.use("/whatsapp-templates", verifyToken, requireActiveMembership, whatsapp
 router.use("/wa", verifyToken, requireActiveMembership, waRoutes);
 router.use("/reminders", verifyToken, requireActiveMembership, reminderRoutes);
 router.use("/campaigns", verifyToken, requireActiveMembership, campaignRoutes);
+router.use("/expenses", organizationResolver, verifyToken, requireActiveMembership, expenseRoutes);
 
 export default router;

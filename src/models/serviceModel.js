@@ -1,5 +1,10 @@
 import { Schema, Types, model } from "mongoose";
 
+const serviceCostSchema = new Schema({
+  concept: { type: String, default: "" },
+  amount: { type: Number, required: true },
+}, { _id: false });
+
 const serviceSchema = new Schema({
   images: [{ type: String }],
   name: { type: String, required: true },
@@ -17,6 +22,8 @@ const serviceSchema = new Schema({
   // 📋 Recomendaciones para el cliente antes de la cita
   // (ej: "Llegar sin maquillaje", "No consumir cafeína 2h antes")
   recommendations: { type: String, default: null },
+  // 💸 Gastos por insumos/materiales (vacío = sin gastos registrados)
+  costs: { type: [serviceCostSchema], default: [] },
 });
 
 export default model("Service", serviceSchema);
