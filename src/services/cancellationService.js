@@ -484,7 +484,7 @@ const cancellationService = {
         .populate('client', 'name phoneNumber')
         .populate('service', 'name')
         .populate('employee', 'names')
-        .populate('organizationId', 'name timezone');
+        .populate('organizationId', 'name timezone timeFormat');
 
       const timezone = info.data?.timezone || appointments[0]?.organizationId?.timezone || 'America/Bogota';
       const now = moment.tz(timezone);
@@ -548,6 +548,8 @@ const cancellationService = {
           const clientPhone = first.client?.phoneNumber;
           const clientName = first.client?.name || 'Cliente';
           const orgTz = first.organizationId?.timezone || timezone;
+          const confirmTimeFormat = first.organizationId?.timeFormat || '12h';
+          const confirmTimeFmtStr = confirmTimeFormat === '24h' ? 'HH:mm' : 'hh:mm A';
 
           if (organizationId && clientPhone) {
             // Verificar si el envío está habilitado para clientConfirmationAck
@@ -568,7 +570,7 @@ const cancellationService = {
             // Construir appointments_list para el template
             const appointments_list = confirmedAppointments
               .map((apt, idx) => {
-                const formattedDate = moment(apt.date).tz(orgTz).format('DD/MM/YYYY [a las] hh:mm A');
+                const formattedDate = moment(apt.date).tz(orgTz).format(`DD/MM/YYYY [a las] ${confirmTimeFmtStr}`);
                 return `  ${idx + 1}. ${apt.service} – ${formattedDate}`;
               })
               .join('\n');
@@ -689,8 +691,8 @@ const cancellationService = {
     try {
       const reservation = await Reservation.findById(reservationId)
         .populate('serviceId', 'name')
-        .populate('organizationId', 'name timezone');
-        
+        .populate('organizationId', 'name timezone timeFormat');
+
       if (!reservation) {
         return {
           success: false,
@@ -828,7 +830,7 @@ const cancellationService = {
         .populate('service', 'name')
         .populate('client', 'name phoneNumber')
         .populate('employee', 'names') // ⚠️ El campo es 'names' no 'name'
-        .populate('organizationId', 'name timezone')
+        .populate('organizationId', 'name timezone timeFormat')
         .lean();
 
       console.log(`📋 Encontradas ${appointments.length} citas`);
@@ -867,6 +869,8 @@ const cancellationService = {
       const clientPhone = firstAppointment.client?.phoneNumber;
       const clientName = firstAppointment.client?.name || 'Cliente';
       const timezone = firstAppointment.organizationId?.timezone || 'America/Bogota';
+      const cancelGroupTimeFormat = firstAppointment.organizationId?.timeFormat || '12h';
+      const cancelGroupTimeFmtStr = cancelGroupTimeFormat === '24h' ? 'HH:mm' : 'hh:mm A';
 
       // Preparar datos para el mensaje
       const cancelledAppointments = appointments
@@ -940,7 +944,7 @@ const cancellationService = {
           // Construir appointments_list para el template
           const appointments_list = cancelledAppointments
             .map((apt, index) => {
-              const formattedDate = moment(apt.date).tz(tz).format('DD/MM/YYYY [a las] hh:mm A');
+              const formattedDate = moment(apt.date).tz(tz).format(`DD/MM/YYYY [a las] ${cancelGroupTimeFmtStr}`);
               return `  ${index + 1}. ${apt.service} – ${formattedDate}`;
             })
             .join('\n');
@@ -1138,10 +1142,11 @@ const cancellationService = {
           const client = appointment.client;
           const timezone = org.timezone || 'America/Bogota';
           const organizationId = org._id || org;
-          
+          const singleCancelTimeFmt = (org.timeFormat || '12h') === '24h' ? 'HH:mm' : 'hh:mm A';
+
           // Formatear la cita cancelada
           const appointmentDate = moment.tz(appointment.startDate, timezone);
-          const appointmentsList = `• ${appointment.service?.name || 'Servicio'} - ${appointmentDate.format('DD/MM/YYYY HH:mm')}`;
+          const appointmentsList = `• ${appointment.service?.name || 'Servicio'} - ${appointmentDate.format(`DD/MM/YYYY ${singleCancelTimeFmt}`)}`;
           
           // Usar plantilla personalizada si existe, sino la por defecto
           const message = await whatsappTemplates.getRenderedTemplate(

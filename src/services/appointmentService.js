@@ -43,21 +43,21 @@ function getBogotaTodayWindowUTC(baseDate = new Date()) {
 
 // Helpers de formato (añádelos arriba, cerca de getBogotaTodayWindowUTC)
 // 🔧 FIX: Helpers de formato que aceptan timezone dinámico
-const fmt = (d, tz = "America/Bogota") =>
+const fmt = (d, tz = "America/Bogota", timeFormat = '12h') =>
   new Intl.DateTimeFormat("es-ES", {
     day: "numeric",
     month: "long",
     hour: "2-digit",
     minute: "2-digit",
-    hour12: true,
+    hour12: timeFormat !== '24h',
     timeZone: tz,
   }).format(new Date(d));
 
-const fmtTime = (d, tz = "America/Bogota") =>
+const fmtTime = (d, tz = "America/Bogota", timeFormat = '12h') =>
   new Intl.DateTimeFormat("es-ES", {
     hour: "2-digit",
     minute: "2-digit",
-    hour12: true,
+    hour12: timeFormat !== '24h',
     timeZone: tz,
   }).format(new Date(d));
 
@@ -167,7 +167,7 @@ const appointmentService = {
       month: "long",
       hour: "2-digit",
       minute: "2-digit",
-      hour12: true,
+      hour12: (organization.timeFormat || '12h') !== '24h',
       timeZone: timezone,
     }).format(parsedStartDate);
 
@@ -557,15 +557,16 @@ const appointmentService = {
         const first = allGroupAppointments[0];
         const last = allGroupAppointments[allGroupAppointments.length - 1];
 
+        const orgTimeFormat = org.timeFormat || '12h';
         const dateRange =
           allGroupAppointments.length === 1
-            ? fmt(first.start, timezone)
-            : `${fmt(first.start, timezone)} – ${fmtTime(last.end, timezone)}`;
+            ? fmt(first.start, timezone, orgTimeFormat)
+            : `${fmt(first.start, timezone, orgTimeFormat)} – ${fmtTime(last.end, timezone, orgTimeFormat)}`;
 
         const servicesForMsg = allGroupAppointments.map((c) => ({
           name: c.svc.name,
-          start: fmtTime(c.start, timezone),
-          end: fmtTime(c.end, timezone),
+          start: fmtTime(c.start, timezone, orgTimeFormat),
+          end: fmtTime(c.end, timezone, orgTimeFormat),
         }));
 
         // 🔗 Enlace de confirmación/cancelación ya generado (solo disponible si hubo token en texto plano)
@@ -1127,7 +1128,7 @@ const appointmentService = {
         const fmtHour = new Intl.DateTimeFormat("es-ES", {
           hour: "2-digit",
           minute: "2-digit",
-          hour12: true,
+          hour12: (org.timeFormat || '12h') !== '24h',
           timeZone: timezone,
         });
         const fmtDay = new Intl.DateTimeFormat("es-ES", {
@@ -1532,8 +1533,10 @@ const appointmentService = {
         const client = appointment.client;
         const timezone = org.timezone || 'America/Bogota';
         const orgId = org._id || org;
+        const noShowTimeFormat = org.timeFormat || '12h';
 
         const appointmentDate = moment.tz(appointment.startDate, timezone);
+        const noShowTimeStr = noShowTimeFormat === '24h' ? 'HH:mm' : 'hh:mm A';
 
         const message = await whatsappTemplates.getRenderedTemplate(
           orgId.toString(),
@@ -1541,7 +1544,7 @@ const appointmentService = {
           {
             names: client.name || 'Cliente',
             service: appointment.service?.name || 'Servicio',
-            date: appointmentDate.format('DD/MM/YYYY HH:mm'),
+            date: appointmentDate.format(`DD/MM/YYYY ${noShowTimeStr}`),
             organization: org.name,
           }
         );

@@ -29,7 +29,7 @@ async function _sendRecurringApprovalWhatsApp({ allCreatedAppts, customerDetails
 
   const fmtTime = (d, tz) =>
     new Intl.DateTimeFormat("es-ES", {
-      hour: "2-digit", minute: "2-digit", hour12: true, timeZone: tz,
+      hour: "2-digit", minute: "2-digit", hour12: (org?.timeFormat || '12h') !== '24h', timeZone: tz,
     }).format(new Date(d));
 
   // Agrupar por occurrenceNumber

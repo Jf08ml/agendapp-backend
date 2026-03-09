@@ -17,21 +17,21 @@ import cancellationService from './cancellationService.js';
 import { generateCancellationLink } from '../utils/cancellationUtils.js';
 
 // 📅 Helpers de formato para mensajes
-const fmt = (d, tz = "America/Bogota") =>
+const fmt = (d, tz = "America/Bogota", timeFormat = '12h') =>
   new Intl.DateTimeFormat("es-ES", {
     day: "numeric",
     month: "long",
     hour: "2-digit",
     minute: "2-digit",
-    hour12: true,
+    hour12: timeFormat !== '24h',
     timeZone: tz,
   }).format(d);
 
-const fmtTime = (d, tz = "America/Bogota") =>
+const fmtTime = (d, tz = "America/Bogota", timeFormat = '12h') =>
   new Intl.DateTimeFormat("es-ES", {
     hour: "2-digit",
     minute: "2-digit",
-    hour12: true,
+    hour12: timeFormat !== '24h',
     timeZone: tz,
   }).format(d);
 
@@ -598,10 +598,11 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
             
             // Formatear servicios de esta ocurrencia
             const serviciosTexto = [];
+            const seriesTimeFormat = organization.timeFormat || '12h';
             for (const cita of citasDeOcurrencia) {
               const svc = await serviceService.getServiceById(cita.service);
-              const horaInicio = fmtTime(cita.startDate, timezone);
-              const horaFin = fmtTime(cita.endDate, timezone);
+              const horaInicio = fmtTime(cita.startDate, timezone, seriesTimeFormat);
+              const horaFin = fmtTime(cita.endDate, timezone, seriesTimeFormat);
               serviciosTexto.push(`     • ${svc.name} (${horaInicio} - ${horaFin})`);
             }
             
@@ -683,16 +684,17 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
                   const svc = await serviceService.getServiceById(cita.service);
                   return {
                     name: svc.name,
-                    start: fmtTime(cita.startDate, timezone),
-                    end: fmtTime(cita.endDate, timezone),
+                    start: fmtTime(cita.startDate, timezone, organization.timeFormat || '12h'),
+                    end: fmtTime(cita.endDate, timezone, organization.timeFormat || '12h'),
                   };
                 })
               );
               
+              const firstOccurrenceTimeFmt = organization.timeFormat || '12h';
               const dateRange = primerasCitas.length === 1
-                ? fmt(firstCita.startDate, timezone)
-                : `${fmt(firstCita.startDate, timezone)} – ${fmtTime(lastCita.endDate, timezone)}`;
-              
+                ? fmt(firstCita.startDate, timezone, firstOccurrenceTimeFmt)
+                : `${fmt(firstCita.startDate, timezone, firstOccurrenceTimeFmt)} – ${fmtTime(lastCita.endDate, timezone, firstOccurrenceTimeFmt)}`;
+
               const templateData = {
                 names: clientDoc?.name || 'Estimado cliente',
                 dateRange,
@@ -702,7 +704,7 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
                 employee: employeeDoc?.names || 'Nuestro equipo',
                 cancellationLink: firstCancellationLink,
                 // Para template simple (scheduleAppointment) cuando es 1 sola cita
-                date: fmt(firstCita.startDate, timezone),
+                date: fmt(firstCita.startDate, timezone, firstOccurrenceTimeFmt),
                 service: primerasCitas.length === 1 ? servicesForMsg[0].name : ''
               };
               

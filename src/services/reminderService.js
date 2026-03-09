@@ -98,7 +98,7 @@ export const reminderService = {
       const fmtHour = new Intl.DateTimeFormat("es-ES", {
         hour: "2-digit",
         minute: "2-digit",
-        hour12: true,
+        hour12: (org?.timeFormat || '12h') !== '24h',
         timeZone: timezone,
       });
       const fmtDay = new Intl.DateTimeFormat("es-ES", {
