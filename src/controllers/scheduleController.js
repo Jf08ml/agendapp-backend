@@ -875,6 +875,109 @@ const scheduleController = {
       return sendResponse(res, 500, null, `Error: ${error.message}`);
     }
   },
+
+  /**
+   * Obtener excepciones de horario de un empleado
+   * GET /api/schedule/employee/:employeeId/exceptions
+   */
+  getEmployeeExceptions: async (req, res) => {
+    const { employeeId } = req.params;
+    try {
+      const employee = await employeeModel.findById(employeeId);
+      if (!employee) {
+        return sendResponse(res, 404, null, "Empleado no encontrado");
+      }
+      return sendResponse(res, 200, employee.scheduleExceptions || [], "Excepciones obtenidas exitosamente");
+    } catch (error) {
+      return sendResponse(res, 500, null, `Error: ${error.message}`);
+    }
+  },
+
+  /**
+   * Agregar excepción de horario a un empleado
+   * POST /api/schedule/employee/:employeeId/exceptions
+   */
+  addEmployeeException: async (req, res) => {
+    const { employeeId } = req.params;
+    const { startDate, endDate, allDay, startTime, endTime, reason } = req.body;
+
+    try {
+      if (!startDate || !endDate) {
+        return sendResponse(res, 400, null, "startDate y endDate son requeridos");
+      }
+
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dateRegex.test(startDate) || !dateRegex.test(endDate)) {
+        return sendResponse(res, 400, null, "El formato de fecha debe ser YYYY-MM-DD");
+      }
+
+      if (startDate > endDate) {
+        return sendResponse(res, 400, null, "La fecha de inicio debe ser anterior o igual a la fecha de fin");
+      }
+
+      if (!allDay) {
+        if (!startTime || !endTime) {
+          return sendResponse(res, 400, null, "startTime y endTime son requeridos cuando allDay es false");
+        }
+        const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+        if (!timeRegex.test(startTime) || !timeRegex.test(endTime)) {
+          return sendResponse(res, 400, null, "El formato de hora debe ser HH:mm");
+        }
+        if (scheduleService.timeToMinutes(startTime) >= scheduleService.timeToMinutes(endTime)) {
+          return sendResponse(res, 400, null, "La hora de inicio debe ser anterior a la hora de fin");
+        }
+      }
+
+      const employee = await employeeModel.findById(employeeId);
+      if (!employee) {
+        return sendResponse(res, 404, null, "Empleado no encontrado");
+      }
+
+      const newException = {
+        startDate,
+        endDate,
+        allDay: allDay !== false,
+        ...((!allDay && startTime && endTime) ? { startTime, endTime } : {}),
+        ...(reason ? { reason } : {}),
+        createdAt: new Date(),
+      };
+
+      employee.scheduleExceptions.push(newException);
+      await employee.save();
+
+      return sendResponse(res, 201, employee.scheduleExceptions, "Excepción agregada exitosamente");
+    } catch (error) {
+      return sendResponse(res, 500, null, `Error: ${error.message}`);
+    }
+  },
+
+  /**
+   * Eliminar excepción de horario de un empleado
+   * DELETE /api/schedule/employee/:employeeId/exceptions/:exceptionId
+   */
+  removeEmployeeException: async (req, res) => {
+    const { employeeId, exceptionId } = req.params;
+    try {
+      const employee = await employeeModel.findById(employeeId);
+      if (!employee) {
+        return sendResponse(res, 404, null, "Empleado no encontrado");
+      }
+
+      const initialLength = employee.scheduleExceptions.length;
+      employee.scheduleExceptions = employee.scheduleExceptions.filter(
+        (e) => e._id.toString() !== exceptionId
+      );
+
+      if (employee.scheduleExceptions.length === initialLength) {
+        return sendResponse(res, 404, null, "Excepción no encontrada");
+      }
+
+      await employee.save();
+      return sendResponse(res, 200, employee.scheduleExceptions, "Excepción eliminada exitosamente");
+    } catch (error) {
+      return sendResponse(res, 500, null, `Error: ${error.message}`);
+    }
+  },
 };
 
 export default scheduleController;

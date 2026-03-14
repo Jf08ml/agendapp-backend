@@ -22,5 +22,8 @@ router.get("/organization/:orgId/open-days", verifyToken, scheduleController.get
 router.put("/employee/:employeeId", verifyToken, scheduleController.updateEmployeeSchedule);
 router.get("/employee/:employeeId", verifyToken, scheduleController.getEmployeeSchedule);
 router.get("/employee/:employeeId/available-days", verifyToken, scheduleController.getEmployeeAvailableDays);
+router.get("/employee/:employeeId/exceptions", verifyToken, scheduleController.getEmployeeExceptions);
+router.post("/employee/:employeeId/exceptions", verifyToken, scheduleController.addEmployeeException);
+router.delete("/employee/:employeeId/exceptions/:exceptionId", verifyToken, scheduleController.removeEmployeeException);
 
 export default router;

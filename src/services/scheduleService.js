@@ -133,6 +133,32 @@ function isSlotInBreak(slotStart, durationMinutes, breaks, dayOfWeek = null) {
 }
 
 /**
+ * Obtiene las excepciones de horario de un empleado para una fecha específica
+ * @param {Object} employee - Documento de empleado
+ * @param {string} dateStr - Fecha en formato "YYYY-MM-DD"
+ * @returns {{ blocked: boolean, breaks: Array<{start: string, end: string}> }}
+ */
+function getEmployeeExceptionsForDate(employee, dateStr) {
+  if (!employee.scheduleExceptions || employee.scheduleExceptions.length === 0) {
+    return { blocked: false, breaks: [] };
+  }
+
+  const breaks = [];
+
+  for (const exception of employee.scheduleExceptions) {
+    if (dateStr >= exception.startDate && dateStr <= exception.endDate) {
+      if (exception.allDay) {
+        return { blocked: true, breaks: [] };
+      } else if (exception.startTime && exception.endTime) {
+        breaks.push({ start: exception.startTime, end: exception.endTime });
+      }
+    }
+  }
+
+  return { blocked: false, breaks };
+}
+
+/**
  * Obtiene el horario de la organización para un día específico
  * @param {Object} organization - Documento de organización
  * @param {number} dayOfWeek - Día de la semana (0=Domingo, 6=Sábado)
@@ -307,6 +333,15 @@ function generateAvailableSlots(date, organization, employee = null, durationMin
     if (!empSchedule) return []; // Empleado no disponible
   }
 
+  // Verificar excepciones de horario del empleado para esta fecha (bloqueos temporales)
+  const employeeExceptionBreaks = [];
+  if (employee) {
+    const exceptionDateStr = dateInTz.format('YYYY-MM-DD');
+    const empExceptions = getEmployeeExceptionsForDate(employee, exceptionDateStr);
+    if (empExceptions.blocked) return [];
+    employeeExceptionBreaks.push(...empExceptions.breaks);
+  }
+
   // Determinar el rango de tiempo efectivo
   let effectiveStart = orgSchedule.start;
   let effectiveEnd = orgSchedule.end;
@@ -335,7 +370,12 @@ function generateAvailableSlots(date, organization, employee = null, durationMin
     }
     
     // Combinar breaks
-    effectiveBreaks = [...effectiveBreaks, ...(empSchedule.breaks || [])];
+    effectiveBreaks = [...effectiveBreaks, ...(empSchedule.breaks || []), ...employeeExceptionBreaks];
+  }
+
+  // Si el empleado usa horario de org pero tiene breaks de excepciones, agregarlos
+  if (employeeExceptionBreaks.length > 0 && (!empSchedule || empSchedule.useOrgSchedule)) {
+    effectiveBreaks = [...effectiveBreaks, ...employeeExceptionBreaks];
   }
 
   // Obtener el intervalo de minutos configurado
@@ -531,39 +571,47 @@ function assignBestEmployeeForSlot(opts) {
   const available = candidateEmployees.filter(emp => {
     const empSchedule = getEmployeeDaySchedule(emp, dayOfWeek, organization);
     if (!empSchedule) return false;
-    
+
+    // Verificar excepciones de horario (bloqueos temporales)
+    const empDateStr = moment.tz(date, timezone).format('YYYY-MM-DD');
+    const empExceptions = getEmployeeExceptionsForDate(emp, empDateStr);
+    if (empExceptions.blocked) return false;
+
     const startMin = timeToMinutes(startTime);
     const endMin = startMin + duration;
     const endTime = minutesToTime(endMin);
-    
+
     // Determinar el horario efectivo (considerando org y empleado)
     const orgSchedule = getOrganizationDaySchedule(organization, dayOfWeek);
     if (!orgSchedule) return false;
-    
+
     let effectiveStart = orgSchedule.start;
-let effectiveEnd = orgSchedule.end;
+    let effectiveEnd = orgSchedule.end;
     // 🔧 Solo incluir breaks de organización si NO skipOrgBreaks
     let effectiveBreaks = skipOrgBreaks ? [] : [...(orgSchedule.breaks || [])];
-    
+
     if (!empSchedule.useOrgSchedule) {
       // Calcular intersección
       const empStartMin = timeToMinutes(empSchedule.start);
       const empEndMin = timeToMinutes(empSchedule.end);
       const orgStartMin = timeToMinutes(effectiveStart);
       const orgEndMin = timeToMinutes(effectiveEnd);
-      
+
       effectiveStart = empStartMin > orgStartMin ? empSchedule.start : effectiveStart;
       effectiveEnd = empEndMin < orgEndMin ? empSchedule.end : effectiveEnd;
-      
+
       // Validar intersección válida
       if (timeToMinutes(effectiveStart) >= timeToMinutes(effectiveEnd)) {
         return false;
       }
-      
+
       // Agregar breaks del empleado
       effectiveBreaks = [...effectiveBreaks, ...(empSchedule.breaks || [])];
     }
-    
+
+    // Agregar breaks de excepciones temporales
+    effectiveBreaks = [...effectiveBreaks, ...empExceptions.breaks];
+
     // Verificar que el slot esté dentro del horario efectivo
     // El inicio debe estar dentro del rango (exclusivo del fin)
     // El fin puede coincidir exactamente con el cierre (inclusivo)
@@ -787,7 +835,20 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
           blockValid = false;
           break;
         }
-        
+
+        // Verificar excepciones de horario (bloqueos temporales)
+        const blockDateStr = dateInTz.format('YYYY-MM-DD');
+        const blockExceptions = getEmployeeExceptionsForDate(employee, blockDateStr);
+        if (blockExceptions.blocked) {
+          blockValid = false;
+          break;
+        }
+        // Check if this slot overlaps with any exception break
+        if (blockExceptions.breaks.length > 0 && isSlotInBreak(slotStart, service.duration, blockExceptions.breaks)) {
+          blockValid = false;
+          break;
+        }
+
         // Determinar horario efectivo (intersección org + empleado)
         let effectiveStart = orgSchedule.start;
         let effectiveEnd = orgSchedule.end;

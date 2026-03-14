@@ -39,6 +39,19 @@ const EmployeeDayScheduleSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// Schema para excepciones de horario (bloqueos temporales)
+const ScheduleExceptionSchema = new mongoose.Schema(
+  {
+    startDate: { type: String, required: true }, // "YYYY-MM-DD"
+    endDate: { type: String, required: true },   // "YYYY-MM-DD"
+    allDay: { type: Boolean, default: true },
+    startTime: { type: String },                 // "HH:mm" - solo si !allDay
+    endTime: { type: String },                   // "HH:mm" - solo si !allDay
+    reason: { type: String },
+    createdAt: { type: Date, default: Date.now },
+  }
+);
+
 const employeeModelSchema = new mongoose.Schema({
   names: { type: String, required: true },
   position: { type: String, required: true },
@@ -81,6 +94,11 @@ const employeeModelSchema = new mongoose.Schema({
         ];
       },
     },
+  },
+  // Excepciones de horario (bloqueos temporales para reserva en línea)
+  scheduleExceptions: {
+    type: [ScheduleExceptionSchema],
+    default: [],
   },
 });
 
