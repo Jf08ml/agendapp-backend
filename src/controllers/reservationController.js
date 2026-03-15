@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import moment from 'moment-timezone';
 import serviceModel from "../models/serviceModel.js";
+import reservationModel from "../models/reservationModel.js";
 import notificationService from "../services/notificationService.js";
 import organizationService from "../services/organizationService.js";
 import reservationService from "../services/reservationService.js";
@@ -920,6 +921,9 @@ const reservationController = {
         "Reserva actualizada exitosamente"
       );
     } catch (error) {
+      if (error.code === 'CONCURRENCY_LIMIT_REACHED') {
+        return sendResponse(res, 409, { code: 'CONCURRENCY_LIMIT_REACHED' }, error.message);
+      }
       sendResponse(
         res,
         500,

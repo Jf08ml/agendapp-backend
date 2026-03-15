@@ -8,6 +8,7 @@ import organizationModel from "../models/organizationModel.js";
 import employeeModel from "../models/employeeModel.js";
 import appointmentModel from "../models/appointmentModel.js";
 import serviceModel from "../models/serviceModel.js";
+import reservationModel from "../models/reservationModel.js";
 import scheduleService from "../services/scheduleService.js";
 import sendResponse from "../utils/sendResponse.js";
 
@@ -687,6 +688,7 @@ const scheduleController = {
         startDate: { $gte: minDate, $lte: maxDate },
         status: { $nin: ['cancelled_by_customer', 'cancelled_by_admin'] } // ✅ Excluir canceladas
       });
+
       
       // Procesar cada solicitud
       const results = [];
@@ -698,15 +700,15 @@ const scheduleController = {
         const endOfDay = moment.tz(request.date, timezone).endOf('day').toDate();
         
         // Filtrar citas del día
-        const dayAppointments = appointments.filter(a => 
+        const dayAppointments = appointments.filter(a =>
           a.startDate >= startOfDay && a.startDate <= endOfDay
         );
-        
+
         let slots = [];
-        
+
         const key = `${request.date}_${request.serviceId}`;
         const eligibleEmployees = employeesByDay.get(key) || [];
-        
+
         if (eligibleEmployees.length === 0) {
           // No hay empleados disponibles ese día
           results.push({
@@ -717,7 +719,7 @@ const scheduleController = {
           });
           continue;
         }
-        
+
         if (request.employeeId) {
           // Empleado específico
           const employee = eligibleEmployees.find(e => e._id.toString() === request.employeeId);
@@ -750,7 +752,7 @@ const scheduleController = {
             );
             generatedSlots.filter(s => s.available).forEach(s => timeSet.add(s.time));
           }
-          
+
           slots = Array.from(timeSet).sort();
         }
         

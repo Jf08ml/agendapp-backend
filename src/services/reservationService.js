@@ -85,6 +85,40 @@ async function _sendRecurringApprovalWhatsApp({ allCreatedAppts, customerDetails
   console.log(`✅ WhatsApp recurrente enviado al aprobar: ${Object.keys(citasPorOcurrencia).length} ocurrencias`);
 }
 
+/**
+ * Verifica que el slot de una reserva no supere la concurrencia máxima del servicio.
+ * Lanza error si ya está lleno — debe llamarse antes de crear la cita al aprobar.
+ * @param {Object} reservation - Reserva populada (serviceId debe ser el doc completo)
+ */
+async function assertConcurrencyNotExceeded(reservation) {
+  const serviceObj = typeof reservation.serviceId === 'object' ? reservation.serviceId : null;
+  if (!serviceObj?._id) return;
+
+  const maxConcurrent = serviceObj.maxConcurrentAppointments ?? 1;
+  if (maxConcurrent <= 1) return; // Servicio sin concurrencia — no aplica
+
+  const orgId = reservation.organizationId._id || reservation.organizationId;
+  const startDate = reservation.startDate;
+  const endDate = new Date(startDate.getTime() + serviceObj.duration * 60 * 1000);
+
+  const count = await Appointment.countDocuments({
+    organizationId: orgId,
+    service: serviceObj._id,
+    startDate: { $lt: endDate },
+    endDate: { $gt: startDate },
+    status: { $nin: ['cancelled', 'cancelled_by_customer', 'cancelled_by_admin'] },
+  });
+
+  if (count >= maxConcurrent) {
+    const timeStr = moment(startDate).format('HH:mm');
+    const err = new Error(
+      `El horario ${timeStr} ya tiene ${count}/${maxConcurrent} cita(s) para "${serviceObj.name}".`
+    );
+    err.code = 'CONCURRENCY_LIMIT_REACHED';
+    throw err;
+  }
+}
+
 const reservationService = {
   // Crear una nueva reserva
   createReservation: async (reservationData, session = null) => {
@@ -136,6 +170,7 @@ const reservationService = {
 
       const nextStatus = updateData.status;
       const skipNotification = updateData.skipNotification || false;
+      const forceApprove = updateData.forceApprove || false;
 
       // Solo crear cita vía batch si pasa a "approved" y no hay appointment aún
       const mustCreateAppointment =
@@ -198,6 +233,13 @@ const reservationService = {
               for (const dateKey of sortedDates) {
                 occurrenceNumber++;
                 const dateReservations = byDate[dateKey];
+
+                // ✅ Verificar concurrencia para cada reserva de esta ocurrencia (omitir si forceApprove)
+                if (!forceApprove) {
+                  for (const r of dateReservations) {
+                    await assertConcurrencyNotExceeded(r);
+                  }
+                }
 
                 const services = dateReservations.map(r => {
                   const sObj = typeof r.serviceId === "object" ? r.serviceId : null;
@@ -267,6 +309,13 @@ const reservationService = {
             }
 
             // 📦 NO RECURRENTE: crear todas las citas en un solo batch (lógica original)
+            // ✅ Verificar concurrencia para cada reserva del grupo (omitir si forceApprove)
+            if (!forceApprove) {
+              for (const r of needAppointment) {
+                await assertConcurrencyNotExceeded(r);
+              }
+            }
+
             const services = needAppointment.map(r => {
               const sObj = typeof r.serviceId === "object" ? r.serviceId : null;
               return sObj?._id || r.serviceId;
@@ -339,6 +388,11 @@ const reservationService = {
           throw new Error("La reserva no tiene una fecha de inicio válida");
         }
 
+        // ✅ Verificar que el slot no supere la concurrencia máxima (omitir si forceApprove)
+        if (!forceApprove) {
+          await assertConcurrencyNotExceeded(reservation);
+        }
+
         const createdAppts = await appointmentService.createAppointmentsBatch({
           services: [serviceObj._id || serviceId],
           employee: employeeId?._id || employeeId || null,
@@ -358,8 +412,8 @@ const reservationService = {
         }
       }
 
-      // Eliminar skipNotification antes de asignar a la reserva
-      const { skipNotification: _skip, ...dataToSave } = updateData;
+      // Eliminar skipNotification y forceApprove antes de asignar a la reserva
+      const { skipNotification: _skip, forceApprove: _force, ...dataToSave } = updateData;
       Object.assign(reservation, dataToSave);
 
       // Si se aprobó exitosamente, limpiar el errorMessage
