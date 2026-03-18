@@ -473,7 +473,10 @@ const appointmentController = {
     try {
       const { appointmentId } = req.params;
       const { status, notifyClient } = req.body;
-      const organizationId = req.organization._id;
+      const organizationId = req.organization?._id || req.user?.organizationId;
+      if (!organizationId) {
+        return sendResponse(res, 400, null, "No se pudo determinar la organización.");
+      }
 
       const appointment = await appointmentService.markAttendance(
         appointmentId,

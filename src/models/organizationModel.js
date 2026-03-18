@@ -159,21 +159,20 @@ const organizationSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
-  referredCount: {
-    type: Number,
-    default: 0,
+  // Legacy — mantenidos para compatibilidad con datos anteriores
+  referredCount: { type: Number, default: 0 },
+  referredReward: { type: String, required: false },
+  serviceCount: { type: Number, default: 0 },
+  serviceReward: { type: String, required: false },
+
+  // Sistema de niveles de fidelidad (reemplaza los campos legacy)
+  serviceTiers: {
+    type: [{ threshold: { type: Number, required: true }, reward: { type: String, required: true } }],
+    default: [],
   },
-  referredReward: {
-    type: String,
-    required: false,
-  },
-  serviceCount: {
-    type: Number,
-    default: 0,
-  },
-  serviceReward: {
-    type: String,
-    required: false,
+  referralTiers: {
+    type: [{ threshold: { type: Number, required: true }, reward: { type: String, required: true } }],
+    default: [],
   },
   // DEPRECATED: Mantener para compatibilidad
   openingHours: {

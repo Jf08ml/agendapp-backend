@@ -208,84 +208,71 @@ const clientService = {
       throw new Error("Cliente no encontrado");
     }
 
-    const serviceCount = organization?.serviceCount || 7;
-    const serviceReward = organization?.serviceReward || "Descuento especial por servicios";
+    // Usar tiers nuevos; fallback a campo legacy si no hay tiers configurados
+    const serviceTiers = organization?.serviceTiers?.length > 0
+      ? organization.serviceTiers
+      : (organization?.serviceCount > 0
+          ? [{ threshold: organization.serviceCount, reward: organization.serviceReward || "Descuento especial" }]
+          : []);
 
-    const { rewardEarned, rewardDetails } = await client.incrementServices(serviceCount, serviceReward);
+    const { rewardEarned, earnedRewards } = await client.incrementServices(serviceTiers);
 
-    // Enviar WhatsApp de felicitación si se ganó una recompensa
     if (rewardEarned && client.phone_e164 && organization) {
-      try {
-        const whatsappDoc = await WhatsappTemplate.findOne({ organizationId: organization._id });
-        const isEnabled = whatsappDoc?.enabledTypes?.loyaltyServiceReward !== false;
-        if (isEnabled) {
-          const msg = await whatsappTemplates.getRenderedTemplate(
-            organization._id.toString(),
-            'loyaltyServiceReward',
-            { names: client.name, reward: rewardDetails, organization: organization.name }
-          );
-          await whatsappService.sendMessage(organization._id.toString(), client.phone_e164, msg);
-          console.log(`[registerService] WA de recompensa enviado a ${client.name}`);
+      for (const earned of earnedRewards) {
+        try {
+          const whatsappDoc = await WhatsappTemplate.findOne({ organizationId: organization._id });
+          const isEnabled = whatsappDoc?.enabledTypes?.loyaltyServiceReward !== false;
+          if (isEnabled) {
+            const msg = await whatsappTemplates.getRenderedTemplate(
+              organization._id.toString(),
+              'loyaltyServiceReward',
+              { names: client.name, reward: earned.reward, organization: organization.name }
+            );
+            await whatsappService.sendMessage(organization._id.toString(), client.phone_e164, msg);
+            console.log(`[registerService] WA de recompensa enviado a ${client.name}: ${earned.reward}`);
+          }
+        } catch (waError) {
+          console.error('[registerService] Error enviando WA de recompensa:', waError.message);
         }
-      } catch (waError) {
-        console.error('[registerService] Error enviando WA de recompensa:', waError.message);
-        // No falla el registro si el WA falla
       }
     }
 
     return client;
   },
 
-  // Registrar un referido para un cliente
+  // Registrar un referido para un cliente (independiente del contador de servicios)
   registerReferral: async (id, organization) => {
     const client = await Client.findById(id);
     if (!client) {
       throw new Error("Cliente no encontrado");
     }
 
-    const referredCount = organization?.referredCount || 5;
-    const referredReward = organization?.referredReward || "Beneficio especial por referidos";
-    const serviceCount = organization?.serviceCount || 7;
-    const serviceReward = organization?.serviceReward || "Descuento especial por servicios";
+    // Usar tiers nuevos; fallback a campo legacy si no hay tiers configurados
+    const referralTiers = organization?.referralTiers?.length > 0
+      ? organization.referralTiers
+      : (organization?.referredCount > 0
+          ? [{ threshold: organization.referredCount, reward: organization.referredReward || "Beneficio especial" }]
+          : []);
 
-    const { referralRewardEarned, referralRewardDetails, serviceRewardEarned, serviceRewardDetails } =
-      await client.incrementReferrals(referredCount, referredReward, serviceCount, serviceReward);
+    const { rewardEarned, earnedRewards } = await client.incrementReferrals(referralTiers);
 
-    // Enviar WA de felicitación por referidos
-    if (referralRewardEarned && client.phone_e164 && organization) {
-      try {
-        const whatsappDoc = await WhatsappTemplate.findOne({ organizationId: organization._id });
-        const isEnabled = whatsappDoc?.enabledTypes?.loyaltyReferralReward !== false;
-        if (isEnabled) {
-          const msg = await whatsappTemplates.getRenderedTemplate(
-            organization._id.toString(),
-            'loyaltyReferralReward',
-            { names: client.name, reward: referralRewardDetails, organization: organization.name }
-          );
-          await whatsappService.sendMessage(organization._id.toString(), client.phone_e164, msg);
-          console.log(`[registerReferral] WA de recompensa de referido enviado a ${client.name}`);
+    if (rewardEarned && client.phone_e164 && organization) {
+      for (const earned of earnedRewards) {
+        try {
+          const whatsappDoc = await WhatsappTemplate.findOne({ organizationId: organization._id });
+          const isEnabled = whatsappDoc?.enabledTypes?.loyaltyReferralReward !== false;
+          if (isEnabled) {
+            const msg = await whatsappTemplates.getRenderedTemplate(
+              organization._id.toString(),
+              'loyaltyReferralReward',
+              { names: client.name, reward: earned.reward, organization: organization.name }
+            );
+            await whatsappService.sendMessage(organization._id.toString(), client.phone_e164, msg);
+            console.log(`[registerReferral] WA de recompensa enviado a ${client.name}: ${earned.reward}`);
+          }
+        } catch (waError) {
+          console.error('[registerReferral] Error enviando WA de recompensa:', waError.message);
         }
-      } catch (waError) {
-        console.error('[registerReferral] Error enviando WA de recompensa de referido:', waError.message);
-      }
-    }
-
-    // También enviar WA si se ganó recompensa de servicios al mismo tiempo
-    if (serviceRewardEarned && client.phone_e164 && organization) {
-      try {
-        const whatsappDoc = await WhatsappTemplate.findOne({ organizationId: organization._id });
-        const isEnabled = whatsappDoc?.enabledTypes?.loyaltyServiceReward !== false;
-        if (isEnabled) {
-          const msg = await whatsappTemplates.getRenderedTemplate(
-            organization._id.toString(),
-            'loyaltyServiceReward',
-            { names: client.name, reward: serviceRewardDetails, organization: organization.name }
-          );
-          await whatsappService.sendMessage(organization._id.toString(), client.phone_e164, msg);
-          console.log(`[registerReferral] WA de recompensa de servicio enviado a ${client.name}`);
-        }
-      } catch (waError) {
-        console.error('[registerReferral] Error enviando WA de recompensa de servicio:', waError.message);
       }
     }
 

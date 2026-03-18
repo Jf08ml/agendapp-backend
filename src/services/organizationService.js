@@ -129,6 +129,8 @@ const organizationService = {
       referredReward,
       serviceCount,
       serviceReward,
+      serviceTiers,
+      referralTiers,
       openingHours,
       weeklySchedule,
       plan,
@@ -195,6 +197,10 @@ const organizationService = {
       serviceCount !== undefined ? serviceCount : organization.serviceCount;
     organization.serviceReward =
       serviceReward !== undefined ? serviceReward : organization.serviceReward;
+    organization.serviceTiers =
+      serviceTiers !== undefined ? serviceTiers : organization.serviceTiers;
+    organization.referralTiers =
+      referralTiers !== undefined ? referralTiers : organization.referralTiers;
     if (openingHours !== undefined) {
       organization.openingHours = {
         ...(organization.openingHours?.toObject?.() ??

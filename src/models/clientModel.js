@@ -91,81 +91,72 @@ clientSchema.index(
   }
 );
 
-// Método para incrementar los servicios tomados
-// Recibe los umbrales configurados por la organización
-clientSchema.methods.incrementServices = async function (serviceCount = 7, serviceReward = "Descuento especial por servicios") {
+// Incrementa servicios tomados y evalúa los niveles (tiers) configurados.
+// tiers: [{ threshold: Number, reward: String }]
+// Al cruzar el umbral exacto de un nivel se otorga esa recompensa.
+// Al alcanzar el nivel máximo el contador se reinicia a 0 (ciclo repetible).
+clientSchema.methods.incrementServices = async function (tiers = []) {
   this.servicesTaken += 1;
 
-  let rewardEarned = false;
-  let rewardDetails = "";
+  const sortedTiers = [...tiers].sort((a, b) => a.threshold - b.threshold);
+  const maxThreshold = sortedTiers[sortedTiers.length - 1]?.threshold ?? 0;
+  const earnedRewards = [];
 
-  if (this.servicesTaken >= serviceCount) {
-    rewardDetails = serviceReward || "Descuento especial por servicios";
+  for (const tier of sortedTiers) {
+    if (this.servicesTaken === tier.threshold) {
+      this.rewardHistory.push({ type: "service", reward: tier.reward, earnedAt: new Date() });
+      earnedRewards.push(tier);
+    }
+  }
+
+  const lastEarned = earnedRewards[earnedRewards.length - 1];
+  if (lastEarned) {
     this.hasServiceDiscount = true;
-    this.serviceDiscountDetails = rewardDetails;
-    this.rewardHistory.push({
-      type: "service",
-      reward: rewardDetails,
-      earnedAt: new Date(),
-    });
-    this.servicesTaken = 0; // Reiniciar el conteo a 0 para el próximo ciclo
-    rewardEarned = true;
+    this.serviceDiscountDetails = lastEarned.reward;
   } else {
     this.hasServiceDiscount = false;
     this.serviceDiscountDetails = "";
   }
 
+  if (maxThreshold > 0 && this.servicesTaken >= maxThreshold) {
+    this.servicesTaken = 0;
+  }
+
   await this.save();
-  return { rewardEarned, rewardDetails };
+  return { rewardEarned: earnedRewards.length > 0, earnedRewards };
 };
 
-// Método para incrementar los referidos realizados
-// Recibe los umbrales configurados por la organización
-clientSchema.methods.incrementReferrals = async function (referredCount = 5, referredReward = "Beneficio especial por referidos", serviceCount = 7, serviceReward = "Descuento especial por servicios") {
+// Incrementa referidos realizados y evalúa los niveles de referidos.
+// Servicios y referidos son tracks completamente independientes.
+clientSchema.methods.incrementReferrals = async function (tiers = []) {
   this.referralsMade += 1;
-  this.servicesTaken += 1; // Cada referido cuenta también como un servicio
 
-  let referralRewardEarned = false;
-  let referralRewardDetails = "";
-  let serviceRewardEarned = false;
-  let serviceRewardDetails = "";
+  const sortedTiers = [...tiers].sort((a, b) => a.threshold - b.threshold);
+  const maxThreshold = sortedTiers[sortedTiers.length - 1]?.threshold ?? 0;
+  const earnedRewards = [];
 
-  // Verificar umbral de referidos
-  if (this.referralsMade >= referredCount) {
-    referralRewardDetails = referredReward || "Beneficio especial por referidos";
+  for (const tier of sortedTiers) {
+    if (this.referralsMade === tier.threshold) {
+      this.rewardHistory.push({ type: "referral", reward: tier.reward, earnedAt: new Date() });
+      earnedRewards.push(tier);
+    }
+  }
+
+  const lastEarned = earnedRewards[earnedRewards.length - 1];
+  if (lastEarned) {
     this.hasReferralBenefit = true;
-    this.referralBenefitDetails = referralRewardDetails;
-    this.rewardHistory.push({
-      type: "referral",
-      reward: referralRewardDetails,
-      earnedAt: new Date(),
-    });
-    this.referralsMade = 0; // Reiniciar conteo a 0
-    referralRewardEarned = true;
+    this.referralBenefitDetails = lastEarned.reward;
   } else {
     this.hasReferralBenefit = false;
     this.referralBenefitDetails = "";
   }
 
-  // También revisar si los servicios tomados alcanzan el umbral configurado
-  if (this.servicesTaken >= serviceCount) {
-    serviceRewardDetails = serviceReward || "Descuento especial por servicios";
-    this.hasServiceDiscount = true;
-    this.serviceDiscountDetails = serviceRewardDetails;
-    this.rewardHistory.push({
-      type: "service",
-      reward: serviceRewardDetails,
-      earnedAt: new Date(),
-    });
-    this.servicesTaken = 0;
-    serviceRewardEarned = true;
-  } else {
-    this.hasServiceDiscount = false;
-    this.serviceDiscountDetails = "";
+  if (maxThreshold > 0 && this.referralsMade >= maxThreshold) {
+    this.referralsMade = 0;
   }
 
   await this.save();
-  return { referralRewardEarned, referralRewardDetails, serviceRewardEarned, serviceRewardDetails };
+  return { rewardEarned: earnedRewards.length > 0, earnedRewards };
 };
 
 const Client = mongoose.model("Client", clientSchema);
