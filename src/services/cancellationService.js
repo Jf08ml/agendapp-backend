@@ -270,8 +270,8 @@ const cancellationService = {
       }
 
       if (reservation) {
-        // Verificar si ya está cancelada
-        if (reservation.status.includes('cancelled')) {
+        // Verificar si ya está cancelada o su cita fue eliminada
+        if (reservation.status.includes('cancelled') || reservation.status === 'appointment_deleted') {
           return {
             valid: false,
             reason: 'Esta reserva ya ha sido cancelada',
