@@ -799,6 +799,25 @@ const cancellationService = {
         }
       }
 
+      // 🔗 Sincronizar reserva vinculada
+      try {
+        await Reservation.updateMany(
+          {
+            appointmentId: appointment._id,
+            status: { $nin: ['cancelled_by_customer', 'cancelled_by_admin'] },
+          },
+          {
+            $set: {
+              status: 'cancelled_by_customer',
+              cancelledAt: new Date(),
+              cancelledBy: 'customer',
+            },
+          }
+        );
+      } catch (resErr) {
+        console.error(`⚠️ Error sincronizando reserva tras cancelación de cita:`, resErr.message);
+      }
+
       return {
         success: true,
         message: 'Cita cancelada exitosamente',

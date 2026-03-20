@@ -33,7 +33,7 @@ const reservationSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "approved", "rejected", "auto_approved", "cancelled_by_customer", "cancelled_by_admin"],
+      enum: ["pending", "approved", "rejected", "auto_approved", "cancelled_by_customer", "cancelled_by_admin", "appointment_deleted"],
       default: "pending",
     },
     auto: {

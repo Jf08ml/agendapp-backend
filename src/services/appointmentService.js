@@ -982,10 +982,13 @@ const appointmentService = {
       throw new Error("Cita no encontrada");
     }
 
-    // Desvincular la reserva asociada para evitar referencias huérfanas
+    // Reflejar eliminación en la reserva vinculada
     await Reservation.updateMany(
       { appointmentId: appointment._id },
-      { $unset: { appointmentId: "" }, $set: { status: "pending" } }
+      {
+        $unset: { appointmentId: "" },
+        $set: { status: "appointment_deleted", cancelledAt: new Date(), cancelledBy: "admin" },
+      }
     );
 
     await appointment.deleteOne();
