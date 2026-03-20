@@ -6,15 +6,16 @@ const expenseController = {
   createExpense: async (req, res) => {
     try {
       if (!req.organization) return sendResponse(res, 400, null, "Organización no identificada");
-      const { concept, amount, category, date } = req.body;
+      const { concept, amount, category, date, type } = req.body;
       const expense = await Expense.create({
         organizationId: req.organization._id,
         concept,
         amount,
         category: category || "",
         date: date || new Date(),
+        type: type === "income" ? "income" : "expense",
       });
-      sendResponse(res, 201, expense, "Gasto registrado exitosamente");
+      sendResponse(res, 201, expense, type === "income" ? "Ingreso registrado exitosamente" : "Gasto registrado exitosamente");
     } catch (error) {
       sendResponse(res, 500, null, error.message);
     }

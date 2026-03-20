@@ -27,6 +27,11 @@ const expenseSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    type: {
+      type: String,
+      enum: ["expense", "income"],
+      default: "expense",
+    },
     registeredBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Employee",
