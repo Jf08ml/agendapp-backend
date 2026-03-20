@@ -8,7 +8,7 @@ const MAIN_DOMAIN = "agenditapp.com";
  * @returns {string} URL completa de cancelación
  */
 export const generateCancellationLink = (token, organization, source = 'confirmation') => {
-  let baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  let baseUrl = process.env.FRONTEND_BASE_URL || 'http://localhost:5173';
 
   if (organization) {
     // 1. Dominio custom configurado → usarlo

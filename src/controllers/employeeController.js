@@ -1,5 +1,6 @@
 import employeeService from "../services/employeeService.js";
 import sendResponse from "../utils/sendResponse.js";
+import { auditLogService } from "../services/auditLogService.js";
 
 const employeeController = {
   // Controlador para crear un nuevo empleado
@@ -87,7 +88,21 @@ const employeeController = {
   deleteEmployee: async (req, res) => {
     const { id } = req.params;
     try {
+      const employeeData = await employeeService.getEmployeeById(id);
       const result = await employeeService.deleteEmployee(id);
+
+      // 📋 Audit log
+      await auditLogService.log({
+        organizationId: employeeData.organizationId,
+        action: "delete_employee",
+        entityType: "employee",
+        entityId: id,
+        entitySnapshot: auditLogService.snapshotEmployee(employeeData),
+        performedById: req.user?._id || req.user?.id || null,
+        performedByName: req.user?.name || req.user?.email || "Admin",
+        performedByRole: req.user?.role || null,
+      });
+
       sendResponse(res, 200, null, result.message);
     } catch (error) {
       sendResponse(res, 404, null, error.message);

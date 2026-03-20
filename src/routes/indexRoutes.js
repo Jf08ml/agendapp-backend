@@ -31,6 +31,7 @@ import paymentRoutes from "./paymentRoutes.js";
 import expenseRoutes from "./expenseRoutes.js";
 import registrationRoutes from "./registrationRoutes.js";
 import adminRoutes from "./adminRoutes.js";
+import auditLogRoutes from "./auditLog.js";
 import membershipService from "../services/membershipService.js";
 import { organizationResolver } from "../middleware/organizationResolver";
 import { verifyToken } from "../middleware/authMiddleware.js";
@@ -149,5 +150,6 @@ router.use("/wa", verifyToken, requireActiveMembership, waRoutes);
 router.use("/reminders", verifyToken, requireActiveMembership, reminderRoutes);
 router.use("/campaigns", verifyToken, requireActiveMembership, campaignRoutes);
 router.use("/expenses", organizationResolver, verifyToken, requireActiveMembership, expenseRoutes);
+router.use("/audit-logs", organizationResolver, verifyToken, auditLogRoutes);
 
 export default router;

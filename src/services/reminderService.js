@@ -42,13 +42,13 @@ export const reminderService = {
       ({ dayStartUTC, dayEndUTC } = getBogotaDayWindowUTC(targetDate));
     }
 
-    // 1) Traer citas de ese día aún no notificadas (excluir canceladas)
+    // 1) Traer citas de ese día aún no notificadas (solo activas: pending y confirmed)
     const appointments = await appointmentModel
       .find({
         ...(orgId ? { organizationId: orgId } : {}),
         startDate: { $gte: dayStartUTC, $lt: dayEndUTC },
         reminderSent: false,
-        status: { $nin: ['cancelled', 'cancelled_by_customer', 'cancelled_by_admin'] },
+        status: { $in: ['pending', 'confirmed'] },
       })
       .populate("client service employee organizationId");
 

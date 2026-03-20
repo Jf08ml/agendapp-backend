@@ -16,6 +16,7 @@ import whatsappTemplates from "../utils/whatsappTemplates.js";
 import { waIntegrationService } from "../services/waIntegrationService.js";
 import { generateCancellationLink } from "../utils/cancellationUtils.js";
 import appointmentSeriesService from "../services/appointmentSeriesService.js";
+import { auditLogService } from "../services/auditLogService.js";
 
 // ---------------------- helpers de notificación ----------------------
 async function notifyNewBooking(org, customerDetails, { isAuto, multi }) {
@@ -1027,7 +1028,31 @@ const reservationController = {
     const { id } = req.params;
     const deleteAppointments = req.query.deleteAppointments === "true";
     try {
+      const reservationData = await reservationService.getReservationById(id);
       const result = await reservationService.deleteReservation(id, { deleteAppointments });
+
+      // 📋 Audit log
+      if (reservationData) {
+        const orgId = reservationData.organizationId?._id || reservationData.organizationId;
+        await auditLogService.log({
+          organizationId: orgId,
+          action: deleteAppointments ? "delete_reservation_with_appointment" : "delete_reservation",
+          entityType: "reservation",
+          entityId: id,
+          entitySnapshot: auditLogService.snapshotReservation(reservationData),
+          performedById: req.user?._id || req.user?.id || null,
+          performedByName: req.user?.name || req.user?.email || "Admin",
+          performedByRole: req.user?.role || null,
+          metadata: {
+            deleteAppointments,
+            deletedCount: result?.deletedCount,
+            wasGroup: result?.wasGroup,
+            groupId: result?.groupId,
+            deletedAppointments: result?.deletedAppointments,
+          },
+        });
+      }
+
       sendResponse(res, 200, result, "Reserva eliminada exitosamente");
     } catch (error) {
       sendResponse(res, 500, null, `Error al eliminar la reserva: ${error.message}`);

@@ -4,6 +4,7 @@ import cancellationService from "../services/cancellationService.js";
 import organizationService from "../services/organizationService.js";
 import subscriptionService from "../services/subscriptionService.js";
 import sendResponse from "../utils/sendResponse.js";
+import { auditLogService } from "../services/auditLogService.js";
 
 const appointmentController = {
   // Controlador para crear una nueva cita
@@ -265,6 +266,18 @@ const appointmentController = {
       const organization = await organizationService.getOrganizationById(
         appointmentData.organizationId
       );
+
+      // 📋 Audit log
+      await auditLogService.log({
+        organizationId: appointmentData.organizationId,
+        action: "delete_appointment",
+        entityType: "appointment",
+        entityId: id,
+        entitySnapshot: auditLogService.snapshotAppointment(appointmentData),
+        performedById: req.user?._id || req.user?.id || null,
+        performedByName: req.user?.name || req.user?.email || "Admin",
+        performedByRole: req.user?.role || null,
+      });
 
       const notify = {
         title: "Cita eliminada",

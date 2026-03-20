@@ -98,21 +98,27 @@ async function assertConcurrencyNotExceeded(reservation) {
   if (maxConcurrent <= 1) return; // Servicio sin concurrencia — no aplica
 
   const orgId = reservation.organizationId._id || reservation.organizationId;
+  const employeeId = reservation.employeeId?._id || reservation.employeeId;
   const startDate = reservation.startDate;
   const endDate = new Date(startDate.getTime() + serviceObj.duration * 60 * 1000);
 
-  const count = await Appointment.countDocuments({
+  const query = {
     organizationId: orgId,
-    service: serviceObj._id,
     startDate: { $lt: endDate },
     endDate: { $gt: startDate },
-    status: { $nin: ['cancelled', 'cancelled_by_customer', 'cancelled_by_admin'] },
-  });
+    status: { $in: ['pending', 'confirmed'] },
+  };
+
+  if (employeeId) {
+    query.employee = employeeId;
+  }
+
+  const count = await Appointment.countDocuments(query);
 
   if (count >= maxConcurrent) {
     const timeStr = moment(startDate).format('HH:mm');
     const err = new Error(
-      `El horario ${timeStr} ya tiene ${count}/${maxConcurrent} cita(s) para "${serviceObj.name}".`
+      `El horario ${timeStr} ya tiene ${count}/${maxConcurrent} cita(s) para este profesional.`
     );
     err.code = 'CONCURRENCY_LIMIT_REACHED';
     throw err;
@@ -367,6 +373,8 @@ const reservationService = {
               }
             );
 
+            // Re-lanzar errores con código conocido (ej: CONCURRENCY_LIMIT_REACHED) sin envolver
+            if (error.code) throw error;
             // Lanzar error con mensaje específico
             throw new Error(
               `No se pudieron crear las citas del grupo: ${error.message}. Todas las reservas del grupo se revirtieron a "pendiente".`
@@ -435,6 +443,8 @@ const reservationService = {
           "No se pudo crear la cita porque el empleado tiene citas que se cruzan en ese horario."
         );
       }
+      // Re-lanzar errores con código conocido sin envolver (preserva error.code)
+      if (error.code) throw error;
       console.error("Error actualizando la reserva:", error.message);
       throw new Error(`No se pudo actualizar la reserva: ${error.message}`);
     }

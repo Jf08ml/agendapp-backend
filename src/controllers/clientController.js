@@ -1,6 +1,7 @@
 import appointmentService from "../services/appointmentService.js";
 import clientService from "../services/clientService.js";
 import sendResponse from "../utils/sendResponse.js";
+import { auditLogService } from "../services/auditLogService.js";
 
 const clientController = {
   // Controlador para crear un nuevo cliente
@@ -113,7 +114,21 @@ const clientController = {
       );
     }
     try {
+      const clientData = await clientService.getClientById(id);
       const result = await clientService.deleteClient(id);
+
+      // 📋 Audit log
+      await auditLogService.log({
+        organizationId: clientData.organizationId,
+        action: "delete_client",
+        entityType: "client",
+        entityId: id,
+        entitySnapshot: auditLogService.snapshotClient(clientData),
+        performedById: req.user?._id || req.user?.id || null,
+        performedByName: req.user?.name || req.user?.email || "Admin",
+        performedByRole: req.user?.role || null,
+      });
+
       sendResponse(res, 200, null, clientHaveAppointments);
     } catch (error) {
       sendResponse(res, 404, null, error.message);
@@ -178,7 +193,22 @@ const clientController = {
   forceDeleteClient: async (req, res) => {
     const { id } = req.params;
     try {
+      const clientData = await clientService.getClientById(id);
       await clientService.forceDeleteClient(id);
+
+      // 📋 Audit log
+      await auditLogService.log({
+        organizationId: clientData.organizationId,
+        action: "force_delete_client",
+        entityType: "client",
+        entityId: id,
+        entitySnapshot: auditLogService.snapshotClient(clientData),
+        performedById: req.user?._id || req.user?.id || null,
+        performedByName: req.user?.name || req.user?.email || "Admin",
+        performedByRole: req.user?.role || null,
+        metadata: { forced: true },
+      });
+
       sendResponse(res, 200, null, "Cliente eliminado con todos sus registros");
     } catch (error) {
       sendResponse(res, 404, null, error.message);

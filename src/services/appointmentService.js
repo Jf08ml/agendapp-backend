@@ -1,4 +1,5 @@
 import appointmentModel from "../models/appointmentModel.js";
+import Reservation from "../models/reservationModel.js";
 import organizationService from "./organizationService.js";
 import membershipService from "./membershipService.js";
 import serviceService from "./serviceService.js";
@@ -405,7 +406,7 @@ const appointmentService = {
           status: { $nin: ['cancelled_by_admin', 'cancelled_by_customer', 'cancelled', 'rejected', 'attended', 'no_show'] },
           startDate: { $lt: serviceEnd },
           endDate: { $gt: currentStart },
-        });
+        }, { session }); // 🔒 Usar sesión para ver citas creadas en esta misma transacción
 
         // 👥 Verificar límite de citas simultáneas configurado en el servicio
         const maxConcurrent = svc.maxConcurrentAppointments ?? 1;
@@ -980,6 +981,12 @@ const appointmentService = {
     if (!appointment) {
       throw new Error("Cita no encontrada");
     }
+
+    // Desvincular la reserva asociada para evitar referencias huérfanas
+    await Reservation.updateMany(
+      { appointmentId: appointment._id },
+      { $unset: { appointmentId: "" }, $set: { status: "pending" } }
+    );
 
     await appointment.deleteOne();
     return { message: "Cita eliminada correctamente" };
