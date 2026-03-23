@@ -1256,6 +1256,24 @@ const appointmentService = {
           const templateDoc = await WhatsappTemplate.findOne({ organizationId: org._id });
           const messageTpl = templateDoc?.[templateType] || whatsappTemplates.getDefaultTemplate(templateType);
 
+          // Marcar citas ANTES de enviar para evitar duplicados por race condition
+          // (dos ejecuciones del cron solapadas o fallo de escritura post-envío)
+          let markedCount = 0;
+          if (includedIds.length) {
+            const markResult = await appointmentModel.updateMany(
+              { _id: { $in: includedIds }, [sentField]: { $ne: true } },
+              { $set: { [sentField]: true } }
+            );
+            markedCount = markResult.modifiedCount;
+            if (markedCount === 0) {
+              console.log(`[${org.name}] [${label}] Todas las citas ya fueron marcadas por otra ejecución concurrente. Saltando envío.`);
+              return { ok: 0, skipped: 0 };
+            }
+            if (markedCount < includedIds.length) {
+              console.warn(`[${org.name}] [${label}] Solo ${markedCount}/${includedIds.length} citas marcadas (el resto ya procesadas).`);
+            }
+          }
+
           console.log(`[${org.name}] [${label}] 📤 Enviando campaña: ${items.length} mensajes`);
 
           try {
@@ -1276,15 +1294,15 @@ const appointmentService = {
             `[${org.name}] [${label}] Campaña enviada: ${result.prepared} mensajes (bulkId: ${result.bulkId})`
           );
 
-          // Marcar citas con el campo correspondiente
+          // Actualizar solo el bulkId (el flag ya fue marcado antes del envío)
           if (includedIds.length) {
             await appointmentModel.updateMany(
               { _id: { $in: includedIds } },
-              { $set: { [sentField]: true, [bulkIdField]: result.bulkId } }
+              { $set: { [bulkIdField]: result.bulkId } }
             );
           }
 
-          return { ok: includedIds.length, skipped: 0 };
+          return { ok: markedCount, skipped: 0 };
         } catch (err) {
           console.error(`[${org.name}] [${label}] Error enviando campaña:`, err.message);
           return { ok: 0, skipped: appointments.length };
