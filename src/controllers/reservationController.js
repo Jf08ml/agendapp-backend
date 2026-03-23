@@ -474,6 +474,21 @@ const reservationController = {
                 organizationId,
               });
 
+            // 🔗 Crear Reservation auto_approved vinculada (doble canal)
+            // createReservation se encarga de setear reservationId en el Appointment
+            const apt = appointments[0];
+            const newReservation = await reservationService.createReservation({
+              serviceId,
+              employeeId,
+              startDate: startDateAsDate,
+              customer: customer._id,
+              customerDetails,
+              organizationId,
+              status: "auto_approved",
+              auto: true,
+              appointmentId: apt?._id || null,
+            });
+
             await notifyNewBooking(org, customerDetails, {
               isAuto: true,
               multi: false,
@@ -481,7 +496,7 @@ const reservationController = {
             return sendResponse(
               res,
               201,
-              { policy, outcome: "approved_and_appointed", appointments },
+              { policy, outcome: "approved_and_appointed", appointments, reservation: newReservation },
               "Cita creada automáticamente"
             );
           } catch (e) {

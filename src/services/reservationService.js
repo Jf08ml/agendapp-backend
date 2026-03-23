@@ -131,17 +131,25 @@ const reservationService = {
     // 🔐 Generar token de cancelación
     const { token, hash } = cancellationService.generateCancelToken();
     reservationData.cancelTokenHash = hash;
-    
+
     const reservation = new Reservation(reservationData);
     if (session) {
       await reservation.save({ session });
     } else {
       await reservation.save();
     }
-    
+
     // Retornar la reservación con el token (solo en memoria, no guardado en DB)
     reservation._cancelToken = token; // Campo temporal para usar en notificaciones
-    
+
+    // 🔗 Doble canal: si la reserva ya tiene cita, vincular reservationId en el Appointment
+    if (reservationData.appointmentId) {
+      await Appointment.findByIdAndUpdate(
+        reservationData.appointmentId,
+        { reservationId: reservation._id }
+      );
+    }
+
     return reservation;
   },
 
@@ -281,12 +289,13 @@ const reservationService = {
                   }
                 }
 
-                // Vincular citas a sus reservas
+                // Vincular citas a sus reservas (doble canal)
                 for (let i = 0; i < dateReservations.length; i++) {
                   if (createdAppts[i]?._id) {
                     dateReservations[i].appointmentId = createdAppts[i]._id;
                     dateReservations[i].status = RES_STATUS.APPROVED;
                     await dateReservations[i].save();
+                    await Appointment.findByIdAndUpdate(createdAppts[i]._id, { reservationId: dateReservations[i]._id });
                   }
                 }
 
@@ -347,12 +356,13 @@ const reservationService = {
               ...(groupClientPackageId ? { clientPackageId: groupClientPackageId } : {}),
             });
 
-            // Asignar las citas creadas a sus respectivas reservas
+            // Asignar las citas creadas a sus respectivas reservas (doble canal)
             for (let i = 0; i < needAppointment.length; i++) {
               if (createdAppts[i]?._id) {
                 needAppointment[i].appointmentId = createdAppts[i]._id;
                 needAppointment[i].status = RES_STATUS.APPROVED;
                 await needAppointment[i].save();
+                await Appointment.findByIdAndUpdate(createdAppts[i]._id, { reservationId: needAppointment[i]._id });
               }
             }
 
@@ -417,6 +427,8 @@ const reservationService = {
           : null;
         if (createdFirst?._id) {
           reservation.appointmentId = createdFirst._id;
+          // 🔗 Doble canal
+          await Appointment.findByIdAndUpdate(createdFirst._id, { reservationId: reservation._id });
         }
       }
 

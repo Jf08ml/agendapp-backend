@@ -110,6 +110,12 @@ const appointmentModelSchema = new mongoose.Schema(
       enum: ['unpaid', 'partial', 'paid', 'free'],
       default: 'unpaid',
     },
+    // 🔗 Reserva de origen (doble canal: Reservation.appointmentId ↔ Appointment.reservationId)
+    reservationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Reservation",
+      default: null,
+    },
     groupId: { type: mongoose.Schema.Types.ObjectId, index: true },
     // 🔁 Campos para citas recurrentes
     seriesId: { 
