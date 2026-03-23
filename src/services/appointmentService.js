@@ -1401,19 +1401,6 @@ const appointmentService = {
         appointment.status = "confirmed";
         await appointment.save();
 
-        // Registrar servicio en el cliente
-        if (appointment.client) {
-          try {
-            await clientService.registerService(appointment.client);
-          } catch (clientError) {
-            console.warn(
-              `Error al registrar servicio para cliente ${appointment.client}:`,
-              clientError.message
-            );
-            // No fallar la confirmación si falla el registro del servicio
-          }
-        }
-
         results.confirmed.push({
           appointmentId,
           clientId: appointment.client,
@@ -1471,19 +1458,6 @@ const appointmentService = {
           // Actualizar estado a confirmed
           appointment.status = 'confirmed';
           await appointment.save();
-
-          // Registrar servicio en el cliente
-          if (appointment.client && appointment.client._id) {
-            try {
-              await clientService.registerService(appointment.client._id);
-            } catch (clientError) {
-              console.warn(
-                `Error al registrar servicio para cliente ${appointment.client._id}:`,
-                clientError.message
-              );
-              // No fallar la confirmación si falla el registro del servicio
-            }
-          }
 
           results.confirmed.push({
             appointmentId: appointment._id,

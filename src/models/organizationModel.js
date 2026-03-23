@@ -117,8 +117,8 @@ const organizationSchema = new mongoose.Schema({
   timezone: {
     type: String,
     required: false,
-    default: 'America/Bogota',
-    // Ejemplos: 'America/Mexico_City', 'America/New_York', 'Europe/Madrid'
+    default: 'UTC',
+    // Ejemplos: 'America/Bogota', 'America/Mexico_City', 'Europe/Madrid'
   },
   // 💱 Moneda de la organización (ISO 4217)
   currency: {

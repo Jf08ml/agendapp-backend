@@ -528,13 +528,6 @@ const cancellationService = {
           organizationTimezone: appointment.organizationId?.timezone || timezone,
         });
 
-        if (appointment.client) {
-          try {
-            await clientService.registerService(appointment.client);
-          } catch (clientError) {
-            console.warn('[confirmByToken] No se pudo registrar servicio en cliente:', clientError.message);
-          }
-        }
       }
 
       const successCount = confirmedIds.length;
