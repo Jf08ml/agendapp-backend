@@ -938,7 +938,10 @@ const reservationController = {
       );
     } catch (error) {
       if (error.code === 'CONCURRENCY_LIMIT_REACHED') {
-        return sendResponse(res, 409, { code: 'CONCURRENCY_LIMIT_REACHED' }, error.message);
+        return sendResponse(res, 409, {
+          code: 'CONCURRENCY_LIMIT_REACHED',
+          conflictingAppointments: error.conflictingAppointments || [],
+        }, error.message);
       }
       sendResponse(
         res,

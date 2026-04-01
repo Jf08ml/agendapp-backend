@@ -101,10 +101,13 @@ async function assertConcurrencyNotExceeded(reservation) {
   const employeeId = reservation.employeeId?._id || reservation.employeeId;
   const startDate = reservation.startDate;
   const endDate = new Date(startDate.getTime() + serviceObj.duration * 60 * 1000);
+  const timezone = reservation.organizationId?.timezone || 'America/Bogota';
+  const startOfDay = moment.tz(startDate, timezone).startOf('day').toDate();
 
   const query = {
     organizationId: orgId,
-    startDate: { $lt: endDate },
+    service: serviceObj._id,
+    startDate: { $gte: startOfDay, $lt: endDate }, // misma jornada local Y antes de que termine la reserva
     endDate: { $gt: startDate },
     status: { $in: ['pending', 'confirmed'] },
   };
@@ -113,14 +116,19 @@ async function assertConcurrencyNotExceeded(reservation) {
     query.employee = employeeId;
   }
 
-  const count = await Appointment.countDocuments(query);
+  const conflictingAppointments = await Appointment.find(query)
+    .populate('client', 'name')
+    .select('startDate endDate status client')
+    .lean();
+  const count = conflictingAppointments.length;
 
   if (count >= maxConcurrent) {
-    const timeStr = moment(startDate).format('HH:mm');
+    const timeStr = moment.tz(startDate, timezone).format('HH:mm');
     const err = new Error(
       `El horario ${timeStr} ya tiene ${count}/${maxConcurrent} cita(s) para este profesional.`
     );
     err.code = 'CONCURRENCY_LIMIT_REACHED';
+    err.conflictingAppointments = conflictingAppointments;
     throw err;
   }
 }
