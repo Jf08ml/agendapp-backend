@@ -493,6 +493,8 @@ const appointmentService = {
     }
 
     // ---------- EFECTOS EXTERNOS (fuera de la transacción) ----------
+    // Fire-and-forget: no bloqueamos la respuesta esperando WA/notificaciones
+    (async () => {
     try {
       // 🔔 Notificar a los empleados asignados
       if (created.length > 0) {
@@ -642,6 +644,7 @@ const appointmentService = {
         error?.message || error
       );
     }
+    })(); // fin fire-and-forget
 
     return created.map((c) => c.saved);
   },
