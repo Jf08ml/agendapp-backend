@@ -62,6 +62,15 @@ const whatsappTemplateSchema = new mongoose.Schema(
           type: Boolean,
           default: true,
         },
+        // 📚 Módulo de Clases
+        classEnrollmentConfirmed: {
+          type: Boolean,
+          default: true,
+        },
+        classEnrollmentCancelled: {
+          type: Boolean,
+          default: true,
+        },
       },
       default: () => ({
         scheduleAppointment: true,
@@ -76,6 +85,8 @@ const whatsappTemplateSchema = new mongoose.Schema(
         clientNoShowAck: true,
         loyaltyServiceReward: true,
         loyaltyReferralReward: true,
+        classEnrollmentConfirmed: true,
+        classEnrollmentCancelled: true,
       }),
     },
     scheduleAppointment: {
@@ -125,6 +136,15 @@ const whatsappTemplateSchema = new mongoose.Schema(
       default: null,
     },
     loyaltyReferralReward: {
+      type: String,
+      default: null,
+    },
+    // 📚 Módulo de Clases
+    classEnrollmentConfirmed: {
+      type: String,
+      default: null,
+    },
+    classEnrollmentCancelled: {
       type: String,
       default: null,
     },
