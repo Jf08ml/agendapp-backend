@@ -28,6 +28,8 @@ import publicRoutes from "./publicRoutes.js";
 import campaignRoutes from "./campaignRoutes.js";
 import packageRoutes from "./packageRoutes.js";
 import paymentRoutes from "./paymentRoutes.js";
+import classRoutes from "./classRoutes.js";
+import enrollmentRoutes from "./enrollmentRoutes.js";
 import expenseRoutes from "./expenseRoutes.js";
 import registrationRoutes from "./registrationRoutes.js";
 import adminRoutes from "./adminRoutes.js";
@@ -151,5 +153,13 @@ router.use("/reminders", verifyToken, requireActiveMembership, reminderRoutes);
 router.use("/campaigns", verifyToken, requireActiveMembership, campaignRoutes);
 router.use("/expenses", organizationResolver, verifyToken, requireActiveMembership, expenseRoutes);
 router.use("/audit-logs", organizationResolver, verifyToken, auditLogRoutes);
+
+// ═══════════════════════════════════════════════════
+// 5. MÓDULO DE CLASES
+//    Semi-públicas (sesiones disponibles, clases por org) + protegidas (CRUD admin)
+//    Las rutas públicas internas manejan su propio auth
+// ═══════════════════════════════════════════════════
+router.use("/classes", classRoutes);
+router.use("/enrollments", enrollmentRoutes);
 
 export default router;

@@ -141,6 +141,7 @@ const organizationService = {
       reservationPolicy,
       showLoyaltyProgram,
       enableOnlineBooking,
+      enableClassBooking,
       welcomeTitle,
       welcomeDescription,
       homeLayout,
@@ -249,6 +250,10 @@ const organizationService = {
 
     if (enableOnlineBooking !== undefined) {
       organization.enableOnlineBooking = enableOnlineBooking;
+    }
+
+    if (enableClassBooking !== undefined) {
+      organization.enableClassBooking = enableClassBooking;
     }
 
     if (welcomeTitle !== undefined) {

@@ -273,6 +273,10 @@ const organizationSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  enableClassBooking: {
+    type: Boolean,
+    default: false,
+  },
   blockHolidaysForReservations: {
     type: Boolean,
     default: false,

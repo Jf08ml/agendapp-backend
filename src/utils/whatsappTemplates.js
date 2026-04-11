@@ -171,6 +171,47 @@ Has alcanzado tu meta de referidos en *{{organization}}*.
 🎁 Tu recompensa: *{{reward}}*
 
 Preséntate en tu próxima visita y reclama tu beneficio. ¡Gracias por recomendar nuestros servicios!`,
+
+      // 📚 Inscripción a clase confirmada (aprobación automática o manual)
+      classEnrollmentConfirmed: `✅ ¡Hola, {{names}}!
+
+Tu inscripción a la clase ha sido *confirmada*.
+
+📚 Clase: *{{className}}*
+🗓️ Fecha: {{date}}
+⏰ Horario: {{startTime}} - {{endTime}}
+📍 Lugar: {{organization}}
+📍 Dirección: {{address}}
+💰 Valor: {{price}}
+{{discount}}Si necesitas cancelar tu inscripción, responde a este mensaje y te ayudamos.
+
+¡Te esperamos!`,
+
+      // ⏳ Inscripción pendiente de aprobación
+      classEnrollmentPending: `⏳ ¡Hola, {{names}}!
+
+Hemos recibido tu solicitud de inscripción.
+
+📚 Clase: *{{className}}*
+🗓️ Fecha: {{date}}
+⏰ Horario: {{startTime}} - {{endTime}}
+📍 Lugar: {{organization}}
+💰 Valor: {{price}}
+{{discount}}Tu inscripción está *pendiente de aprobación*. Te notificaremos en cuanto sea confirmada.
+
+Si tienes alguna pregunta, responde a este mensaje.`,
+
+      // ❌ Inscripción cancelada
+      classEnrollmentCancelled: `❌ ¡Hola, {{names}}!
+
+Tu inscripción a la siguiente clase ha sido cancelada:
+
+📚 Clase: *{{className}}*
+🗓️ Fecha: {{date}}
+⏰ Horario: {{startTime}} - {{endTime}}
+📍 {{organization}}
+
+Si deseas inscribirte en otra sesión o tienes alguna pregunta, responde a este mensaje y con gusto te ayudamos.`,
     };
 
     return templates[templateType] || '';
