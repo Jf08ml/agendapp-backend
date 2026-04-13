@@ -74,14 +74,14 @@ const loginLimiter = rateLimit({
 });
 
 app.use(morgan("dev"));
-// Evitar respuestas 304 en desarrollo para que el frontend siempre reciba datos frescos
-if (process.env.NODE_ENV !== "production") {
-  app.disable("etag");
-  app.use((req, res, next) => {
-    res.setHeader("Cache-Control", "no-store");
-    next();
-  });
-}
+// Evitar caché de respuestas de API: el CDN de Vercel puede cachear respuestas
+// con Access-Control-Allow-Origin de un origen y servirlas a otros (ignora Vary: Origin).
+// no-store previene esto tanto en dev como en producción.
+app.disable("etag");
+app.use((req, res, next) => {
+  res.setHeader("Cache-Control", "no-store");
+  next();
+});
 app.use(express.json({
   limit: "5mb",
   // Captura el body crudo para validar firmas de webhooks (ej. Lemon Squeezy HMAC)
