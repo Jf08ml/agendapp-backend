@@ -277,6 +277,10 @@ const organizationSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  setupCompleted: {
+    type: Boolean,
+    default: false,
+  },
   blockHolidaysForReservations: {
     type: Boolean,
     default: false,
