@@ -16,6 +16,7 @@ const paymentSessionSchema = new mongoose.Schema(
     processed: { type: Boolean, default: false },
     processedAt: { type: Date },
     processedEventIds: [{ type: String }], // IDs de eventos ya procesados para evitar duplicados
+    paymentMode: { type: String, enum: ["once", "subscription"], default: "once" },
     rawCreateResponse: { type: Object },
     rawWebhookEvent: { type: Object },
   },

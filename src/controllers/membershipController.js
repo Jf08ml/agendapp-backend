@@ -12,7 +12,7 @@ const membershipController = {
   getCurrentMembership: async (req, res) => {
     try {
       const { organizationId } = req.params;
-      const membership = await membershipService.getActiveMembership(organizationId);
+      const membership = await membershipService.getCurrentMembership(organizationId);
 
       if (!membership) {
         return sendResponse(res, 404, null, "No hay membresía activa");

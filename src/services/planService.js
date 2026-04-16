@@ -55,6 +55,7 @@ const planService = {
       // precio público
       price: p.price,
       currency: p.currency,
+      paypalPlanId: p.paypalPlanId ?? null,
       payment: p.payment,
     }));
   },

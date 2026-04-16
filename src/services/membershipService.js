@@ -188,7 +188,7 @@ const membershipService = {
    * Activar plan pagado. Función única para activar membresías post-pago.
    * Usada tanto por webhooks externos como por confirmación manual.
    */
-  activatePaidPlan: async ({ organizationId, planId, paymentAmount }) => {
+  activatePaidPlan: async ({ organizationId, planId, paymentAmount, subscriptionId, paymentMode }) => {
     const plan = await planModel.findById(planId);
     if (!plan) throw new Error("Plan no encontrado");
 
@@ -199,7 +199,8 @@ const membershipService = {
 
     const now = new Date();
     const newPeriodEnd = new Date(now);
-    newPeriodEnd.setMonth(newPeriodEnd.getMonth() + 1);
+    const cycleMonths = { monthly: 1, quarterly: 3, semiannual: 6, yearly: 12, lifetime: 120 };
+    newPeriodEnd.setMonth(newPeriodEnd.getMonth() + (cycleMonths[plan.billingCycle] ?? 1));
 
     if (membership) {
       // Actualizar membresía existente
@@ -220,6 +221,10 @@ const membershipService = {
         pastDueDay2Sent: false,
       };
       membership.lastCheckedAt = null;
+      if (subscriptionId !== undefined) membership.paypalSubscriptionId = subscriptionId || null;
+      if (paymentMode !== undefined) membership.paymentMode = paymentMode || null;
+      if (paymentMode === "subscription") membership.autoRenew = true;
+      if (paymentMode === "once") membership.autoRenew = false;
       await membership.save();
     } else {
       // Crear nueva
@@ -233,6 +238,9 @@ const membershipService = {
         status: "active",
         lastPaymentDate: now,
         lastPaymentAmount: paymentAmount || 0,
+        paypalSubscriptionId: subscriptionId || null,
+        paymentMode: paymentMode || null,
+        autoRenew: paymentMode === "subscription",
       });
     }
 

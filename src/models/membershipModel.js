@@ -80,6 +80,18 @@ const membershipSchema = new mongoose.Schema(
       default: false,
     },
 
+    // PayPal
+    paypalSubscriptionId: {
+      type: String,
+      default: null,
+      index: true,
+    },
+    paymentMode: {
+      type: String,
+      enum: ["once", "subscription"],
+      default: null,
+    },
+
     // Notas administrativas
     adminNotes: {
       type: String,

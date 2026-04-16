@@ -71,8 +71,8 @@ const planSchema = new mongoose.Schema(
       servicePackages: { type: Boolean, default: false },
     },
     
-    // Lemon Squeezy variant ID for checkout (one per plan, USD)
-    lsVariantId: {
+    // PayPal Subscription Plan ID (one per plan, created in PayPal dashboard)
+    paypalPlanId: {
       type: String,
       default: null,
     },

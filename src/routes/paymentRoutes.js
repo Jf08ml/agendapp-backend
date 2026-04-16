@@ -5,10 +5,14 @@ import { verifyToken } from "../middleware/authMiddleware.js";
 
 const router = Router();
 
-// Webhooks (público, sin auth — el provider valida firma internamente)
+// Webhooks de PayPal (público — PayPal valida firma internamente)
 router.post("/webhook/:provider", paymentController.handleWebhook);
 
-// Checkout y manual confirm (protegidos con auth)
+// PayPal SDK: el frontend avisa después de que el usuario aprueba
+router.post("/paypal/subscription-created", verifyToken, paymentController.subscriptionCreated);
+router.post("/paypal/order-captured", verifyToken, paymentController.orderCaptured);
+
+// Manual
 router.post("/checkout", verifyToken, paymentController.createCheckout);
 router.post("/manual-confirm", verifyToken, paymentController.confirmManualPayment);
 router.get("/history/:organizationId", verifyToken, paymentController.getPaymentHistory);
