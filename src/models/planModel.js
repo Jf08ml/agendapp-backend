@@ -34,7 +34,7 @@ const planSchema = new mongoose.Schema(
     
     billingCycle: {
       type: String,
-      enum: ["monthly", "yearly", "lifetime"],
+      enum: ["monthly", "quarterly", "semiannual", "yearly", "lifetime"],
       default: "monthly",
     },
     
