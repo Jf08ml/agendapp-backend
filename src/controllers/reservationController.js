@@ -16,6 +16,7 @@ import whatsappTemplates from "../utils/whatsappTemplates.js";
 import { waIntegrationService } from "../services/waIntegrationService.js";
 import { generateCancellationLink } from "../utils/cancellationUtils.js";
 import appointmentSeriesService from "../services/appointmentSeriesService.js";
+import appointmentModel from "../models/appointmentModel.js";
 import { auditLogService } from "../services/auditLogService.js";
 
 // ---------------------- helpers de notificación ----------------------
@@ -463,8 +464,9 @@ const reservationController = {
       // === AUTO: intentar crear cita batch con un solo servicio
       if (policy === "auto_if_available") {
         if (employeeId) {
+          let autoAppointments = null;
           try {
-            const appointments =
+            autoAppointments =
               await appointmentService.createAppointmentsBatch({
                 services: [serviceId],
                 employee: employeeId,
@@ -476,7 +478,7 @@ const reservationController = {
 
             // 🔗 Crear Reservation auto_approved vinculada (doble canal)
             // createReservation se encarga de setear reservationId en el Appointment
-            const apt = appointments[0];
+            const apt = autoAppointments[0];
             const newReservation = await reservationService.createReservation({
               serviceId,
               employeeId,
@@ -496,10 +498,15 @@ const reservationController = {
             return sendResponse(
               res,
               201,
-              { policy, outcome: "approved_and_appointed", appointments, reservation: newReservation },
+              { policy, outcome: "approved_and_appointed", appointments: autoAppointments, reservation: newReservation },
               "Cita creada automáticamente"
             );
           } catch (e) {
+            // Si las citas ya se crearon pero createReservation falló, cancelarlas para evitar huérfanas
+            if (autoAppointments?.length > 0) {
+              const ids = autoAppointments.map(a => a._id).filter(Boolean);
+              await appointmentModel.updateMany({ _id: { $in: ids } }, { status: 'cancelled' }).catch(() => {});
+            }
             // cae a reserva pending si no hay disponibilidad o falla
           }
         }

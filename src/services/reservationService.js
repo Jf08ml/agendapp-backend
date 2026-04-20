@@ -287,6 +287,7 @@ const reservationService = {
                   skipNotification: true, // No notificar individualmente
                   sharedGroupId,
                   sharedTokenHash, // 🔐 Token compartido para cancelar toda la serie
+                  skipConcurrencyCheck: !!forceApprove,
                   ...(groupClientPackageId ? { clientPackageId: groupClientPackageId } : {}),
                 });
 
@@ -361,6 +362,7 @@ const reservationService = {
               organizationId: orgId,
               skipNotification: false,
               sharedGroupId,
+              skipConcurrencyCheck: !!forceApprove,
               ...(groupClientPackageId ? { clientPackageId: groupClientPackageId } : {}),
             });
 
@@ -427,6 +429,7 @@ const reservationService = {
           startDate,
           organizationId: organizationId._id || organizationId,
           skipNotification,
+          skipConcurrencyCheck: !!forceApprove,
           ...(reservation.clientPackageId ? { clientPackageId: reservation.clientPackageId } : {}),
         });
 

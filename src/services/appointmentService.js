@@ -282,6 +282,7 @@ const appointmentService = {
       customDurations = {}, // 🕐 Duraciones personalizadas por servicio (en minutos)
       clientPackageId = null, // 📦 Paquete de sesiones del cliente
       usePackageForServices = {}, // 📦 Mapeo serviceId -> clientPackageId
+      skipConcurrencyCheck = false, // 🔓 Omitir validación de concurrencia (para forzar aprobación)
     } = payload;
     
     if (!Array.isArray(services) || services.length === 0) {
@@ -399,20 +400,29 @@ const appointmentService = {
         // Contar cuántas citas del MISMO servicio tiene el empleado en ese horario.
         // maxConcurrentAppointments es un límite por servicio, no por empleado en total.
         // Condición estándar de solapamiento: existente.inicio < nueva.fin Y existente.fin > nueva.inicio
-        const simultaneousCount = await appointmentModel.countDocuments({
+        const concurrencyQuery = {
           employee: employeeForThisService,
           service: serviceId,
           organizationId,
           status: { $nin: ['cancelled_by_admin', 'cancelled_by_customer', 'cancelled', 'rejected', 'attended', 'no_show'] },
           startDate: { $lt: serviceEnd },
           endDate: { $gt: currentStart },
-        }, { session }); // 🔒 Usar sesión para ver citas creadas en esta misma transacción
+        };
+        const simultaneousCount = await appointmentModel.countDocuments(concurrencyQuery, { session }); // 🔒 Usar sesión para ver citas creadas en esta misma transacción
 
         // 👥 Verificar límite de citas simultáneas configurado en el servicio
         const maxConcurrent = svc.maxConcurrentAppointments ?? 1;
-        if (simultaneousCount >= maxConcurrent) {
+        if (!skipConcurrencyCheck && simultaneousCount >= maxConcurrent) {
           console.log(`⚠️ Límite de citas simultáneas alcanzado para empleado ${employeeForThisService} en ${currentStart}. Simultáneas: ${simultaneousCount}, Máximo: ${maxConcurrent}`);
-          throw new Error(`No hay disponibilidad para el servicio ${svc.name} en el horario solicitado (límite de ${maxConcurrent} cita${maxConcurrent > 1 ? 's' : ''} simultánea${maxConcurrent > 1 ? 's' : ''})`);
+          const conflictingAppointments = await appointmentModel
+            .find(concurrencyQuery)
+            .populate('client', 'name')
+            .select('startDate endDate status client')
+            .lean();
+          const concurrencyErr = new Error(`No hay disponibilidad para el servicio ${svc.name} en el horario solicitado (límite de ${maxConcurrent} cita${maxConcurrent > 1 ? 's' : ''} simultánea${maxConcurrent > 1 ? 's' : ''})`);
+          concurrencyErr.code = 'CONCURRENCY_LIMIT_REACHED';
+          concurrencyErr.conflictingAppointments = conflictingAppointments;
+          throw concurrencyErr;
         }
 
         const additionalItems = additionalItemsByService[serviceId] || [];
