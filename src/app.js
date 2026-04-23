@@ -105,6 +105,10 @@ app.get("/", (req, res) => {
   res.send("API galaxia glamour");
 });
 
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "ok" });
+});
+
 // Manejo de errores
 app.use((err, req, res, next) => {
   console.error(err.stack || err);
