@@ -132,11 +132,8 @@ dbConnection()
       );
     });
     
-    // Los cron jobs ahora se ejecutan desde Vercel Cron
-    // No es necesario iniciarlos manualmente aquí
-    console.log("⏰ Cron jobs configurados en Vercel:");
-    console.log("  - Verificación de membresías: Diario a las 9 AM (hora Colombia)");
-    console.log("  - Recordatorios: Configurados en servidor Vultr (cada hora)");
+    membershipCheckJob.start();
+    console.log("⏰ Cron job iniciado: verificación de membresías (9 AM hora Colombia)");
   })
   .catch((err) => {
     console.error("Failed to connect to the database", err);
