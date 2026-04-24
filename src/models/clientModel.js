@@ -13,18 +13,26 @@ const clientSchema = new mongoose.Schema(
     },
     phoneNumber: {
       type: String,
-      required: true,
+      required: false,
     },
     // 🌍 Campos internacionales
     phone_e164: {
       type: String,
-      required: false, // Se poblará progresivamente
+      required: false,
       index: true,
     },
     phone_country: {
       type: String,
-      required: false, // ISO2: CO, MX, PE, etc.
+      required: false,
       maxlength: 2,
+    },
+    documentId: {
+      type: String,
+      required: false,
+    },
+    notes: {
+      type: String,
+      required: false,
     },
     servicesTaken: {
       type: Number,
@@ -78,18 +86,10 @@ const clientSchema = new mongoose.Schema(
   }
 );
 
-// 🔒 Índice compuesto único: previene duplicados de phone_e164 por organización
-// Solo aplica a documentos donde phone_e164 existe y es string (ignora null/undefined)
-clientSchema.index(
-  { phone_e164: 1, organizationId: 1 },
-  {
-    unique: true,
-    partialFilterExpression: {
-      phone_e164: { $exists: true, $type: 'string' }
-    },
-    name: 'unique_phone_per_organization'
-  }
-);
+// Índices de rendimiento (la unicidad se maneja a nivel de aplicación según identifierField)
+clientSchema.index({ phone_e164: 1, organizationId: 1 }, { name: 'phone_per_organization' });
+clientSchema.index({ documentId: 1, organizationId: 1 }, { name: 'documentId_per_organization' });
+clientSchema.index({ email: 1, organizationId: 1 }, { name: 'email_per_organization' });
 
 // Incrementa servicios tomados y evalúa los niveles (tiers) configurados.
 // tiers: [{ threshold: Number, reward: String }]

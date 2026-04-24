@@ -42,23 +42,42 @@ function computeTotalPrice(pricePerPerson, discountPercent) {
 }
 
 /**
- * Busca o crea un cliente por teléfono dentro de la organización.
+ * Busca o crea un cliente usando el identifierField configurado por la organización.
  */
-async function findOrCreateClient(organizationId, attendee) {
-  if (!attendee.phone) return null;
+async function findOrCreateClient(organizationId, attendee, org) {
+  const identifierField = org?.clientFormConfig?.identifierField || "phone";
 
-  const normalized = normalizePhoneNumber(attendee.phone, attendee.phone_country || "CO");
-  const phone_e164 = normalized?.e164 || attendee.phone;
+  // Normalizar teléfono (siempre, aunque no sea el identificador)
+  const normalized = normalizePhoneNumber(
+    attendee.phone || attendee.phone_e164 || "",
+    attendee.phone_country || org?.default_country || "CO"
+  );
+  const phone_e164 = normalized?.isValid ? normalized.phone_e164 : (attendee.phone_e164 || attendee.phone || null);
 
-  let client = await Client.findOne({ organizationId, phone_e164 });
+  // Construir query de búsqueda según el identificador configurado
+  let lookupQuery = { organizationId };
+  if (identifierField === "phone") {
+    if (!phone_e164) return null;
+    lookupQuery.$or = [{ phone_e164 }, { phoneNumber: normalized?.phone_national_clean }].filter(c => Object.values(c)[0]);
+  } else if (identifierField === "email") {
+    if (!attendee.email) return null;
+    lookupQuery.email = attendee.email.toLowerCase().trim();
+  } else if (identifierField === "documentId") {
+    if (!attendee.documentId) return null;
+    lookupQuery.documentId = attendee.documentId.trim();
+  }
+
+  let client = await Client.findOne(lookupQuery);
   if (!client) {
     client = new Client({
       organizationId,
-      names: attendee.name,
-      phone: attendee.phone,
-      phone_e164,
+      name: attendee.name,
+      phoneNumber: normalized?.phone_national_clean || attendee.phone || null,
+      phone_e164: phone_e164 || null,
       phone_country: attendee.phone_country || null,
       email: attendee.email || null,
+      documentId: attendee.documentId || null,
+      notes: attendee.notes || null,
     });
     await client.save();
   }
@@ -173,8 +192,8 @@ async function createPublicEnrollments({ organizationId, sessionId, attendee, co
   const groupId = companion ? new Types.ObjectId() : null;
 
   // 6. Buscar o crear clientes
-  const mainClient = await findOrCreateClient(organizationId, attendee);
-  const companionClient = companion ? await findOrCreateClient(organizationId, companion) : null;
+  const mainClient = await findOrCreateClient(organizationId, attendee, org);
+  const companionClient = companion ? await findOrCreateClient(organizationId, companion, org) : null;
 
   // 7. Crear inscripciones
   const enrollmentsData = [{ attendeeData: attendee, client: mainClient }];
@@ -315,7 +334,7 @@ async function adminCreateEnrollments({ organizationId, sessionId, attendees, ap
   const created = [];
 
   for (const attendeeData of attendees) {
-    const client = await findOrCreateClient(organizationId, attendeeData);
+    const client = await findOrCreateClient(organizationId, attendeeData, org);
     const { token, hash } = generateToken();
     const normalized = normalizePhoneNumber(
       attendeeData.phone,

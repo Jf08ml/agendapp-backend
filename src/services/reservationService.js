@@ -618,82 +618,82 @@ const reservationService = {
     };
   },
 
-  // Validar y crear cliente si no existe
+  // Validar y crear cliente si no existe, usando el identificador configurado por la organización
   ensureClientExists: async ({
     name,
     phoneNumber,
     email,
     organizationId,
     birthDate,
+    documentId,
+    notes,
   }) => {
-    // 🌍 Obtener país por defecto de la organización
-    const org = await Organization.findById(organizationId).select('default_country');
+    const org = await Organization.findById(organizationId).select('default_country clientFormConfig');
     const defaultCountry = org?.default_country || 'CO';
+    const identifierField = org?.clientFormConfig?.identifierField || 'phone';
 
-    // 🌍 Normalizar teléfono a E.164
-    const phoneResult = normalizePhoneNumber(phoneNumber, defaultCountry);
-    if (!phoneResult.isValid) {
-      throw new Error(phoneResult.error || 'Número de teléfono inválido');
+    // Normalizar teléfono si se provee (puede venir aunque no sea el identificador)
+    let phoneResult = null;
+    if (phoneNumber) {
+      phoneResult = normalizePhoneNumber(phoneNumber, defaultCountry);
+      if (!phoneResult.isValid) {
+        throw new Error(phoneResult.error || 'Número de teléfono inválido');
+      }
     }
 
-    // 🔍 Buscar cliente por phone_e164 O phoneNumber (compatibilidad con datos antiguos)
-    const existingClient = await Client.findOne({
-      organizationId,
-      $or: [
-        { phone_e164: phoneResult.phone_e164 },
-        { phoneNumber: phoneResult.phone_national_clean }
-      ]
-    });
+    // Construir query de búsqueda según el identificador configurado
+    let lookupQuery = { organizationId };
+    if (identifierField === 'phone') {
+      if (!phoneResult) throw new Error('Número de teléfono requerido');
+      lookupQuery = {
+        organizationId,
+        $or: [
+          { phone_e164: phoneResult.phone_e164 },
+          { phoneNumber: phoneResult.phone_national_clean },
+        ],
+      };
+    } else if (identifierField === 'email') {
+      if (!email) throw new Error('Correo electrónico requerido como identificador');
+      lookupQuery.email = email.toLowerCase().trim();
+    } else if (identifierField === 'documentId') {
+      if (!documentId) throw new Error('Número de documento requerido como identificador');
+      lookupQuery.documentId = documentId.trim();
+    }
+
+    const existingClient = await Client.findOne(lookupQuery);
 
     if (existingClient) {
-      // 🔄 Actualizar campos si han cambiado
       let isUpdated = false;
-      
-      // Migración automática: actualizar campos de teléfono si faltan
-      if (!existingClient.phone_e164) {
+
+      // Migración automática de teléfono si falta phone_e164
+      if (phoneResult && !existingClient.phone_e164) {
         existingClient.phone_e164 = phoneResult.phone_e164;
         existingClient.phone_country = phoneResult.phone_country;
         existingClient.phoneNumber = phoneResult.phone_national_clean;
         isUpdated = true;
       }
-      
-      if (name && existingClient.name !== name) {
-        existingClient.name = name;
-        isUpdated = true;
-      }
-      if (email && existingClient.email !== email) {
-        existingClient.email = email;
-        isUpdated = true;
-      }
-      if (birthDate && existingClient.birthDate !== birthDate) {
-        existingClient.birthDate = birthDate;
-        isUpdated = true;
-      }
-      
+
+      if (name && existingClient.name !== name) { existingClient.name = name; isUpdated = true; }
+      if (email && existingClient.email !== email) { existingClient.email = email; isUpdated = true; }
+      if (birthDate && existingClient.birthDate !== birthDate) { existingClient.birthDate = birthDate; isUpdated = true; }
+      if (documentId && existingClient.documentId !== documentId) { existingClient.documentId = documentId.trim(); isUpdated = true; }
+      if (notes && existingClient.notes !== notes) { existingClient.notes = notes.trim(); isUpdated = true; }
+
       if (isUpdated) await existingClient.save();
       return existingClient;
     }
 
-    // 🆕 Crear nuevo cliente con campos normalizados
-    const newClient = new Client({
-      name,
-      phoneNumber: phoneResult.phone_national_clean, // 🆕 Solo dígitos locales
-      phone_e164: phoneResult.phone_e164, // Con código de país en formato E.164
-      phone_country: phoneResult.phone_country,
-      email,
-      organizationId,
-      birthDate,
-    });
-    
-    try {
-      return await newClient.save();
-    } catch (error) {
-      // Capturar error de duplicado del índice único de MongoDB
-      if (error.code === 11000) {
-        throw new Error('Ya existe un cliente con este número de teléfono en esta organización');
-      }
-      throw error;
+    // Crear nuevo cliente
+    const clientDoc = { name, email, organizationId, birthDate };
+    if (phoneResult) {
+      clientDoc.phoneNumber = phoneResult.phone_national_clean;
+      clientDoc.phone_e164 = phoneResult.phone_e164;
+      clientDoc.phone_country = phoneResult.phone_country;
     }
+    if (documentId) clientDoc.documentId = documentId.trim();
+    if (notes) clientDoc.notes = notes.trim();
+
+    return await new Client(clientDoc).save();
   },
 };
 

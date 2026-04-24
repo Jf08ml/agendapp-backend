@@ -158,6 +158,7 @@ const organizationService = {
       blockHolidaysForReservations,
       allowedHolidayDates,
       hasAccessBlocked,
+      clientFormConfig,
     } = organizationData;
 
     const organization = await Organization.findById(id);
@@ -327,6 +328,14 @@ const organizationService = {
 
     if (allowedHolidayDates !== undefined) {
       organization.allowedHolidayDates = allowedHolidayDates;
+    }
+
+    // 📋 Configuración del formulario de cliente
+    if (clientFormConfig !== undefined) {
+      organization.clientFormConfig = {
+        identifierField: clientFormConfig.identifierField ?? organization.clientFormConfig?.identifierField ?? 'phone',
+        fields: Array.isArray(clientFormConfig.fields) ? clientFormConfig.fields : organization.clientFormConfig?.fields ?? [],
+      };
     }
 
     // 🔒 Bloqueo de acceso (superadmin)

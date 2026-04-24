@@ -459,6 +459,8 @@ const reservationController = {
         email: customerDetails.email,
         organizationId,
         birthDate: customerDetails.birthDate,
+        documentId: customerDetails.documentId,
+        notes: customerDetails.notes,
       });
 
       // === AUTO: intentar crear cita batch con un solo servicio
@@ -594,6 +596,8 @@ const reservationController = {
         email: customerDetails.email,
         organizationId,
         birthDate: customerDetails.birthDate,
+        documentId: customerDetails.documentId,
+        notes: customerDetails.notes,
       });
 
       // === AUTO: crear citas batch (una sola transacción/mensaje)

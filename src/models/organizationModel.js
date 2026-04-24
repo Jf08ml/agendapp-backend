@@ -1,5 +1,16 @@
 import mongoose from "mongoose";
 
+// Schema para configuración de campos del formulario de cliente
+const ClientFieldConfigSchema = new mongoose.Schema(
+  {
+    key: { type: String, required: true }, // 'name'|'phone'|'email'|'birthDate'|'documentId'|'notes'
+    enabled: { type: Boolean, default: true },
+    required: { type: Boolean, default: false },
+    label: { type: String }, // etiqueta personalizada, opcional
+  },
+  { _id: false }
+);
+
 // Schema para intervalos de descanso (breaks) dentro de un día
 const OpeningBreakSchema = new mongoose.Schema(
   {
@@ -349,6 +360,19 @@ const organizationSchema = new mongoose.Schema({
       },
     },
   },
+  // 📋 Configuración del formulario de registro de cliente
+  clientFormConfig: {
+    identifierField: {
+      type: String,
+      enum: ['phone', 'email', 'documentId'],
+      default: 'phone',
+    },
+    fields: {
+      type: [ClientFieldConfigSchema],
+      default: [],
+    },
+  },
+
   // 🚫 Política de cancelación de citas
   cancellationPolicy: {
     // Horas mínimas antes de la cita para permitir cancelación (0 = sin restricción)

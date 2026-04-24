@@ -11,38 +11,76 @@ import whatsappService from "./sendWhatsappService.js";
 const clientService = {
   // Crear un nuevo cliente
   createClient: async (clientData) => {
-    const { name, email, phoneNumber, organizationId, birthDate } = clientData;
+    const { name, email, phoneNumber, organizationId, birthDate, documentId, notes } = clientData;
 
-    // 🌍 Obtener país por defecto de la organización
-    const org = await Organization.findById(organizationId).select('default_country');
+    const org = await Organization.findById(organizationId).select('default_country clientFormConfig');
     const defaultCountry = org?.default_country || 'CO';
+    const identifierField = org?.clientFormConfig?.identifierField || 'phone';
 
-    // 🌍 Normalizar teléfono a E.164
-    const phoneResult = normalizePhoneNumber(phoneNumber, defaultCountry);
-    if (!phoneResult.isValid) {
-      throw new Error(phoneResult.error);
+    const clientDoc = { name, email, organizationId, birthDate };
+    if (documentId) clientDoc.documentId = documentId.trim();
+    if (notes) clientDoc.notes = notes.trim();
+
+    // Normalizar teléfono si se provee
+    if (phoneNumber) {
+      const phoneResult = normalizePhoneNumber(phoneNumber, defaultCountry);
+      if (!phoneResult.isValid) throw new Error(phoneResult.error);
+      clientDoc.phoneNumber = phoneResult.phone_national_clean;
+      clientDoc.phone_e164 = phoneResult.phone_e164;
+      clientDoc.phone_country = phoneResult.phone_country;
     }
 
-    // Crear y guardar el nuevo cliente (índice único previene duplicados)
-    const newClient = new Client({
-      name,
-      email,
-      phoneNumber: phoneResult.phone_national_clean, // 🆕 Solo dígitos locales, sin espacios ni guiones
-      phone_e164: phoneResult.phone_e164, // Con código de país en formato E.164
-      phone_country: phoneResult.phone_country,
-      organizationId,
-      birthDate,
-    });
-    
-    try {
-      return await newClient.save();
-    } catch (error) {
-      // Capturar error de duplicado del índice único de MongoDB
-      if (error.code === 11000) {
-        throw new Error('Ya existe un cliente con este número de teléfono en esta organización');
+    // Verificar duplicado según el identificador configurado
+    let duplicateQuery = { organizationId };
+    if (identifierField === 'phone' && clientDoc.phone_e164) {
+      duplicateQuery.$or = [
+        { phone_e164: clientDoc.phone_e164 },
+        { phoneNumber: clientDoc.phoneNumber },
+      ];
+    } else if (identifierField === 'email' && email) {
+      duplicateQuery.email = email.toLowerCase().trim();
+    } else if (identifierField === 'documentId' && clientDoc.documentId) {
+      duplicateQuery.documentId = clientDoc.documentId;
+    }
+
+    if (duplicateQuery.$or || duplicateQuery.email || duplicateQuery.documentId) {
+      const existing = await Client.findOne(duplicateQuery);
+      if (existing) {
+        const labels = { phone: 'teléfono', email: 'correo electrónico', documentId: 'número de documento' };
+        throw new Error(`Ya existe un cliente con ese ${labels[identifierField]} en esta organización`);
       }
-      throw error;
     }
+
+    return await new Client(clientDoc).save();
+  },
+
+  // Buscar un cliente por el campo identificador configurado en la organización
+  getClientByIdentifier: async (field, value, organizationId) => {
+    if (!value || !field || !organizationId) return null;
+
+    let query = { organizationId };
+
+    if (field === 'phone') {
+      const org = await Organization.findById(organizationId).select('default_country');
+      const defaultCountry = org?.default_country || 'CO';
+      const phoneResult = normalizePhoneNumber(value, defaultCountry);
+      const conditions = [{ phoneNumber: value, organizationId }, { phone_e164: value, organizationId }];
+      if (phoneResult.isValid) {
+        conditions.push({ phone_e164: phoneResult.phone_e164, organizationId });
+        conditions.push({ phoneNumber: phoneResult.phone_national_clean, organizationId });
+      }
+      return await Client.findOne({ $or: conditions }).populate('organizationId').exec();
+    }
+
+    if (field === 'email') {
+      query.email = value.toLowerCase().trim();
+    } else if (field === 'documentId') {
+      query.documentId = value.trim();
+    } else {
+      return null;
+    }
+
+    return await Client.findOne(query).populate('organizationId').exec();
   },
 
   // Obtener todos los clientes
@@ -59,18 +97,19 @@ const clientService = {
   searchClients: async (organizationId, searchQuery = "", limit = 20) => {
     const query = { organizationId };
     
-    // Si hay búsqueda, agregar filtro por nombre, teléfono original o E.164
     if (searchQuery) {
       query.$or = [
         { name: { $regex: searchQuery, $options: "i" } },
         { phoneNumber: { $regex: searchQuery, $options: "i" } },
-        { phone_e164: { $regex: searchQuery, $options: "i" } }, // 🌍 Buscar también por E.164
+        { phone_e164: { $regex: searchQuery, $options: "i" } },
+        { email: { $regex: searchQuery, $options: "i" } },
+        { documentId: { $regex: searchQuery, $options: "i" } },
       ];
     }
 
     return await Client.find(query)
       .limit(limit)
-      .select("_id name phoneNumber phone_e164 phone_country email birthDate")
+      .select("_id name phoneNumber phone_e164 phone_country email birthDate documentId")
       .sort({ name: 1 })
       .lean();
   },
@@ -127,15 +166,16 @@ const clientService = {
 
   // Actualizar un cliente
   updateClient: async (id, clientData) => {
-    const { name, email, phoneNumber, phone_country, organizationId, birthDate } = clientData;
+    const { name, email, phoneNumber, phone_country, organizationId, birthDate, documentId, notes } = clientData;
     const client = await Client.findById(id);
 
     if (!client) {
       throw new Error("Cliente no encontrado");
     }
 
-    const org = await Organization.findById(client.organizationId).select('default_country');
+    const org = await Organization.findById(client.organizationId).select('default_country clientFormConfig');
     const defaultCountry = org?.default_country || 'CO';
+    const identifierField = org?.clientFormConfig?.identifierField || 'phone';
 
     // 🔄 MIGRACIÓN AUTOMÁTICA: Si el cliente no tiene phone_e164, normalizar el número actual
     if (!client.phone_e164 && client.phoneNumber) {
@@ -178,16 +218,26 @@ const clientService = {
 
     // Permitir que birthDate sea null
     client.birthDate = birthDate !== undefined ? birthDate : client.birthDate;
+    if (documentId !== undefined) client.documentId = documentId ? documentId.trim() : documentId;
+    if (notes !== undefined) client.notes = notes ? notes.trim() : notes;
 
-    try {
-      return await client.save();
-    } catch (error) {
-      // Capturar error de duplicado del índice único de MongoDB
-      if (error.code === 11000) {
-        throw new Error('Ya existe otro cliente con este número de teléfono en esta organización');
-      }
-      throw error;
+    // Verificar duplicado por identificador si el campo cambió
+    const labels = { phone: 'teléfono', email: 'correo electrónico', documentId: 'número de documento' };
+    let dupQuery = { organizationId: client.organizationId, _id: { $ne: client._id } };
+    if (identifierField === 'phone' && client.phone_e164) {
+      dupQuery.$or = [{ phone_e164: client.phone_e164 }, { phoneNumber: client.phoneNumber }];
+    } else if (identifierField === 'email' && client.email) {
+      dupQuery.email = client.email.toLowerCase().trim();
+    } else if (identifierField === 'documentId' && client.documentId) {
+      dupQuery.documentId = client.documentId;
     }
+
+    if (dupQuery.$or || dupQuery.email || dupQuery.documentId) {
+      const dup = await Client.findOne(dupQuery);
+      if (dup) throw new Error(`Ya existe otro cliente con ese ${labels[identifierField]}`);
+    }
+
+    return await client.save();
   },
 
   // Eliminar un cliente
@@ -378,70 +428,61 @@ const clientService = {
       totalErrors: 0
     };
 
-    // Obtener país por defecto de la organización
-    const org = await Organization.findById(organizationId).select('default_country');
+    const org = await Organization.findById(organizationId).select('default_country clientFormConfig');
     const defaultCountry = org?.default_country || 'CO';
+    const identifierField = org?.clientFormConfig?.identifierField || 'phone';
+    const identifierLabels = { phone: 'teléfono', email: 'correo electrónico', documentId: 'número de documento' };
 
-    console.log(`[bulkCreateClients] Procesando ${clientsData.length} clientes para organización ${organizationId}, país: ${defaultCountry}`);
+    console.log(`[bulkCreateClients] Procesando ${clientsData.length} clientes para organización ${organizationId}, identificador: ${identifierField}`);
 
     for (let i = 0; i < clientsData.length; i++) {
       const row = clientsData[i];
       results.totalProcessed++;
 
       try {
-        // Validar datos requeridos
-        if (!row.name || !row.phoneNumber) {
-          throw new Error('Nombre y teléfono son obligatorios');
-        }
+        if (!row.name) throw new Error('El nombre es obligatorio');
+        if (!row.phoneNumber) throw new Error('El teléfono es obligatorio');
+        if (identifierField === 'email' && !row.email) throw new Error('El correo es obligatorio como identificador');
+        if (identifierField === 'documentId' && !row.documentId) throw new Error('El número de documento es obligatorio como identificador');
 
-        // Limpiar el número de teléfono antes de normalizar
         const cleanPhoneNumber = String(row.phoneNumber).trim();
-        
-        console.log(`[bulkCreateClients] Fila ${i + 2}: Procesando ${row.name}, teléfono: ${cleanPhoneNumber}`);
-
-        // Normalizar teléfono a E.164
         const phoneResult = normalizePhoneNumber(cleanPhoneNumber, defaultCountry);
-        
-        console.log(`[bulkCreateClients] Fila ${i + 2}: Resultado normalización:`, phoneResult);
-        
-        if (!phoneResult.isValid) {
-          throw new Error(phoneResult.error || 'Número de teléfono inválido');
-        }
+        if (!phoneResult.isValid) throw new Error(phoneResult.error || 'Número de teléfono inválido');
 
-        // Crear cliente
+        // Verificar duplicado según identificador configurado
+        let dupQuery = { organizationId };
+        if (identifierField === 'phone') {
+          dupQuery.$or = [{ phone_e164: phoneResult.phone_e164 }, { phoneNumber: phoneResult.phone_national_clean }];
+        } else if (identifierField === 'email') {
+          dupQuery.email = row.email.toLowerCase().trim();
+        } else if (identifierField === 'documentId') {
+          dupQuery.documentId = String(row.documentId).trim();
+        }
+        const dup = await Client.findOne(dupQuery);
+        if (dup) throw new Error(`Cliente duplicado — ya existe con ese ${identifierLabels[identifierField]}`);
+
         const newClient = new Client({
           name: row.name.trim(),
           email: row.email ? row.email.trim() : undefined,
-          phoneNumber: phoneResult.phone_national_clean, // 🆕 Solo dígitos locales
-          phone_e164: phoneResult.phone_e164, // Con código de país
+          phoneNumber: phoneResult.phone_national_clean,
+          phone_e164: phoneResult.phone_e164,
           phone_country: phoneResult.phone_country,
+          documentId: row.documentId ? String(row.documentId).trim() : undefined,
           organizationId,
           birthDate: row.birthDate || null,
         });
 
         const savedClient = await newClient.save();
-        results.success.push({
-          row: i + 2, // +2 porque la primera fila es encabezado y Excel empieza en 1
-          name: savedClient.name,
-          phoneNumber: savedClient.phoneNumber
-        });
+        results.success.push({ row: i + 2, name: savedClient.name, phoneNumber: savedClient.phoneNumber });
         results.totalSuccess++;
 
       } catch (error) {
-        let errorMessage = error.message;
-        
-        // Mejorar mensaje de error de duplicado
-        if (error.code === 11000) {
-          errorMessage = 'Cliente duplicado - Ya existe con este número de teléfono';
-        }
-
-        console.error(`[bulkCreateClients] Fila ${i + 2}: Error - ${errorMessage}`);
-
+        console.error(`[bulkCreateClients] Fila ${i + 2}: Error - ${error.message}`);
         results.errors.push({
           row: i + 2,
           name: row.name || 'Sin nombre',
           phoneNumber: row.phoneNumber || 'Sin teléfono',
-          error: errorMessage
+          error: error.message,
         });
         results.totalErrors++;
       }

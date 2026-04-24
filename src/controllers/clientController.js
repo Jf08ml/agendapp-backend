@@ -88,6 +88,21 @@ const clientController = {
     }
   },
 
+  // Controlador para buscar cliente por el campo identificador configurado
+  getClientByIdentifier: async (req, res) => {
+    const { field, value, organizationId } = req.query;
+    if (!field || !value || !organizationId) {
+      return sendResponse(res, 400, null, 'Parámetros requeridos: field, value, organizationId');
+    }
+    try {
+      const client = await clientService.getClientByIdentifier(field, value, organizationId);
+      if (!client) return sendResponse(res, 404, null, 'Cliente no encontrado');
+      sendResponse(res, 200, client, 'Cliente encontrado');
+    } catch (error) {
+      sendResponse(res, 500, null, error.message);
+    }
+  },
+
   // Controlador para actualizar un cliente
   updateClient: async (req, res) => {
     const { id } = req.params;

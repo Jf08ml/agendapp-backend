@@ -10,6 +10,8 @@ router.get(
   "/phone/:phoneNumber/organization/:organizationId",
   clientController.getClientByPhoneNumberAndOrganization
 );
+// GET /clients/by-identifier?field=documentId&value=...&organizationId=...
+router.get("/by-identifier", clientController.getClientByIdentifier);
 router.put("/:id", clientController.updateClient);
 
 // 🔒 Rutas PROTEGIDAS (requieren autenticación)
