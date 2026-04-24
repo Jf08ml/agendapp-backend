@@ -4,3 +4,8 @@ dist
 *.log
 migration_log.txt
 scripts
+.git
+.gitignore
+*.md
+docker-compose.yml
+.dockerignore

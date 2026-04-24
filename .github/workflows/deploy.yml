@@ -20,3 +20,16 @@ jobs:
             cd /app/agendapp-backend
             git pull
             docker compose up -d --build
+            echo "Esperando que el contenedor esté healthy..."
+            for i in $(seq 1 12); do
+              STATUS=$(docker inspect --format='{{.State.Health.Status}}' $(docker compose ps -q backend) 2>/dev/null)
+              echo "Intento $i: $STATUS"
+              if [ "$STATUS" = "healthy" ]; then
+                echo "Deploy exitoso"
+                exit 0
+              fi
+              sleep 10
+            done
+            echo "El contenedor no alcanzó estado healthy en 120s"
+            docker compose logs --tail=50 backend
+            exit 1
