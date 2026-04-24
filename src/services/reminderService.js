@@ -137,7 +137,7 @@ export const reminderService = {
         if (!byPhone.has(phone)) {
           byPhone.set(phone, {
             phone,
-            names: a?.client?.name || "Cliente",
+            namesSet: new Set(),
             services: [],
             firstStart: start,
             lastEnd: end || start,
@@ -149,6 +149,7 @@ export const reminderService = {
         }
 
         const bucket = byPhone.get(phone);
+        if (a?.client?.name) bucket.namesSet.add(a.client.name);
         bucket.services.push({ name: serviceName, time: timeLabel });
         // Agregar recomendaciones del servicio si existen
         if (a?.service?.recommendations) {
@@ -174,9 +175,11 @@ export const reminderService = {
 
         // 🔧 Validar que el teléfono sea válido antes de continuar
         if (!bucket.phone || typeof bucket.phone !== 'string' || bucket.phone.trim() === '') {
-          console.warn(`[${_orgId}] Bucket sin teléfono válido, omitiendo:`, bucket.names);
+          console.warn(`[${_orgId}] Bucket sin teléfono válido, omitiendo:`, [...bucket.namesSet].join(', '));
           continue;
         }
+
+        bucket.names = [...bucket.namesSet].filter(Boolean).join(' y ') || 'Cliente';
 
         const servicesList = bucket.services
           .map((s, i) => `  ${i + 1}. ${s.name} (${s.time})`)
