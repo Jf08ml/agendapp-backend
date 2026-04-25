@@ -659,6 +659,123 @@ const appointmentService = {
     return created.map((c) => c.saved);
   },
 
+  // Crear citas para múltiples profesionales en paralelo (cada bloque es independiente)
+  createMultiEmployeeBatch: async (payload) => {
+    const {
+      client,
+      organizationId,
+      advancePayment = 0,
+      employeeRequestedByClient = false,
+      blocks,
+    } = payload;
+
+    if (!blocks || blocks.length === 0) {
+      throw new Error('Debe enviar al menos un bloque de profesional.');
+    }
+
+    const org = await organizationService.getOrganizationById(organizationId);
+    if (!org) throw new Error('Organización no encontrada.');
+
+    const timezone = org.timezone || 'America/Bogota';
+
+    // Generar groupId y cancelToken compartidos para todo el conjunto
+    const sharedGroupId = new mongoose.Types.ObjectId();
+    const { token: cancelToken, hash: cancelTokenHash } = cancellationService.generateCancelToken();
+
+    // Crear citas de cada bloque en secuencia (dentro de una sola operación atómica por bloque)
+    const allCreated = [];
+    for (const block of blocks) {
+      const created = await appointmentService.createAppointmentsBatch({
+        services: block.services,
+        employee: block.employee,
+        client,
+        organizationId,
+        advancePayment,
+        employeeRequestedByClient,
+        startDate: block.startDate,
+        ...(block.endDate && { endDate: block.endDate }),
+        customDurations: block.customDurations || {},
+        skipNotification: true,
+        sharedGroupId,
+        sharedTokenHash: cancelTokenHash,
+      });
+      allCreated.push(...(created || []));
+    }
+
+    // Envío del mensaje WA unificado (fire-and-forget)
+    (async () => {
+      try {
+        const orgTimeFormat = org.timeFormat || '12h';
+        const cancellationLink = generateCancellationLink(cancelToken, org);
+
+        const clientDoc = typeof client === 'string'
+          ? await clientService.getClientById(client)
+          : client;
+
+        const phoneE164 = clientDoc?.phone_e164 || clientDoc?.phoneNumber;
+        if (!phoneE164) return;
+
+        // Recuperar todas las citas del grupo para armar el mensaje
+        const groupAppts = await appointmentModel
+          .find({ groupId: sharedGroupId })
+          .populate('service')
+          .populate('employee')
+          .sort({ startDate: 1 });
+
+        if (!groupAppts.length) return;
+
+        const servicesListLines = groupAppts.map((appt, i) => {
+          const svcName = appt.service?.name || 'Servicio';
+          const start = fmtTime(appt.startDate, timezone, orgTimeFormat);
+          const end = fmtTime(appt.endDate, timezone, orgTimeFormat);
+          return `  ${i + 1}. ${svcName} ${start} – ${end}`;
+        });
+
+        const first = groupAppts[0];
+        const last = groupAppts[groupAppts.length - 1];
+        const dateRange = groupAppts.length === 1
+          ? fmt(first.startDate, timezone, orgTimeFormat)
+          : `${fmt(first.startDate, timezone, orgTimeFormat)} – ${fmtTime(last.endDate, timezone, orgTimeFormat)}`;
+
+        const employeeNames = [...new Set(groupAppts.map(a => a.employee?.names).filter(Boolean))];
+
+        const templateData = {
+          names: clientDoc?.name || 'Estimado cliente',
+          dateRange,
+          organization: org.name,
+          address: org.address || '',
+          servicesList: servicesListLines.join('\n'),
+          employee: employeeNames.join(' y ') || 'Nuestro equipo',
+          cancellationLink,
+        };
+
+        const batchPlanLimits = await membershipService.getPlanLimits(organizationId);
+        const planAllowsConfirmations = !(batchPlanLimits && batchPlanLimits.autoConfirmations === false);
+        const whatsappTemplate = await WhatsappTemplate.findOne({ organizationId });
+        const isBatchConfirmationEnabled = whatsappTemplate?.enabledTypes?.scheduleAppointmentBatch !== false;
+
+        if (planAllowsConfirmations && isBatchConfirmationEnabled) {
+          const msg = await whatsappTemplates.getRenderedTemplate(
+            organizationId,
+            'scheduleAppointmentBatch',
+            templateData
+          );
+          await waIntegrationService.sendMessage({
+            orgId: organizationId,
+            phone: phoneE164,
+            message: msg,
+            image: null,
+          });
+          console.log(`✅ WA multi-profesional enviado (${groupAppts.length} citas, ${employeeNames.length} profesionales)`);
+        }
+      } catch (err) {
+        console.error('Error enviando WA multi-profesional:', err?.message || err);
+      }
+    })();
+
+    return allCreated;
+  },
+
   // Obtener todas las citas
   getAppointments: async () => {
     return await appointmentModel

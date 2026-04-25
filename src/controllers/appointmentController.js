@@ -34,6 +34,15 @@ const appointmentController = {
   },
 
   // Controlador para crear múltiples citas (batch)
+  createMultiEmployeeBatch: async (req, res) => {
+    try {
+      const createdAppointments = await appointmentService.createMultiEmployeeBatch(req.body);
+      sendResponse(res, 201, createdAppointments, "Citas multi-profesional creadas exitosamente");
+    } catch (error) {
+      sendResponse(res, 500, null, error.message);
+    }
+  },
+
   createAppointmentsBatch: async (req, res) => {
     try {
       const createdAppointments =

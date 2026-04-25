@@ -9,6 +9,9 @@ router.post("/", appointmentController.createAppointment);
 // Crear múltiples citas (batch)
 router.post("/batch", appointmentController.createAppointmentsBatch);
 
+// Crear citas para múltiples profesionales en paralelo
+router.post("/multi-batch", appointmentController.createMultiEmployeeBatch);
+
 // Confirmar múltiples citas (batch)
 router.put("/batch/confirm", appointmentController.batchConfirmAppointments);
 
