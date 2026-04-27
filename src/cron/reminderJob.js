@@ -35,7 +35,7 @@ const reminderJob = () => {
     }
   );
 
-  console.log("✅ Cron job de recordatorios iniciado - Se ejecutará cada hora");
+  console.log("✅ Cron job de recordatorios iniciado - Se ejecutará cada 30 minutos");
 };
 
 export default reminderJob;
