@@ -7,6 +7,27 @@ import AdminUser from "../models/adminUserModel.js";
 import Organization from "../models/organizationModel.js";
 import ExchangeCode from "../models/exchangeCodeModel.js";
 import ImpersonationAudit from "../models/impersonationAuditModel.js";
+import Appointment from "../models/appointmentModel.js";
+import Client from "../models/clientModel.js";
+import Employee from "../models/employeeModel.js";
+import Service from "../models/serviceModel.js";
+import Reservation from "../models/reservationModel.js";
+import Membership from "../models/membershipModel.js";
+import Campaign from "../models/campaignModel.js";
+import WhatsappTemplate from "../models/whatsappTemplateModel.js";
+import Notification from "../models/notificationModel.js";
+import PaymentEvent from "../models/paymentEventModel.js";
+import PaymentSession from "../models/paymentSessionModel.js";
+import Advances from "../models/advancesModel.js";
+import Subscription from "../models/subscriptionModel.js";
+import ServicePackage from "../models/servicePackageModel.js";
+import ClientPackage from "../models/clientPackageModel.js";
+import AuditLog from "../models/auditLogModel.js";
+import Expense from "../models/expenseModel.js";
+import Class from "../models/classModel.js";
+import ClassSession from "../models/classSessionModel.js";
+import Room from "../models/roomModel.js";
+import Enrollment from "../models/enrollmentModel.js";
 import sendResponse from "../utils/sendResponse.js";
 
 /** TTL del ExchangeCode de impersonación (90 segundos) */
@@ -204,6 +225,66 @@ const adminController = {
     } catch (error) {
       console.error("[admin/listAudits] Error:", error);
       sendResponse(res, 500, null, "Error al obtener auditorías");
+    }
+  },
+  /**
+   * DELETE /api/admin/organizations/:id
+   * Elimina una organización y todos sus datos asociados en cascada.
+   * Requiere JWT de superadmin.
+   */
+  deleteOrganization: async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      if (!mongoose.isValidObjectId(id)) {
+        return sendResponse(res, 400, null, "ID de organización inválido");
+      }
+
+      const org = await Organization.findById(id).select("name slug").lean();
+      if (!org) {
+        return sendResponse(res, 404, null, "Organización no encontrada");
+      }
+
+      const adminId = req.user.adminId;
+      const admin = await AdminUser.findById(adminId).select("email").lean();
+      const orgId = new mongoose.Types.ObjectId(id);
+
+      await Promise.all([
+        Appointment.deleteMany({ organizationId: orgId }),
+        Client.deleteMany({ organizationId: orgId }),
+        Employee.deleteMany({ organizationId: orgId }),
+        Service.deleteMany({ organizationId: orgId }),
+        Reservation.deleteMany({ organizationId: orgId }),
+        Membership.deleteMany({ organizationId: orgId }),
+        Campaign.deleteMany({ organizationId: orgId }),
+        WhatsappTemplate.deleteMany({ organizationId: orgId }),
+        Notification.deleteMany({ organizationId: orgId }),
+        PaymentEvent.deleteMany({ organizationId: orgId }),
+        PaymentSession.deleteMany({ organizationId: orgId }),
+        Advances.deleteMany({ organizationId: orgId }),
+        Subscription.deleteMany({ organizationId: orgId }),
+        ServicePackage.deleteMany({ organizationId: orgId }),
+        ClientPackage.deleteMany({ organizationId: orgId }),
+        ExchangeCode.deleteMany({ organizationId: orgId }),
+        AuditLog.deleteMany({ organizationId: orgId }),
+        Expense.deleteMany({ organizationId: orgId }),
+        Class.deleteMany({ organizationId: orgId }),
+        ClassSession.deleteMany({ organizationId: orgId }),
+        Room.deleteMany({ organizationId: orgId }),
+        Enrollment.deleteMany({ organizationId: orgId }),
+        ImpersonationAudit.deleteMany({ targetOrganizationId: orgId }),
+      ]);
+
+      await Organization.findByIdAndDelete(id);
+
+      console.log(
+        `[SUPERADMIN] ⚠️ Organización "${org.name}" (${org.slug}) eliminada en cascada por ${admin?.email || adminId}`
+      );
+
+      sendResponse(res, 200, { organizationId: id, name: org.name }, "Organización eliminada exitosamente");
+    } catch (error) {
+      console.error("[admin/deleteOrganization] Error:", error);
+      sendResponse(res, 500, null, "Error al eliminar la organización");
     }
   },
 };

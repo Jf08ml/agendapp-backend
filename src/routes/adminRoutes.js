@@ -52,4 +52,12 @@ router.get(
   adminController.listAudits
 );
 
+/** Eliminar organización y todos sus datos en cascada */
+router.delete(
+  "/admin/organizations/:id",
+  verifyToken,
+  requireSuperAdmin,
+  adminController.deleteOrganization
+);
+
 export default router;

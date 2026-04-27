@@ -34,6 +34,7 @@ import expenseRoutes from "./expenseRoutes.js";
 import registrationRoutes from "./registrationRoutes.js";
 import adminRoutes from "./adminRoutes.js";
 import auditLogRoutes from "./auditLog.js";
+import chatRoutes from "./chatRoutes.js";
 import membershipService from "../services/membershipService.js";
 import { organizationResolver } from "../middleware/organizationResolver";
 import { verifyToken } from "../middleware/authMiddleware.js";
@@ -139,6 +140,7 @@ router.use("/packages", packageRoutes);
 // ═══════════════════════════════════════════════════
 router.use("/organizations", organizationResolver, verifyToken, organizationRoutes);
 router.use("/notifications", verifyToken, notificationRoutes);
+router.use("/chat", organizationResolver, verifyToken, chatRoutes);
 
 // ═══════════════════════════════════════════════════
 // 4. GRUPO PROTEGIDO: auth + membership enforcement

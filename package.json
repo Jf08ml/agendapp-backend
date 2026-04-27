@@ -13,6 +13,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.91.1",
     "@babel/runtime": "^7.25.4",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
