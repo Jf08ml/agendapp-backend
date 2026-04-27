@@ -22,7 +22,7 @@ import appointmentService from "../services/appointmentService.js";
  */
 const reminderJob = () => {
   cron.schedule(
-    "0 * * * *", // Cada hora en punto
+    "*/30 * * * *", // Cada 30 minutos
     () => {
       const now = new Date();
       console.log(

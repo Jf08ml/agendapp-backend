@@ -134,6 +134,8 @@ dbConnection()
     
     membershipCheckJob.start();
     console.log("⏰ Cron job iniciado: verificación de membresías (9 AM hora Colombia)");
+    reminderJob();
+    console.log("⏰ Cron job iniciado: recordatorios de citas (cada hora)");
   })
   .catch((err) => {
     console.error("Failed to connect to the database", err);
