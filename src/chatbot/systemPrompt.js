@@ -1,3 +1,163 @@
+const FRONTEND_NAV_GUIDE = `
+═══ GUÍA DE LA INTERFAZ ═══
+
+MENÚ LATERAL — secciones y rutas:
+
+Sección "Explora" (páginas públicas del negocio):
+  · "Nuestros Servicios"    → /servicios-precios
+  · "Plan de fidelidad"     → /search-client
+  · "Reserva en línea"      → /online-reservation
+  · "Reservar clase"        → /reservar-clase
+
+Sección "Gestión de cuenta":
+  · "Gestión de caja"              → /gestion-caja
+  · "Gestionar agenda"             → /gestionar-agenda
+  · "Gestionar reservas online"    → /gestionar-reservas-online
+  · "Configuración del negocio"    → /informacion-negocio
+  · "Información del profesional"  → /informacion-profesional
+  · "Instrucciones y ayuda"        → /instrucciones
+
+Sección "Sección administrativa":
+  · "Gestionar clientes"         → /gestionar-clientes
+  · "Gestionar servicios"        → /gestionar-servicios
+  · "Gestionar profesionales"    → /gestionar-profesionales
+  · "Paquetes / Planes"          → /gestionar-paquetes
+  · "Módulo de Clases"           → /gestionar-clases
+  · "Gestionar WhatsApp"         → /gestionar-whatsapp
+  · "Mensajes de WhatsApp"       → /mensajes-whatsapp
+  · "Campañas WhatsApp"          → /admin/campaigns
+  · "Analíticas del negocio"     → /analytics-dashboard
+  · "Mi Membresía"               → /my-membership
+  · "Historial de eliminaciones" → /historial-eliminaciones
+
+─────────────────────────────────────
+PÁGINAS — botones y acciones clave:
+─────────────────────────────────────
+
+/gestionar-agenda — Agenda del negocio
+  Toolbar superior:
+    · Ícono de estado WhatsApp (izquierda) — click para ver estado o ir a configurarlo
+    · Badge "Citas este mes: X"
+    · Botón **Crear cita** — abre modal para agendar nueva cita
+    · Menú "⋮ Acciones" contiene:
+        - Buscar citas — búsqueda global por cliente, fecha, etc.
+        - Recargar agenda — refresca las citas del mes actual
+        - Añadir cita — igual que "Crear cita"
+        - Reordenar profesionales — drag & drop para cambiar columnas en vista diaria
+        - Sección "Recordatorios por WhatsApp": selector de fecha + botón "Enviar recordatorios"
+  Cuerpo:
+    · Calendario mensual — click en un día abre la vista diaria con columnas por profesional
+    · Click en una franja horaria vacía → crea nueva cita en ese horario
+    · Click en una cita existente → menú de acciones:
+        - Editar — modifica cliente, servicio, horario, abono
+        - Confirmar — cambia estado a "confirmada"
+        - Cancelar cita (mantener en historial) — marca como cancelada
+        - Eliminar definitivamente — borra por completo del sistema
+        - Marcar asistencia: "Asistió" o "No asistió"
+
+/gestionar-clientes — Listado de clientes
+  Toolbar sticky:
+    · Buscador por nombre o teléfono
+    · Botón **Crear cliente** — abre modal para agregar nuevo cliente
+    · Botón **Carga masiva** — importar clientes desde Excel
+    · Botón **Restablecer todo** — resetea contadores de fidelidad (servicios y referidos) de todos los clientes a 0
+  Tabla de clientes — acciones por fila (menú o botones):
+    · Editar datos del cliente
+    · Eliminar cliente (con historial) o eliminar definitivamente
+    · Fusionar con otro cliente (unir duplicados)
+    · Registrar servicio tomado (contador fidelidad)
+    · Registrar referido (contador fidelidad)
+    · Resetear fidelidad individual
+    · Ver premios ganados
+
+/gestionar-servicios — Catálogo de servicios
+  Toolbar:
+    · Buscador por nombre, tipo o descripción
+    · Select **Tipo** — filtrar por categoría
+    · Control **Estado**: Todos / Activos / Inactivos
+    · Select **Ordenar por**: Nombre (A–Z) / Precio (mayor) / Duración (mayor)
+    · Botón **Descargar Servicios** — exporta a Excel (o descarga plantilla vacía si no hay servicios)
+    · Botón **Carga masiva** — importar servicios desde Excel
+    · Botón **Nuevo servicio** — abre modal de creación
+  Tarjetas de servicio — menú "⋮" por tarjeta:
+    · Editar — abre modal con pestañas: Info, Gastos, Imágenes
+    · Activar / Desactivar — muestra u oculta el servicio para reservas
+    · Eliminar
+
+/gestionar-profesionales — Equipo de trabajo
+  Toolbar:
+    · Buscador por nombre
+    · Control **Estado**: Todos / Activos / Inactivos
+    · Botón **Limpiar filtros**
+    · Botón **Agregar profesional** — abre modal de creación
+  Tarjetas de profesional — acciones:
+    · Editar (datos, comisión, servicios asignados)
+    · Eliminar
+    · Activar / Desactivar
+    · Ver detalle (historial de citas, comisiones)
+    · Registrar anticipo / gasto
+
+/informacion-negocio — Configuración del negocio
+  Pestañas horizontales (scroll si hay muchas):
+    · **Negocio** — nombre, teléfono, descripción, dominio
+    · **Horario y reservas** — días/horas de atención, intervalo entre citas, política de reserva (manual/automática), límites
+    · **Redes sociales** — Instagram, Facebook, TikTok, etc.
+    · **Ubicación** — dirección y mapa
+    · **Fidelidad** — configurar programa de puntos/recompensas
+    · **Branding** — subir Logo, Favicon, Ícono PWA; elegir color principal
+    · **Pagos** — métodos de pago habilitados, datos de cuenta bancaria
+    · **Cancelación** — política de cancelación (horas de anticipación mínimas)
+    · **Recordatorios** — configurar cuándo se envían los recordatorios automáticos
+    · **Formulario cliente** — campos adicionales al reservar en línea
+  Barra sticky inferior (aparece solo cuando hay cambios sin guardar):
+    · Botón **Guardar cambios**
+    · Botón **Cancelar** — descarta los cambios
+
+/gestionar-whatsapp — Conexión de WhatsApp
+  · Conectar sesión escaneando código QR con el teléfono
+  · O vincular ingresando el número de teléfono (pairing code)
+  · Muestra estado de conexión en tiempo real
+
+/mensajes-whatsapp — Personalización de mensajes automáticos
+  · Editar texto de cada tipo de mensaje: confirmación de reserva, recordatorio de cita, cancelación, no asistencia, recompensa de fidelidad, referido, etc.
+  · Cada mensaje tiene variables disponibles (ej: {{names}}, {{date_range}})
+  · Toggle para habilitar/deshabilitar cada tipo de mensaje
+
+/admin/campaigns — Campañas masivas de WhatsApp
+  · Lista de campañas creadas con estado (borrador, enviada, etc.)
+  · Botón **Nueva campaña** → asistente paso a paso para crear campaña
+  · Click en una campaña → ver métricas y detalle de envíos
+
+/analytics-dashboard — Analíticas del negocio
+  · Reportes por período: ingresos, número de citas, clientes nuevos, servicios más populares
+  · Comisiones por profesional
+  · Filtros de fecha y profesional
+
+/gestionar-paquetes — Paquetes de sesiones prepagadas
+  · Plantillas de paquetes (ej: "10 sesiones de masaje por $500.000")
+  · Ver paquetes asignados a clientes con sesiones restantes
+
+/gestionar-clases — Módulo de clases grupales
+  · Clases (plantillas con nombre, instructor, capacidad, precio)
+  · Sesiones programadas (instancias de cada clase con fecha/hora/sala)
+  · Salones (rooms con capacidad y recursos)
+  · Inscripciones de clientes en cada sesión
+
+/gestion-caja — Caja diaria
+  · Vista para profesionales: citas del día, pagos recibidos, anticipos, gastos
+
+/gestionar-reservas-online — Reservas online pendientes
+  · Lista de reservas enviadas por clientes desde el booking público
+  · Acciones por reserva: Aprobar, Rechazar
+
+/my-membership — Membresía y plan
+  · Estado actual de la suscripción (trial, activa, suspendida…)
+  · Botones para renovar o cambiar de plan
+
+/historial-eliminaciones — Auditoría
+  · Registro de todas las eliminaciones realizadas en la plataforma (quién eliminó qué y cuándo)
+`.trim();
+
 export const buildSystemPrompt = (context) => {
   const { organization, setupStatus } = context;
   const isOnboarding = !setupStatus?.setupCompleted;
@@ -112,6 +272,8 @@ Estado actual del negocio:
 ${orgInfo}
 
 ${isOnboarding ? onboardingInstructions : supportInstructions}
+
+${FRONTEND_NAV_GUIDE}
 
 Reglas generales:
 - Responde siempre en español.

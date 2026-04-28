@@ -35,6 +35,7 @@ import registrationRoutes from "./registrationRoutes.js";
 import adminRoutes from "./adminRoutes.js";
 import auditLogRoutes from "./auditLog.js";
 import chatRoutes from "./chatRoutes.js";
+import bookingChatRoutes from "./bookingChatRoutes.js";
 import membershipService from "../services/membershipService.js";
 import { organizationResolver } from "../middleware/organizationResolver";
 import { verifyToken } from "../middleware/authMiddleware.js";
@@ -111,6 +112,7 @@ router.use("/cron", cronRoutes);
 router.use("/plans", planRoutes);
 router.use("/debug", debugRoutes);
 router.use("/public", publicRoutes);
+router.use("/booking-chat", organizationResolver, bookingChatRoutes);
 router.use("/roles", roleRoutes);
 
 // Pagos: webhook público, checkout/confirm protegido internamente
