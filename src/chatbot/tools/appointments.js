@@ -1,6 +1,9 @@
 import Appointment from "../../models/appointmentModel.js";
 import Client from "../../models/clientModel.js";
 import Employee from "../../models/employeeModel.js";
+import Service from "../../models/serviceModel.js";
+import appointmentService from "../../services/appointmentService.js";
+import cancellationService from "../../services/cancellationService.js";
 import moment from "moment-timezone";
 
 const CANCELLED_STATUSES = ["cancelled", "cancelled_by_customer", "cancelled_by_admin"];
@@ -261,6 +264,341 @@ Para dateFrom/dateTo acepta: "today", "yesterday", "this_week", "last_week", "th
       }
 
       return { success: true, ...base };
+    },
+  },
+
+  {
+    name: "create_appointments",
+    description: `Crea una o varias citas para un cliente. Si son varias, envía un único mensaje de WhatsApp con el resumen completo (servicios, profesionales y horarios).
+Úsalo cuando el usuario quiera agendar citas: una sola o varias con distintos servicios, profesionales o días.
+Antes de crear verifica solapamientos con citas existentes del profesional — avisa si los hay pero crea igual salvo que el usuario indique lo contrario.
+Requiere al menos clientName o clientPhone para identificar al cliente.`,
+    parameters: {
+      clientName: {
+        type: "string",
+        description: "Nombre del cliente (búsqueda parcial). Requerido si no se proporciona clientPhone.",
+        required: false,
+      },
+      clientPhone: {
+        type: "string",
+        description: "Teléfono del cliente con código de país (ej: +573001234567). Tiene prioridad sobre clientName.",
+        required: false,
+      },
+      appointments: {
+        type: "array",
+        description: "Lista de citas a crear. Puede incluir distintos servicios, profesionales y horarios.",
+        required: true,
+        items: {
+          type: "object",
+          properties: {
+            serviceName: { type: "string", description: "Nombre del servicio (búsqueda parcial)" },
+            employeeName: { type: "string", description: "Nombre del profesional (búsqueda parcial)" },
+            date: { type: "string", description: "Fecha en formato YYYY-MM-DD" },
+            time: { type: "string", description: "Hora en formato HH:mm en 24h. Ej: 14:30 para las 2:30 PM" },
+            customPrice: { type: "number", description: "Precio personalizado. Si se omite, usa el precio del servicio." },
+          },
+        },
+      },
+      advancePayment: {
+        type: "number",
+        description: "Abono o anticipo del cliente (opcional, por defecto 0).",
+        required: false,
+      },
+    },
+    handler: async (params, context) => {
+      const { organizationId, organization } = context;
+      const timezone = organization.timezone || "America/Bogota";
+
+      // 1. Buscar cliente
+      let clientDoc = null;
+      if (params.clientPhone) {
+        clientDoc = await Client.findOne({
+          organizationId,
+          $or: [{ phone_e164: params.clientPhone }, { phoneNumber: params.clientPhone }],
+        });
+      }
+      if (!clientDoc && params.clientName) {
+        clientDoc = await Client.findOne({
+          organizationId,
+          name: { $regex: params.clientName, $options: "i" },
+        });
+      }
+      if (!clientDoc) {
+        const term = params.clientPhone || params.clientName;
+        return { success: false, error: `No se encontró ningún cliente con "${term}". Verifica el nombre o teléfono.` };
+      }
+
+      // 2. Resolver servicios, empleados y horarios
+      const resolved = [];
+      const warnings = [];
+
+      for (const appt of params.appointments) {
+        const svc = await Service.findOne({
+          organizationId,
+          name: { $regex: appt.serviceName, $options: "i" },
+          isActive: true,
+        });
+        if (!svc) {
+          return { success: false, error: `No se encontró el servicio "${appt.serviceName}". Verifica el nombre.` };
+        }
+
+        const emp = await Employee.findOne({
+          organizationId,
+          names: { $regex: appt.employeeName, $options: "i" },
+          isActive: true,
+        });
+        if (!emp) {
+          return { success: false, error: `No se encontró el profesional "${appt.employeeName}". Verifica el nombre.` };
+        }
+
+        const startMoment = moment.tz(`${appt.date}T${appt.time}:00`, "YYYY-MM-DDTHH:mm:ss", timezone);
+        if (!startMoment.isValid()) {
+          return { success: false, error: `Fecha u hora inválida: "${appt.date} ${appt.time}". Usa formato YYYY-MM-DD y HH:mm.` };
+        }
+        const endMoment = startMoment.clone().add(svc.duration, "minutes");
+
+        // 3. Verificar solapamiento (advertencia, no bloqueo)
+        const overlapping = await Appointment.find({
+          employee: emp._id,
+          status: { $nin: CANCELLED_STATUSES },
+          startDate: { $lt: endMoment.toDate() },
+          endDate: { $gt: startMoment.toDate() },
+        })
+          .populate("client", "name")
+          .populate("service", "name");
+
+        if (overlapping.length > 0) {
+          const list = overlapping
+            .map((o) => `${o.service?.name || "?"} con ${o.client?.name || "?"} a las ${moment(o.startDate).tz(timezone).format("HH:mm")}`)
+            .join(", ");
+          warnings.push(`⚠️ ${emp.names} ya tiene cita(s) en ese horario: ${list}`);
+        }
+
+        resolved.push({
+          serviceId: svc._id.toString(),
+          employeeId: emp._id.toString(),
+          serviceName: svc.name,
+          employeeName: emp.names,
+          duration: svc.duration,
+          startDateStr: startMoment.format("YYYY-MM-DDTHH:mm:ss"),
+          endDateStr: endMoment.format("YYYY-MM-DDTHH:mm:ss"),
+          startDate: startMoment.toDate(),
+          customPrice: appt.customPrice ?? null,
+        });
+      }
+
+      // 4. Crear citas
+      if (resolved.length === 1) {
+        const r = resolved[0];
+        await appointmentService.createAppointment({
+          service: r.serviceId,
+          employee: r.employeeId,
+          employeeRequestedByClient: false,
+          client: clientDoc,
+          startDate: r.startDateStr,
+          endDate: r.endDateStr,
+          organizationId,
+          advancePayment: params.advancePayment || 0,
+          customPrice: r.customPrice,
+          additionalItems: [],
+        });
+      } else {
+        // Múltiples citas → un solo WA al final via createMultiEmployeeBatch
+        const blocks = resolved.map((r) => ({
+          services: [r.serviceId],
+          employee: r.employeeId,
+          startDate: r.startDateStr,
+          customDurations: { [r.serviceId]: r.duration },
+        }));
+
+        await appointmentService.createMultiEmployeeBatch({
+          client: clientDoc._id.toString(),
+          organizationId,
+          advancePayment: params.advancePayment || 0,
+          employeeRequestedByClient: false,
+          blocks,
+        });
+      }
+
+      // 5. Respuesta
+      const resumen = resolved
+        .map((r) => {
+          const hora = moment(r.startDate).tz(timezone).format("DD/MM/YYYY [a las] HH:mm");
+          return `• ${r.serviceName} con ${r.employeeName} el ${hora}`;
+        })
+        .join("\n");
+
+      return {
+        success: true,
+        cliente: clientDoc.name,
+        citasCreadas: resolved.length,
+        resumen,
+        whatsappEnviado: true,
+        ...(warnings.length > 0 && { advertencias: warnings }),
+      };
+    },
+  },
+
+  {
+    name: "cancel_or_delete_appointment",
+    description: `Cancela o elimina definitivamente una cita existente.
+- "cancel": cambia el estado a cancelada (queda en el historial). Opcionalmente notifica al cliente por WhatsApp.
+- "delete": borra la cita permanentemente del sistema (sin historial).
+Busca la cita por criterios (cliente, fecha, servicio, profesional). Si encuentra más de una, devuelve la lista para que el usuario especifique. Si encuentra exactamente una, ejecuta la acción.
+Úsalo cuando el usuario diga "cancela", "borra", "elimina" o "quita" una cita.`,
+    parameters: {
+      action: {
+        type: "string",
+        description: '"cancel" para cancelar (mantiene historial) o "delete" para eliminar definitivamente.',
+        required: true,
+      },
+      clientName: {
+        type: "string",
+        description: "Nombre parcial del cliente cuya cita se quiere cancelar/eliminar.",
+        required: false,
+      },
+      clientPhone: {
+        type: "string",
+        description: "Teléfono del cliente (con código de país). Prioridad sobre clientName.",
+        required: false,
+      },
+      date: {
+        type: "string",
+        description: 'Fecha de la cita en formato YYYY-MM-DD o preset (today, tomorrow, this_week). Ej: "mañana" → YYYY-MM-DD del día siguiente.',
+        required: false,
+      },
+      serviceName: {
+        type: "string",
+        description: "Nombre parcial del servicio para afinar la búsqueda (opcional).",
+        required: false,
+      },
+      employeeName: {
+        type: "string",
+        description: "Nombre parcial del profesional para afinar la búsqueda (opcional).",
+        required: false,
+      },
+      notifyClient: {
+        type: "boolean",
+        description: 'Solo aplica si action="cancel". true = enviar WhatsApp al cliente informando la cancelación. Por defecto false.',
+        required: false,
+      },
+    },
+    handler: async (params, context) => {
+      const { organizationId, organization } = context;
+      const timezone = organization.timezone || "America/Bogota";
+
+      if (!["cancel", "delete"].includes(params.action)) {
+        return { success: false, error: 'La acción debe ser "cancel" o "delete".' };
+      }
+
+      // 1. Construir filtro base
+      const filter = {
+        organizationId,
+        status: { $nin: CANCELLED_STATUSES },
+      };
+
+      // 2. Filtrar por cliente
+      if (params.clientPhone || params.clientName) {
+        const clientQuery = params.clientPhone
+          ? { organizationId, $or: [{ phone_e164: params.clientPhone }, { phoneNumber: params.clientPhone }] }
+          : { organizationId, name: { $regex: params.clientName, $options: "i" } };
+        const clients = await Client.find(clientQuery).select("_id");
+        if (clients.length === 0) {
+          const term = params.clientPhone || params.clientName;
+          return { success: false, error: `No se encontró ningún cliente con "${term}".` };
+        }
+        filter.client = { $in: clients.map((c) => c._id) };
+      }
+
+      // 3. Filtrar por fecha
+      if (params.date) {
+        const now = moment.tz(timezone);
+        const presets = {
+          today: [now.clone().startOf("day"), now.clone().endOf("day")],
+          tomorrow: [now.clone().add(1, "day").startOf("day"), now.clone().add(1, "day").endOf("day")],
+          this_week: [now.clone().startOf("isoWeek"), now.clone().endOf("isoWeek")],
+          next_week: [now.clone().add(1, "week").startOf("isoWeek"), now.clone().add(1, "week").endOf("isoWeek")],
+        };
+        const range = presets[params.date] || (() => {
+          const d = moment.tz(params.date, "YYYY-MM-DD", timezone);
+          return d.isValid() ? [d.startOf("day"), d.clone().endOf("day")] : null;
+        })();
+        if (!range) {
+          return { success: false, error: `Fecha inválida: "${params.date}". Usa YYYY-MM-DD o presets (today, tomorrow, this_week).` };
+        }
+        filter.startDate = { $gte: range[0].toDate(), $lte: range[1].toDate() };
+      }
+
+      // 4. Filtrar por servicio
+      if (params.serviceName) {
+        const svcs = await Service.find({ organizationId, name: { $regex: params.serviceName, $options: "i" }, isActive: true }).select("_id");
+        if (svcs.length === 0) return { success: false, error: `No se encontró el servicio "${params.serviceName}".` };
+        filter.service = { $in: svcs.map((s) => s._id) };
+      }
+
+      // 5. Filtrar por profesional
+      if (params.employeeName) {
+        const emps = await Employee.find({ organizationId, names: { $regex: params.employeeName, $options: "i" }, isActive: true }).select("_id");
+        if (emps.length === 0) return { success: false, error: `No se encontró el profesional "${params.employeeName}".` };
+        filter.employee = { $in: emps.map((e) => e._id) };
+      }
+
+      // 6. Buscar citas
+      const appointments = await Appointment.find(filter)
+        .populate("client", "name")
+        .populate("service", "name")
+        .populate("employee", "names")
+        .sort({ startDate: 1 })
+        .limit(10);
+
+      if (appointments.length === 0) {
+        return { success: false, error: "No se encontraron citas con esos criterios. Intenta con más detalles (cliente, fecha, servicio)." };
+      }
+
+      // 7. Si hay varias, pedir que especifique
+      if (appointments.length > 1) {
+        const lista = appointments.map((a) => {
+          const fecha = moment(a.startDate).tz(timezone).format("DD/MM/YYYY [a las] HH:mm");
+          return `• ${a.client?.name || "?"} — ${a.service?.name || "?"} con ${a.employee?.names || "?"} el ${fecha} (ID: ${a._id})`;
+        });
+        return {
+          success: false,
+          multipleFound: true,
+          message: `Encontré ${appointments.length} citas. ¿A cuál te refieres?`,
+          citas: lista,
+        };
+      }
+
+      // 8. Exactamente una cita — ejecutar acción
+      const appt = appointments[0];
+      const fecha = moment(appt.startDate).tz(timezone).format("DD/MM/YYYY [a las] HH:mm");
+      const resumen = `${appt.service?.name || "?"} de ${appt.client?.name || "?"} con ${appt.employee?.names || "?"} el ${fecha}`;
+
+      if (params.action === "cancel") {
+        const result = await cancellationService.cancelAppointment(
+          appt._id.toString(),
+          "admin",
+          null,
+          params.notifyClient ?? false
+        );
+        if (!result.success) {
+          return { success: false, error: result.message };
+        }
+        return {
+          success: true,
+          action: "cancel",
+          resumen,
+          whatsappEnviado: params.notifyClient ?? false,
+        };
+      }
+
+      // delete
+      await appointmentService.deleteAppointment(appt._id.toString());
+      return {
+        success: true,
+        action: "delete",
+        resumen,
+      };
     },
   },
 ];

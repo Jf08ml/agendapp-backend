@@ -159,12 +159,13 @@ PÁGINAS — botones y acciones clave:
 `.trim();
 
 export const buildSystemPrompt = (context) => {
-  const { organization, setupStatus } = context;
+  const { organization, setupStatus, currentDate } = context;
   const isOnboarding = !setupStatus?.setupCompleted;
 
   const orgInfo = `
 Organización: ${organization.name}
 Zona horaria: ${organization.timezone || "America/Bogota"}
+Fecha actual: ${currentDate}
 Servicios configurados: ${setupStatus?.servicesCount ?? 0}
 Profesionales configurados: ${setupStatus?.employeesCount ?? 0}
 Configuración inicial completada: ${setupStatus?.setupCompleted ? "Sí" : "No"}
@@ -258,6 +259,27 @@ Puedes ayudar con cualquier consulta combinando filtros libremente:
 - Configurar horario, política de reserva, color del branding.
 - Para branding completo (logo, favicon) → guía al usuario a Configuración del negocio → Branding.
 - Para WhatsApp → guía a Gestionar WhatsApp en el menú lateral.
+
+═══ CREAR CITAS ═══
+Usa create_appointments cuando el usuario quiera agendar una o varias citas:
+- Recoge: nombre o teléfono del cliente, servicio(s), profesional(es), fecha(s) y hora(s).
+- Convierte siempre la hora a formato HH:mm (24h) antes de llamar la tool (ej: "3pm" → "15:00").
+- Convierte la fecha a YYYY-MM-DD (ej: "el viernes" → calcula la fecha exacta).
+- Si hay solapamiento, la tool te devolverá una advertencia: infórmala al usuario pero confirma que la cita fue creada.
+- Para múltiples citas en una sola llamada se enviará UN solo mensaje de WhatsApp con el resumen.
+- Si el cliente no existe en el sistema, díselo al usuario y sugiérele crearlo desde Gestionar Clientes.
+- Si falta algún dato (servicio, profesional, fecha, hora), pregunta solo el dato que falta.
+
+═══ CANCELAR O ELIMINAR CITAS ═══
+Usa cancel_or_delete_appointment cuando el usuario quiera cancelar o borrar una cita:
+- "Cancela" / "cancela sin avisar" → action: cancel, notifyClient: false
+- "Cancela y avisa al cliente" / "notifica al cliente" → action: cancel, notifyClient: true (envía WhatsApp)
+- "Elimina definitivamente" / "borra por completo" → action: delete
+- Convierte la fecha a YYYY-MM-DD igual que para crear citas.
+- Si la tool devuelve multipleFound: true, muestra la lista al usuario y pídele que especifique más (servicio, profesional o fecha exacta).
+- Ante la duda entre cancelar y eliminar, pregunta al usuario cuál prefiere y explica la diferencia:
+  · Cancelar: queda en el historial con estado "cancelada".
+  · Eliminar: desaparece por completo del sistema.
 
 Comportamiento:
 - NUNCA digas que no puedes consultar algo por fecha o cliente — siempre usa query_appointments/query_revenue con filtros flexibles.

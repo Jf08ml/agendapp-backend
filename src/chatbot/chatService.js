@@ -20,6 +20,7 @@ const buildContext = async (organization, user) => {
     organizationId: organization._id,
     organization,
     user,
+    currentDate: new Date().toISOString().slice(0, 10), // YYYY-MM-DD en UTC
     setupStatus: {
       servicesCount,
       employeesCount,

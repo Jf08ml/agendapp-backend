@@ -127,6 +127,11 @@ const appointmentService = {
       throw new Error("Servicio no encontrado");
     }
 
+    // Resolver empleado: acepta ID (string) u objeto poblado
+    const employeeDoc = typeof employee === "object" && employee !== null
+      ? employee
+      : await employeeService.getEmployeeById(employee);
+
     const basePrice = customPrice ?? serviceDetails.price; // Usar precio personalizado o el del servicio
     const additionalCost = additionalItems.reduce(
       (sum, item) => sum + item.price * item.quantity,
@@ -178,7 +183,7 @@ const appointmentService = {
       organization: organization.name,
       address: organization.address || "",
       service: serviceDetails.name,
-      employee: employee.names,
+      employee: employeeDoc?.names || "",
       phoneNumber: organization.phoneNumber,
     };
 
