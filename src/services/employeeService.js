@@ -98,6 +98,7 @@ const employeeService = {
       order,
       commissionType,
       commissionValue,
+      customPermissions,
     } = employeeData;
     const employee = await Employee.findById(id);
 
@@ -122,6 +123,9 @@ const employeeService = {
       commissionType !== undefined ? commissionType : employee.commissionType;
     employee.commissionValue =
       commissionValue !== undefined ? commissionValue : employee.commissionValue;
+    if (customPermissions !== undefined) {
+      employee.customPermissions = customPermissions;
+    }
 
     // Encriptar la contraseña solo si se ha proporcionado una nueva
     if (password) {
