@@ -159,6 +159,7 @@ const organizationService = {
       allowedHolidayDates,
       hasAccessBlocked,
       clientFormConfig,
+      termsAndConditions,
     } = organizationData;
 
     const organization = await Organization.findById(id);
@@ -328,6 +329,14 @@ const organizationService = {
 
     if (allowedHolidayDates !== undefined) {
       organization.allowedHolidayDates = allowedHolidayDates;
+    }
+
+    // 📄 Términos y condiciones
+    if (termsAndConditions !== undefined) {
+      organization.termsAndConditions = {
+        ...organization.termsAndConditions,
+        ...termsAndConditions,
+      };
     }
 
     // 📋 Configuración del formulario de cliente
