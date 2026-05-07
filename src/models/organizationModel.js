@@ -64,6 +64,11 @@ const BrandingSchema = new mongoose.Schema(
     pwaDescription: String,
     footerTextColor: String,
     manifest: Object,
+    fontFamily: {
+      type: String,
+      enum: ["inter", "plus-jakarta-sans", "nunito", "dm-sans", "outfit", "manrope"],
+      default: "inter",
+    },
   },
   { _id: false }
 );
