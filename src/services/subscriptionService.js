@@ -61,7 +61,12 @@ const subscriptionService = {
     try {
       await webPush.sendNotification(subscription, payload, options);
     } catch (error) {
-      console.error("Error al enviar notificación:", error);
+      // 410 Gone / 404 Not Found = suscripción expirada o cancelada, limpiar de DB
+      if (error.statusCode === 410 || error.statusCode === 404) {
+        await Subscription.findOneAndDelete({ endpoint: subscription.endpoint });
+      } else {
+        console.error("Error al enviar notificación push:", error.message);
+      }
     }
   },
 
@@ -71,9 +76,11 @@ const subscriptionService = {
       userId
     );
 
-    subscriptions.forEach(async (subscription) => {
-      await subscriptionService.sendNotification(subscription, payload);
-    });
+    await Promise.all(
+      subscriptions.map((subscription) =>
+        subscriptionService.sendNotification(subscription, payload)
+      )
+    );
   },
 
   // Enviar notificación a todos los usuarios
@@ -84,9 +91,11 @@ const subscriptionService = {
       throw new Error("No hay suscripciones registradas");
     }
 
-    subscriptions.forEach(async (subscription) => {
-      await subscriptionService.sendNotification(subscription, payload);
-    });
+    await Promise.all(
+      subscriptions.map((subscription) =>
+        subscriptionService.sendNotification(subscription, payload)
+      )
+    );
   },
 
   deleteSubscription: async (endpoint, userId) => {
