@@ -56,6 +56,7 @@ const employeeService = {
     return await Employee.find({ organizationId })
       .select("-password")
       .populate("services")
+      .populate("role")
       .sort({ order: 1, _id: 1 }) // Ordenar primero por 'order' ascendente, luego por '_id' como respaldo
       .exec();
   },
