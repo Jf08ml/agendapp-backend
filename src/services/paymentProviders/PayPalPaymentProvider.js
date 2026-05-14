@@ -315,4 +315,101 @@ export default class PayPalPaymentProvider extends PaymentProvider {
   async verifySession(_sessionId) {
     return null;
   }
+
+  // ─── Diagnóstico ──────────────────────────────────────────────────────────
+
+  /**
+   * Verifica la configuración completa de PayPal:
+   * - Conexión OAuth2
+   * - Lista de webhooks registrados
+   * - Si el PAYPAL_WEBHOOK_ID configurado existe y apunta a la URL correcta
+   * - Qué tipos de eventos están suscritos
+   */
+  async diagnose(backendUrl) {
+    const result = {
+      mode: this.mode,
+      baseUrl: this.baseUrl,
+      clientIdPrefix: this.clientId?.slice(0, 8) + "...",
+      webhookIdConfigured: this.webhookId,
+      oauth: null,
+      webhooks: null,
+      configuredWebhook: null,
+      issues: [],
+    };
+
+    // 1. Verificar OAuth
+    try {
+      await this._getToken();
+      result.oauth = "OK";
+    } catch (err) {
+      result.oauth = `ERROR: ${err.message}`;
+      result.issues.push("OAuth2 falló — CLIENT_ID o CLIENT_SECRET incorrectos");
+      return result; // sin token no podemos seguir
+    }
+
+    const token = this._token;
+
+    // 2. Listar todos los webhooks registrados en PayPal
+    try {
+      const res = await fetch(`${this.baseUrl}/v1/notifications/webhooks`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      result.webhooks = (data.webhooks || []).map((wh) => ({
+        id: wh.id,
+        url: wh.url,
+        eventTypes: (wh.event_types || []).map((e) => e.name),
+      }));
+    } catch (err) {
+      result.issues.push(`No se pudieron listar webhooks: ${err.message}`);
+    }
+
+    // 3. Verificar el webhook configurado en PAYPAL_WEBHOOK_ID
+    if (this.webhookId) {
+      try {
+        const res = await fetch(`${this.baseUrl}/v1/notifications/webhooks/${this.webhookId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          result.configuredWebhook = `ERROR ${res.status}: webhook ID no encontrado en PayPal`;
+          result.issues.push("PAYPAL_WEBHOOK_ID no existe en PayPal — la verificación de firma siempre fallará");
+        } else {
+          const wh = await res.json();
+          const eventTypes = (wh.event_types || []).map((e) => e.name);
+          result.configuredWebhook = {
+            id: wh.id,
+            url: wh.url,
+            eventTypes,
+          };
+
+          // Verificar URL apunta al backend correcto
+          if (backendUrl && !wh.url.includes(backendUrl.replace(/https?:\/\//, ""))) {
+            result.issues.push(
+              `El webhook apunta a "${wh.url}" pero el backend esperado contiene "${backendUrl}"`
+            );
+          }
+
+          // Verificar eventos críticos suscritos
+          const required = [
+            "BILLING.SUBSCRIPTION.ACTIVATED",
+            "PAYMENT.SALE.COMPLETED",
+            "BILLING.SUBSCRIPTION.SUSPENDED",
+            "BILLING.SUBSCRIPTION.CANCELLED",
+            "PAYMENT.CAPTURE.COMPLETED",
+          ];
+          const missing = required.filter((e) => !eventTypes.includes(e) && !eventTypes.includes("*"));
+          if (missing.length > 0) {
+            result.issues.push(`Eventos no suscritos en el webhook: ${missing.join(", ")}`);
+          }
+        }
+      } catch (err) {
+        result.issues.push(`Error consultando webhook ${this.webhookId}: ${err.message}`);
+      }
+    } else {
+      result.issues.push("PAYPAL_WEBHOOK_ID no está configurado — la verificación de firma fallará");
+    }
+
+    result.ok = result.issues.length === 0;
+    return result;
+  }
 }

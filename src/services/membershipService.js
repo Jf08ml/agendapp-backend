@@ -293,19 +293,22 @@ const membershipService = {
    * Renovar membresía (registrar pago) — usado por superadmin
    */
   renewMembership: async (membershipId, paymentAmount) => {
-    const membership = await membershipModel.findById(membershipId);
+    const membership = await membershipModel.findById(membershipId).populate("planId");
     if (!membership) throw new Error("Membresía no encontrada");
 
     const now = new Date();
+    const cycleMonths = { monthly: 1, quarterly: 3, semiannual: 6, yearly: 12, lifetime: 120 };
+    const months = cycleMonths[membership.planId?.billingCycle] ?? 1;
+
     let newPeriodEnd;
 
     if (membership.currentPeriodEnd < now) {
       membership.currentPeriodStart = now;
       newPeriodEnd = new Date(now);
-      newPeriodEnd.setMonth(newPeriodEnd.getMonth() + 1);
+      newPeriodEnd.setMonth(newPeriodEnd.getMonth() + months);
     } else {
       newPeriodEnd = new Date(membership.currentPeriodEnd);
-      newPeriodEnd.setMonth(newPeriodEnd.getMonth() + 1);
+      newPeriodEnd.setMonth(newPeriodEnd.getMonth() + months);
     }
 
     membership.currentPeriodEnd = newPeriodEnd;

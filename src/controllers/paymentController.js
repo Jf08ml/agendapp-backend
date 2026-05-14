@@ -1,5 +1,6 @@
 // controllers/paymentController.js
 import paymentService from "../services/paymentService.js";
+import { runPaypalSubscriptionSync } from "../cron/paypalSubscriptionSyncJob.js";
 import sendResponse from "../utils/sendResponse.js";
 
 const paymentController = {
@@ -153,38 +154,48 @@ const paymentController = {
    *   500: error temporal (DB caída) → proveedor reintenta
    */
   handleWebhook: async (req, res) => {
-    try {
-      const { provider: providerName } = req.params;
+    const { provider: providerName } = req.params;
+    const eventType = req.body?.event_type || "unknown";
+    const eventId = req.body?.id || "no-id";
+    console.log(`[Webhook] ▶ ${providerName} | ${eventType} | id=${eventId}`);
 
+    try {
       let provider;
       try {
         provider = paymentService.getProvider(providerName);
       } catch {
+        console.warn(`[Webhook] Provider no soportado: ${providerName}`);
         return res.status(400).json({ error: `Provider "${providerName}" not supported` });
       }
 
       let parsed;
       try {
-        // await es necesario porque parseWebhook puede ser async (PayPal)
         parsed = await provider.parseWebhook(req.headers, req.body, req.rawBody);
       } catch (parseError) {
-        console.error(`[Payment] Error parseando webhook ${providerName}:`, parseError.message);
+        console.error(`[Webhook] Error parseando ${providerName}/${eventType}:`, parseError.message);
         return res.status(400).json({ error: "Invalid webhook payload" });
       }
 
-      // Eventos ignorados (ej. CHECKOUT.ORDER.APPROVED, tipos no soportados)
       if (parsed.status === "ignored" || !parsed.sessionId) {
+        console.log(`[Webhook] Ignorado: ${eventType}`);
         return res.status(200).json({ received: true, ignored: true });
       }
 
+      console.log(`[Webhook] Procesando: sessionId=${parsed.sessionId} status=${parsed.status}`);
       const result = await paymentService.processPaymentEvent({
         provider: providerName,
         ...parsed,
       });
 
+      if (result.alreadyProcessed) {
+        console.log(`[Webhook] Ya procesado: ${parsed.eventId}`);
+      } else {
+        console.log(`[Webhook] ✓ Completado: ${parsed.eventId}`);
+      }
+
       res.status(200).json({ received: true, alreadyProcessed: result.alreadyProcessed });
     } catch (error) {
-      console.error(`[Payment] Error en webhook ${req.params.provider}:`, error);
+      console.error(`[Webhook] ✗ Error ${providerName}/${eventType}:`, error.message, error.stack);
       res.status(500).json({ error: "Internal processing error" });
     }
   },
@@ -198,6 +209,81 @@ const paymentController = {
       const sessions = await paymentService.getPaymentHistory(organizationId);
       sendResponse(res, 200, sessions, "Historial de pagos");
     } catch (error) {
+      sendResponse(res, 500, null, error.message);
+    }
+  },
+
+  /**
+   * POST /payments/paypal/renew-by-subscription
+   * Superadmin: registra manualmente un pago de renovación para una suscripción PayPal.
+   * Útil cuando el webhook PAYMENT.SALE.COMPLETED no llegó (URL incorrecta, etc.).
+   *
+   * Body: { subscriptionId, amount, currency? }
+   * Busca la membresía por paypalSubscriptionId y la renueva usando el billingCycle del plan.
+   */
+  renewBySubscription: async (req, res) => {
+    try {
+      const { subscriptionId, amount, currency } = req.body;
+
+      if (!subscriptionId || !amount) {
+        return sendResponse(res, 400, null, "subscriptionId y amount son requeridos");
+      }
+
+      // eventId único para que sea idempotente pero no colisione con webhooks reales
+      const eventId = `manual_renewal_${subscriptionId}_${Date.now()}`;
+
+      const result = await paymentService.processPaymentEvent({
+        provider: "paypal",
+        eventId,
+        type: "PAYMENT.SALE.COMPLETED",
+        sessionId: `sub_${subscriptionId}`,
+        amount: parseFloat(amount),
+        currency: (currency || "USD").toUpperCase(),
+        status: "succeeded",
+        subscriptionId,
+        paymentMode: "subscription",
+        raw: { manual: true, renewedBy: req.user?.id, renewedAt: new Date() },
+      });
+
+      if (result.alreadyProcessed) {
+        return sendResponse(res, 200, result, "Esta renovación ya fue procesada");
+      }
+
+      sendResponse(res, 200, result, `Membresía renovada para suscripción ${subscriptionId}`);
+    } catch (error) {
+      console.error("[Payment] Error en renovación manual por subscriptionId:", error);
+      sendResponse(res, 500, null, error.message);
+    }
+  },
+
+  /**
+   * GET /payments/paypal/diagnose
+   * Superadmin: verifica la configuración de PayPal (OAuth, webhooks, eventos suscritos).
+   * No modifica nada, solo consulta la API de PayPal y reporta problemas.
+   */
+  diagnosePaypal: async (req, res) => {
+    try {
+      const provider = paymentService.getProvider("paypal");
+      const backendUrl = process.env.BACKEND_URL || process.env.VERCEL_URL || "";
+      const result = await provider.diagnose(backendUrl);
+      sendResponse(res, 200, result, result.ok ? "Configuración OK" : "Se encontraron problemas");
+    } catch (error) {
+      console.error("[Payment] Error en diagnóstico PayPal:", error);
+      sendResponse(res, 500, null, error.message);
+    }
+  },
+
+  /**
+   * POST /payments/paypal/sync-subscriptions
+   * Superadmin: ejecutar manualmente el sync activo de suscripciones PayPal.
+   * Útil para activar membresías cuyo webhook nunca llegó.
+   */
+  syncPaypalSubscriptions: async (req, res) => {
+    try {
+      const result = await runPaypalSubscriptionSync();
+      sendResponse(res, 200, result, "Sync de suscripciones completado");
+    } catch (error) {
+      console.error("[Payment] Error en sync manual de suscripciones:", error);
       sendResponse(res, 500, null, error.message);
     }
   },

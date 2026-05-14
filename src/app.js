@@ -10,6 +10,7 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import routes from "./routes/indexRoutes.js";
 import membershipCheckJob from "./cron/membershipCheckJob.js";
+import paypalSubscriptionSyncJob from "./cron/paypalSubscriptionSyncJob.js";
 import reminderJob from "./cron/reminderJob.js";
 import { dynamicCorsOptions } from "./middleware/corsMiddleware.js";
 
@@ -134,6 +135,8 @@ dbConnection()
     
     membershipCheckJob.start();
     console.log("⏰ Cron job iniciado: verificación de membresías (9 AM hora Colombia)");
+    paypalSubscriptionSyncJob.start();
+    console.log("⏰ Cron job iniciado: sync activo de suscripciones PayPal (cada 30 min)");
     reminderJob();
     console.log("⏰ Cron job iniciado: recordatorios de citas (cada media hora)");
   })
