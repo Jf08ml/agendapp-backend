@@ -48,8 +48,12 @@ export const processChat = async (organization, user, messages) => {
 
   let currentMessages = [...messages];
   const executedTools = new Set();
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let rounds = 0;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    rounds = round + 1;
     const toolsWithCache = claudeTools.map((t, i) =>
       i === claudeTools.length - 1 ? { ...t, cache_control: { type: "ephemeral" } } : t
     );
@@ -62,12 +66,19 @@ export const processChat = async (organization, user, messages) => {
       messages: currentMessages,
     });
 
+    inputTokens += response.usage?.input_tokens ?? 0;
+    outputTokens += response.usage?.output_tokens ?? 0;
+
     if (response.stop_reason !== "tool_use") {
       const reply = extractText(response.content);
       const invalidates = [...executedTools].some((t) => ORG_INVALIDATING_TOOLS.has(t))
         ? ["organization"]
         : [];
-      return { reply, invalidates };
+      return {
+        reply,
+        invalidates,
+        _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false },
+      };
     }
 
     const toolUseBlocks = response.content.filter((b) => b.type === "tool_use");
@@ -95,5 +106,9 @@ export const processChat = async (organization, user, messages) => {
     ];
   }
 
-  return { reply: "Lo siento, no pude completar la acción. Por favor intenta de nuevo.", invalidates: [] };
+  return {
+    reply: "Lo siento, no pude completar la acción. Por favor intenta de nuevo.",
+    invalidates: [],
+    _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: true },
+  };
 };

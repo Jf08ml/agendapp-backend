@@ -22,6 +22,10 @@ export const processBookingChat = async (organization, messages) => {
 
   let currentMessages = [...messages];
   let bookingPayload = null;
+  const executedTools = new Set();
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let rounds = 0;
 
   const toolsWithCache = bookingClaudeTools.map((t, i) =>
     i === bookingClaudeTools.length - 1
@@ -30,35 +34,35 @@ export const processBookingChat = async (organization, messages) => {
   );
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    rounds = round + 1;
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: MAX_TOKENS,
-      system: [
-        {
-          type: "text",
-          text: systemPrompt,
-          cache_control: { type: "ephemeral" },
-        },
-      ],
+      system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
       tools: toolsWithCache,
       messages: currentMessages,
     });
 
+    inputTokens += response.usage?.input_tokens ?? 0;
+    outputTokens += response.usage?.output_tokens ?? 0;
+
     if (response.stop_reason !== "tool_use") {
       const reply = extractText(response.content);
-      return { reply, bookingPayload };
+      return {
+        reply,
+        bookingPayload,
+        _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false },
+      };
     }
 
-    const toolUseBlocks = response.content.filter(
-      (b) => b.type === "tool_use"
-    );
+    const toolUseBlocks = response.content.filter((b) => b.type === "tool_use");
 
     const toolResults = await Promise.all(
       toolUseBlocks.map(async (block) => {
+        executedTools.add(block.name);
         let result;
         try {
           result = await executeBookingTool(block.name, block.input, context);
-          // Capturar el payload cuando prepare_reservation devuelve éxito
           if (block.name === "prepare_reservation" && result?.success) {
             bookingPayload = result.payload;
           }
@@ -81,8 +85,8 @@ export const processBookingChat = async (organization, messages) => {
   }
 
   return {
-    reply:
-      "Lo siento, no pude completar el proceso. Por favor intenta de nuevo.",
+    reply: "Lo siento, no pude completar el proceso. Por favor intenta de nuevo.",
     bookingPayload: null,
+    _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: true },
   };
 };

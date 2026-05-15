@@ -1,8 +1,15 @@
 import { processBookingChat } from "./bookingChatService.js";
 import sendResponse from "../utils/sendResponse.js";
+import ChatLog from "../models/chatLogModel.js";
+
+function extractTextMessages(messages) {
+  return messages
+    .filter((m) => typeof m.content === "string" && ["user", "assistant"].includes(m.role))
+    .map((m) => ({ role: m.role, content: m.content }));
+}
 
 export const bookingChat = async (req, res) => {
-  const { messages } = req.body;
+  const { messages, sessionId } = req.body;
 
   if (!Array.isArray(messages) || messages.length === 0) {
     return sendResponse(res, 400, null, "Se requiere un arreglo de mensajes.");
@@ -18,10 +25,50 @@ export const bookingChat = async (req, res) => {
     return sendResponse(res, 404, null, "Organización no encontrada.");
   }
 
-  const { reply, bookingPayload } = await processBookingChat(
-    req.organization,
-    messages
-  );
+  const startTime = Date.now();
+  let result;
+
+  try {
+    result = await processBookingChat(req.organization, messages);
+  } catch (err) {
+    if (sessionId) {
+      ChatLog.findOneAndUpdate(
+        { sessionId },
+        {
+          $setOnInsert: { organizationId: req.organization._id, type: "booking" },
+          $set: { error: err.message },
+          $inc: { durationMs: Date.now() - startTime },
+        },
+        { upsert: true }
+      ).catch(() => {});
+    }
+    return sendResponse(res, 500, null, "Error procesando el chat.");
+  }
+
+  const { reply, bookingPayload, _meta } = result;
+
+  if (sessionId) {
+    ChatLog.findOneAndUpdate(
+      { sessionId },
+      {
+        $setOnInsert: { organizationId: req.organization._id, type: "booking" },
+        $set: {
+          messages: extractTextMessages(messages),
+          reply,
+          hitRoundLimit: _meta.hitRoundLimit,
+          ...(bookingPayload ? { bookingPayload } : {}),
+        },
+        $inc: {
+          rounds: _meta.rounds,
+          inputTokens: _meta.inputTokens,
+          outputTokens: _meta.outputTokens,
+          durationMs: Date.now() - startTime,
+        },
+        $addToSet: { toolsUsed: { $each: _meta.toolsUsed } },
+      },
+      { upsert: true }
+    ).catch(() => {});
+  }
 
   return sendResponse(res, 200, { reply, bookingPayload });
 };
