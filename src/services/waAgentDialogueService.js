@@ -14,7 +14,10 @@ const anthropic = new Anthropic();
 // ─── Punto de entrada: primera vez que detectamos intención ──────────────────
 
 export async function startDialogue(convo, org, intent) {
-  const { services, employees } = await loadOrgData(org._id);
+  const [{ services, employees }, clientInfo] = await Promise.all([
+    loadOrgData(org._id),
+    loadClientInfo(convo.clientPhone, org._id),
+  ]);
   const orgAdminPhone = normalizePhone(org.phoneNumber);
 
   const clientConvText = convo.messages
@@ -28,6 +31,7 @@ export async function startDialogue(convo, org, intent) {
     clientConvText,
     adminConversation: [],
     clientPhone: convo.clientPhone,
+    clientInfo,
   });
 
   if (!agentMessage) return;
@@ -37,10 +41,10 @@ export async function startDialogue(convo, org, intent) {
   }
 
   if (agentMessage.action === "create_appointment") {
-    const validationError = validateAgentIds(agentMessage, services, employees);
+    const validationError = validateAgentIds(agentMessage, services, employees, clientInfo, org.clientFormConfig);
     if (validationError) {
-      console.error("[WaDialogue] IDs inválidos del LLM en startDialogue:", validationError, agentMessage);
-      await sendAndRecord(convo, orgAdminPhone, `No pude identificar el servicio o profesional. ¿Puedes confirmar? ${validationError}`);
+      console.error("[WaDialogue] Validación fallida en startDialogue:", validationError, agentMessage);
+      await sendAndRecord(convo, orgAdminPhone, `Falta información para crear la cita: ${validationError}`);
       return;
     }
     const freshConvo = await WaConversation.findById(convo._id).lean();
@@ -57,7 +61,9 @@ export async function continueDialogue(convo, org, adminReply) {
     return;
   }
 
-  const { services, employees } = await loadOrgData(org._id);
+  const [{ services, employees }] = await Promise.all([
+    loadOrgData(org._id),
+  ]);
   const orgAdminPhone = normalizePhone(org.phoneNumber);
 
   // Agregar respuesta del admin al historial
@@ -66,6 +72,7 @@ export async function continueDialogue(convo, org, adminReply) {
   });
 
   const updatedConvo = await WaConversation.findById(convo._id).lean();
+  const clientInfo = await loadClientInfo(convo.clientPhone, org._id);
 
   const clientConvText = updatedConvo.messages
     .map((m) => `${m.role === "client" ? "Cliente" : "Negocio"}: ${m.body}`)
@@ -78,6 +85,7 @@ export async function continueDialogue(convo, org, adminReply) {
     clientConvText,
     adminConversation: updatedConvo.adminConversation,
     clientPhone: convo.clientPhone,
+    clientInfo,
   });
 
   if (!agentMessage) return;
@@ -94,10 +102,10 @@ export async function continueDialogue(convo, org, adminReply) {
   }
 
   if (agentMessage.action === "create_appointment") {
-    const validationError = validateAgentIds(agentMessage, services, employees);
+    const validationError = validateAgentIds(agentMessage, services, employees, clientInfo, org.clientFormConfig);
     if (validationError) {
-      console.error("[WaDialogue] IDs inválidos del LLM:", validationError, agentMessage);
-      await sendAndRecord(updatedConvo, orgAdminPhone, `No pude identificar el servicio o profesional correctamente. ¿Puedes confirmar? ${validationError}`);
+      console.error("[WaDialogue] Validación fallida en continueDialogue:", validationError, agentMessage);
+      await sendAndRecord(updatedConvo, orgAdminPhone, `Falta información para crear la cita: ${validationError}`);
       return;
     }
     await createAppointment(updatedConvo, org, agentMessage, orgAdminPhone, services);
@@ -106,7 +114,7 @@ export async function continueDialogue(convo, org, adminReply) {
 
 // ─── LLM: orquestador del diálogo ───────────────────────────────────────────
 
-async function runDialogueAgent({ org, services, employees, clientConvText, adminConversation, clientPhone }) {
+async function runDialogueAgent({ org, services, employees, clientConvText, adminConversation, clientPhone, clientInfo }) {
   const now = moment().tz(org.timezone || "America/Bogota").format("dddd D [de] MMMM [de] YYYY, HH:mm");
 
   const servicesList = services
@@ -121,6 +129,10 @@ async function runDialogueAgent({ org, services, employees, clientConvText, admi
     ? adminConversation.map((m) => `${m.role === "agent" ? "Agente" : "Admin"}: ${m.body}`).join("\n")
     : "(sin mensajes aún)";
 
+  const clientSection = clientInfo.exists
+    ? `CLIENTE: Registrado como "${clientInfo.name}" (${clientPhone})`
+    : buildNewClientSection(clientPhone, org.clientFormConfig);
+
   const systemPrompt = `Eres el asistente de agenda de AgenditApp para ${org.name}.
 Un cliente escribió al WhatsApp del negocio solicitando una cita. Tu trabajo es confirmar los detalles con el administrador por WhatsApp y crear la cita cuando todo esté confirmado.
 
@@ -132,18 +144,22 @@ ${servicesList || "(ninguno registrado)"}
 PROFESIONALES DISPONIBLES (ÚNICAMENTE ESTOS — no inventes otros):
 ${employeesList || "(ninguno registrado)"}
 
+${clientSection}
+
 INSTRUCCIONES:
 - Escribe en español. Mensajes cortos y directos para WhatsApp.
 - SOLO usa los IDs exactos de las listas de arriba. NUNCA inventes ni uses IDs que no aparezcan en esas listas.
 - Si el admin menciona un profesional o servicio que no está en la lista, pregúntale cuál de los disponibles prefiere.
 - Sugiere opciones reales de la lista cuando el admin no especifica (ej: "¿Con quién? Tenemos a Nataly y Mariana")
-- Cuando tengas servicio + profesional + fecha/hora confirmados por el admin, responde con la acción create_appointment
+- Si el cliente NO está registrado, extrae de la conversación lo que puedas (nombre, email, etc.) y pregunta al admin por los campos requeridos que falten. No preguntes por campos opcionales a menos que el admin los mencione.
+- Agrupa las preguntas de datos del cliente en un solo mensaje para no saturar al admin.
+- Cuando tengas servicio + profesional + fecha/hora confirmados y todos los campos requeridos del cliente, responde con create_appointment
 - Si el admin rechaza o dice que no, responde con la acción reject
 - Responde SOLO con JSON sin markdown ni texto adicional
 
 FORMATOS DE RESPUESTA POSIBLES:
 {"action":"ask","message":"tu pregunta al admin aquí"}
-{"action":"create_appointment","serviceId":"id_exacto_de_la_lista","employeeId":"id_exacto_de_la_lista","startDate":"YYYY-MM-DDTHH:mm:ss","notes":"contexto extra"}
+{"action":"create_appointment","serviceId":"id_exacto_de_la_lista","employeeId":"id_exacto_de_la_lista","startDate":"YYYY-MM-DDTHH:mm:ss","clientData":{"name":"nombre","email":"email o null","documentId":"doc o null","birthDate":"YYYY-MM-DD o null","notes":"notas o null"},"notes":"notas de la cita"}
 {"action":"reject"}`;
 
   const response = await anthropic.messages.create({
@@ -182,8 +198,13 @@ async function createAppointment(convo, org, agentData, orgAdminPhone, services)
     // Buscar o crear el cliente por teléfono
     let client = await clientService.getClientByIdentifier("phone", convo.clientPhone, org._id);
     if (!client) {
+      const cd = agentData.clientData || {};
       client = await clientService.createClient({
-        name: `Cliente WA ${convo.clientPhone}`,
+        name: cd.name?.trim() || `Cliente WA ${convo.clientPhone}`,
+        email: cd.email || undefined,
+        documentId: cd.documentId || undefined,
+        birthDate: cd.birthDate || undefined,
+        notes: cd.notes || undefined,
         phoneNumber: convo.clientPhone,
         organizationId: org._id,
       });
@@ -224,6 +245,45 @@ async function createAppointment(convo, org, agentData, orgAdminPhone, services)
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+const FIELD_LABELS = {
+  name: "Nombre",
+  email: "Email",
+  documentId: "Documento de identidad",
+  birthDate: "Fecha de nacimiento (YYYY-MM-DD)",
+  notes: "Notas",
+};
+
+const DEFAULT_FIELDS = [
+  { key: "name", enabled: true, required: true },
+  { key: "phone", enabled: true, required: true },
+  { key: "email", enabled: true, required: false },
+  { key: "birthDate", enabled: false, required: false },
+  { key: "documentId", enabled: false, required: false },
+  { key: "notes", enabled: false, required: false },
+];
+
+function buildNewClientSection(clientPhone, clientFormConfig) {
+  const fields = clientFormConfig?.fields?.length ? clientFormConfig.fields : DEFAULT_FIELDS;
+  const relevant = fields.filter((f) => f.key !== "phone" && f.enabled);
+
+  const required = relevant.filter((f) => f.required).map((f) => `  - ${f.label || FIELD_LABELS[f.key] || f.key} (REQUERIDO)`);
+  const optional = relevant.filter((f) => !f.required).map((f) => `  - ${f.label || FIELD_LABELS[f.key] || f.key} (opcional)`);
+
+  const lines = [...required, ...optional];
+
+  return `CLIENTE: Número ${clientPhone} — NO está registrado en el sistema.
+Debes recopilar estos datos antes de crear la cita:
+${lines.length ? lines.join("\n") : "  - Nombre (REQUERIDO)"}
+Extrae lo que puedas de la conversación del cliente. Pregunta al admin solo por los REQUERIDOS que falten, en un único mensaje.`;
+}
+
+async function loadClientInfo(clientPhone, orgId) {
+  const client = await clientService.getClientByIdentifier("phone", clientPhone, orgId);
+  return client
+    ? { exists: true, name: client.name }
+    : { exists: false, name: null };
+}
+
 async function loadOrgData(orgId) {
   const [services, employees] = await Promise.all([
     Service.find({ organizationId: orgId, isActive: true }).select("_id name duration price").lean(),
@@ -240,11 +300,24 @@ function isAutoReply(body, orgName) {
   return matchCount >= 2;
 }
 
-function validateAgentIds(agentMessage, services, employees) {
+function validateAgentIds(agentMessage, services, employees, clientInfo, clientFormConfig) {
   const serviceOk = services.some((s) => s._id.toString() === agentMessage.serviceId);
   const employeeOk = employees.some((e) => e._id.toString() === agentMessage.employeeId);
   if (!serviceOk) return `Servicio "${agentMessage.serviceId}" no encontrado.`;
   if (!employeeOk) return `Profesional "${agentMessage.employeeId}" no encontrado.`;
+
+  // Si el cliente es nuevo, verificar campos requeridos
+  if (!clientInfo.exists) {
+    const fields = clientFormConfig?.fields?.length ? clientFormConfig.fields : DEFAULT_FIELDS;
+    const requiredKeys = fields.filter((f) => f.key !== "phone" && f.enabled && f.required).map((f) => f.key);
+    const cd = agentMessage.clientData || {};
+    for (const key of requiredKeys) {
+      if (!cd[key]?.toString().trim()) {
+        return `Falta el campo requerido del cliente: ${FIELD_LABELS[key] || key}.`;
+      }
+    }
+  }
+
   return null;
 }
 
