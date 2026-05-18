@@ -14,9 +14,10 @@ const anthropic = new Anthropic();
 // ─── Punto de entrada: primera vez que detectamos intención ──────────────────
 
 export async function startDialogue(convo, org, intent) {
+  const identifierField = org.clientFormConfig?.identifierField || "phone";
   const [{ services, employees }, clientInfo] = await Promise.all([
     loadOrgData(org._id),
-    loadClientInfo(convo.clientPhone, org._id),
+    loadClientInfo(convo.clientPhone, org._id, identifierField),
   ]);
   const orgAdminPhone = normalizePhone(org.phoneNumber);
 
@@ -72,7 +73,8 @@ export async function continueDialogue(convo, org, adminReply) {
   });
 
   const updatedConvo = await WaConversation.findById(convo._id).lean();
-  const clientInfo = await loadClientInfo(convo.clientPhone, org._id);
+  const identifierField = org.clientFormConfig?.identifierField || "phone";
+  const clientInfo = await loadClientInfo(convo.clientPhone, org._id, identifierField);
 
   const clientConvText = updatedConvo.messages
     .map((m) => `${m.role === "client" ? "Cliente" : "Negocio"}: ${m.body}`)
@@ -129,8 +131,8 @@ async function runDialogueAgent({ org, services, employees, clientConvText, admi
     ? adminConversation.map((m) => `${m.role === "agent" ? "Agente" : "Admin"}: ${m.body}`).join("\n")
     : "(sin mensajes aún)";
 
-  const clientSection = clientInfo.exists
-    ? `CLIENTE: Registrado como "${clientInfo.name}" (${clientPhone})`
+  const clientSection = clientInfo.exists === true
+    ? `CLIENTE: Ya registrado como "${clientInfo.name}" (${clientPhone}). No necesitas pedir datos del cliente.`
     : buildNewClientSection(clientPhone, org.clientFormConfig);
 
   const systemPrompt = `Eres el asistente de agenda de AgenditApp para ${org.name}.
@@ -195,10 +197,16 @@ async function createAppointment(convo, org, agentData, orgAdminPhone, services)
     const endMoment = startMoment.clone().add(service.duration, "minutes");
     const endDate = endMoment.format("YYYY-MM-DDTHH:mm:ss");
 
-    // Buscar o crear el cliente por teléfono
-    let client = await clientService.getClientByIdentifier("phone", convo.clientPhone, org._id);
+    // Buscar cliente usando el identificador configurado por la org
+    const identifierField = org.clientFormConfig?.identifierField || "phone";
+    const cd = agentData.clientData || {};
+    const identifierValue = identifierField === "phone" ? convo.clientPhone : cd[identifierField];
+
+    let client = identifierValue
+      ? await clientService.getClientByIdentifier(identifierField, identifierValue, org._id)
+      : null;
+
     if (!client) {
-      const cd = agentData.clientData || {};
       client = await clientService.createClient({
         name: cd.name?.trim() || `Cliente WA ${convo.clientPhone}`,
         email: cd.email || undefined,
@@ -263,25 +271,42 @@ const DEFAULT_FIELDS = [
 ];
 
 function buildNewClientSection(clientPhone, clientFormConfig) {
+  const identifierField = clientFormConfig?.identifierField || "phone";
   const fields = clientFormConfig?.fields?.length ? clientFormConfig.fields : DEFAULT_FIELDS;
-  const relevant = fields.filter((f) => f.key !== "phone" && f.enabled);
+
+  // El campo identificador siempre es requerido para poder registrar al cliente
+  const relevant = fields
+    .filter((f) => f.key !== "phone" && f.enabled)
+    .map((f) => ({
+      ...f,
+      required: f.required || f.key === identifierField,
+    }));
 
   const required = relevant.filter((f) => f.required).map((f) => `  - ${f.label || FIELD_LABELS[f.key] || f.key} (REQUERIDO)`);
   const optional = relevant.filter((f) => !f.required).map((f) => `  - ${f.label || FIELD_LABELS[f.key] || f.key} (opcional)`);
 
   const lines = [...required, ...optional];
 
-  return `CLIENTE: Número ${clientPhone} — NO está registrado en el sistema.
-Debes recopilar estos datos antes de crear la cita:
+  const identifierNote = identifierField !== "phone"
+    ? `\nEl identificador principal de clientes en esta organización es: ${FIELD_LABELS[identifierField] || identifierField}. Debes recopilarlo para verificar si el cliente ya existe o es nuevo.`
+    : "";
+
+  return `CLIENTE: Número WA ${clientPhone} — identidad no confirmada aún.${identifierNote}
+Recopila estos datos (el admin puede conocerlos o los puede pedir al cliente):
 ${lines.length ? lines.join("\n") : "  - Nombre (REQUERIDO)"}
-Extrae lo que puedas de la conversación del cliente. Pregunta al admin solo por los REQUERIDOS que falten, en un único mensaje.`;
+Extrae lo que puedas de la conversación. Pregunta al admin solo por los REQUERIDOS que falten, en un único mensaje.`;
 }
 
-async function loadClientInfo(clientPhone, orgId) {
-  const client = await clientService.getClientByIdentifier("phone", clientPhone, orgId);
-  return client
-    ? { exists: true, name: client.name }
-    : { exists: false, name: null };
+async function loadClientInfo(clientPhone, orgId, identifierField) {
+  if (identifierField === "phone") {
+    const client = await clientService.getClientByIdentifier("phone", clientPhone, orgId);
+    return client
+      ? { exists: true, name: client.name, identifierField }
+      : { exists: false, name: null, identifierField };
+  }
+  // Si el identificador no es teléfono, no podemos hacer el lookup aún —
+  // necesitamos que el LLM recopile ese valor del admin primero.
+  return { exists: "unknown", name: null, identifierField };
 }
 
 async function loadOrgData(orgId) {
@@ -306,10 +331,13 @@ function validateAgentIds(agentMessage, services, employees, clientInfo, clientF
   if (!serviceOk) return `Servicio "${agentMessage.serviceId}" no encontrado.`;
   if (!employeeOk) return `Profesional "${agentMessage.employeeId}" no encontrado.`;
 
-  // Si el cliente es nuevo, verificar campos requeridos
-  if (!clientInfo.exists) {
+  // Si el cliente no está confirmado como existente, verificar campos requeridos
+  if (clientInfo.exists !== true) {
+    const identifierField = clientFormConfig?.identifierField || "phone";
     const fields = clientFormConfig?.fields?.length ? clientFormConfig.fields : DEFAULT_FIELDS;
-    const requiredKeys = fields.filter((f) => f.key !== "phone" && f.enabled && f.required).map((f) => f.key);
+    const requiredKeys = fields
+      .filter((f) => f.key !== "phone" && f.enabled && (f.required || f.key === identifierField))
+      .map((f) => f.key);
     const cd = agentMessage.clientData || {};
     for (const key of requiredKeys) {
       if (!cd[key]?.toString().trim()) {
