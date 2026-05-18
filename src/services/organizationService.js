@@ -160,6 +160,8 @@ const organizationService = {
       hasAccessBlocked,
       clientFormConfig,
       termsAndConditions,
+      waPhone,
+      waAgentEnabled,
     } = organizationData;
 
     const organization = await Organization.findById(id);
@@ -350,6 +352,14 @@ const organizationService = {
     // 🔒 Bloqueo de acceso (superadmin)
     if (hasAccessBlocked !== undefined) {
       organization.hasAccessBlocked = hasAccessBlocked;
+    }
+
+    // 🤖 Agente WA (Baileys)
+    if (waPhone !== undefined) {
+      organization.waPhone = waPhone || null;
+    }
+    if (waAgentEnabled !== undefined) {
+      organization.waAgentEnabled = waAgentEnabled;
     }
 
     // Encriptar la contraseña solo si se proporciona una nueva

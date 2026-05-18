@@ -36,6 +36,7 @@ import adminRoutes from "./adminRoutes.js";
 import auditLogRoutes from "./auditLog.js";
 import chatRoutes from "./chatRoutes.js";
 import bookingChatRoutes from "./bookingChatRoutes.js";
+import waAgentRoutes from "./waAgentRoutes.js";
 import membershipService from "../services/membershipService.js";
 import { organizationResolver } from "../middleware/organizationResolver";
 import { verifyToken } from "../middleware/authMiddleware.js";
@@ -113,6 +114,10 @@ router.use("/plans", planRoutes);
 router.use("/debug", debugRoutes);
 router.use("/public", publicRoutes);
 router.use("/booking-chat", organizationResolver, bookingChatRoutes);
+
+// Agente WA: webhook de Meta (GET verify + POST mensajes) + endpoint de Baileys
+// Va en grupo público — Meta y Baileys tienen su propia autenticación interna
+router.use("/wa-agent", waAgentRoutes);
 router.use("/roles", roleRoutes);
 
 // Pagos: webhook público, checkout/confirm protegido internamente

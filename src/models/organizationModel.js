@@ -234,6 +234,18 @@ const organizationSchema = new mongoose.Schema({
     type: String,
     required: false,
   },
+  // Número WA de la org en formato E.164 (ej: "+573001234567")
+  // Usado por el agente de WA para mapear mensajes de Baileys a esta organización
+  waPhone: {
+    type: String,
+    required: false,
+    sparse: true,
+  },
+  // Habilita el agente de WA para esta org — solo procesa si está en true
+  waAgentEnabled: {
+    type: Boolean,
+    default: false,
+  },
   branding: {
     type: BrandingSchema,
     default: {},
