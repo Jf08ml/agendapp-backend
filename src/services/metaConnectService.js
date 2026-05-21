@@ -15,7 +15,6 @@ export async function connectOrg(orgId, code, redirectUri, providedWabaId, provi
     params: {
       client_id: APP_ID,
       client_secret: APP_SECRET,
-      redirect_uri: redirectUri,
       code,
     },
   });
