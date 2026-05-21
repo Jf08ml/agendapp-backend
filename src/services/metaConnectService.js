@@ -63,15 +63,21 @@ export async function connectOrg(orgId, code, redirectUri, providedWabaId, provi
   }
   if (!phoneData) throw new Error("No se encontró número de teléfono en la WABA.");
 
-  // 5. Suscribir el WABA al webhook de la app
+  // 5. Obtener info del negocio asociado al WABA (business_management)
+  const wabaInfoRes = await axios.get(`${GRAPH_URL}/${wabaId}`, {
+    params: { access_token: accessToken, fields: "id,name,business_name,business" },
+  }).catch(() => null);
+  const businessName = wabaInfoRes?.data?.business_name || wabaInfoRes?.data?.business?.name || null;
+
+  // 6. Suscribir el WABA al webhook de la app
   await axios.post(
     `${GRAPH_URL}/${wabaId}/subscribed_apps`,
     {},
     { params: { access_token: accessToken } }
   );
 
-  // 6. Guardar en la org
-  const org = await Organization.findByIdAndUpdate(
+  // 7. Guardar en la org
+  await Organization.findByIdAndUpdate(
     orgId,
     {
       waConnectionType: "meta",
@@ -79,6 +85,7 @@ export async function connectOrg(orgId, code, redirectUri, providedWabaId, provi
       metaPhoneNumberId: phoneData.id,
       metaAccessToken: accessToken,
       metaPhone: phoneData.display_phone_number,
+      ...(businessName && { metaBusinessName: businessName }),
     },
     { new: true }
   );
@@ -88,6 +95,7 @@ export async function connectOrg(orgId, code, redirectUri, providedWabaId, provi
     phoneNumberId: phoneData.id,
     phone: phoneData.display_phone_number,
     verifiedName: phoneData.verified_name,
+    businessName,
   };
 }
 

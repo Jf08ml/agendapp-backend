@@ -257,6 +257,7 @@ const organizationSchema = new mongoose.Schema({
   metaPhoneNumberId: { type: String, required: false, sparse: true }, // Phone Number ID de Meta
   metaAccessToken: { type: String, required: false },     // Token de acceso por org
   metaPhone: { type: String, required: false },           // Número E.164 del número Meta registrado
+  metaBusinessName: { type: String, required: false },    // Nombre del negocio del WABA (de business_management)
   branding: {
     type: BrandingSchema,
     default: {},
