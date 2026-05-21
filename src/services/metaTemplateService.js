@@ -117,11 +117,16 @@ export async function sendTextMessage(org, toPhone, text) {
     throw new Error("La organización no tiene Meta API configurada.");
   }
   const client = graphClient(org.metaAccessToken);
-  const res = await client.post(`/${org.metaPhoneNumberId}/messages`, {
-    messaging_product: "whatsapp",
-    to: toPhone,
-    type: "text",
-    text: { body: text },
-  });
-  return { messageId: res.data?.messages?.[0]?.id };
+  try {
+    const res = await client.post(`/${org.metaPhoneNumberId}/messages`, {
+      messaging_product: "whatsapp",
+      to: toPhone,
+      type: "text",
+      text: { body: text },
+    });
+    return { messageId: res.data?.messages?.[0]?.id };
+  } catch (err) {
+    console.error("[metaSendText] Error:", JSON.stringify(err.response?.data));
+    throw err;
+  }
 }
