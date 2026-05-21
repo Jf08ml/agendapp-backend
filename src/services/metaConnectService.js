@@ -31,6 +31,12 @@ export async function connectOrg(orgId, code, redirectUri, providedWabaId, provi
   });
   const accessToken = longRes.data.access_token;
 
+  // debug: verificar permisos del token
+  const debugRes = await axios.get(`${GRAPH_URL}/debug_token`, {
+    params: { input_token: accessToken, access_token: `${APP_ID}|${APP_SECRET}` },
+  }).catch(() => null);
+  console.log("[metaConnect] token scopes:", debugRes?.data?.data?.scopes);
+
   // 3. Obtener WABA ID — usar el del callback si viene, si no consultar API
   let wabaId = providedWabaId;
   console.log("[metaConnect] providedWabaId:", providedWabaId, "providedPhoneNumberId:", providedPhoneNumberId);
