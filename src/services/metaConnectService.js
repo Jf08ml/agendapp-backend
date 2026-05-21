@@ -37,28 +37,33 @@ export async function connectOrg(orgId, code, redirectUri, providedWabaId, provi
   }).catch(() => null);
   console.log("[metaConnect] token scopes:", debugRes?.data?.data?.scopes);
 
-  // 3. Obtener WABA ID — usar el del callback si viene, si no consultar API
+  // 3. Obtener WABA ID — usar el del callback si viene, si no buscar via businesses
   let wabaId = providedWabaId;
   console.log("[metaConnect] providedWabaId:", providedWabaId, "providedPhoneNumberId:", providedPhoneNumberId);
   if (!wabaId) {
-    // Primero intentar /me/whatsapp_business_accounts (más directo)
-    const directRes = await axios.get(`${GRAPH_URL}/me/whatsapp_business_accounts`, {
+    const bizRes = await axios.get(`${GRAPH_URL}/me/businesses`, {
       params: { access_token: accessToken, fields: "id,name" },
-    }).catch((e) => { console.log("[metaConnect] me/whatsapp_business_accounts error:", e.response?.data); return null; });
-    console.log("[metaConnect] me/whatsapp_business_accounts:", JSON.stringify(directRes?.data));
-    const directWaba = directRes?.data?.data?.[0];
+    });
+    console.log("[metaConnect] businesses:", JSON.stringify(bizRes.data?.data));
+    const businesses = bizRes.data?.data ?? [];
 
-    if (directWaba) {
-      wabaId = directWaba.id;
-    } else {
-      // Fallback: buscar via me/businesses
-      const wabaRes = await axios.get(`${GRAPH_URL}/me/businesses`, {
-        params: { access_token: accessToken, fields: "id,name,whatsapp_business_accounts" },
-      });
-      const waba = wabaRes.data?.data?.[0]?.whatsapp_business_accounts?.data?.[0];
-      if (!waba) throw new Error("No se encontró WhatsApp Business Account asociada.");
-      wabaId = waba.id;
+    for (const biz of businesses) {
+      const ownedRes = await axios.get(`${GRAPH_URL}/${biz.id}/owned_whatsapp_business_accounts`, {
+        params: { access_token: accessToken, fields: "id,name" },
+      }).catch(() => null);
+      console.log("[metaConnect] owned WABAs for", biz.id, JSON.stringify(ownedRes?.data?.data));
+      const waba = ownedRes?.data?.data?.[0];
+      if (waba) { wabaId = waba.id; break; }
+
+      const clientRes = await axios.get(`${GRAPH_URL}/${biz.id}/client_whatsapp_business_accounts`, {
+        params: { access_token: accessToken, fields: "id,name" },
+      }).catch(() => null);
+      console.log("[metaConnect] client WABAs for", biz.id, JSON.stringify(clientRes?.data?.data));
+      const clientWaba = clientRes?.data?.data?.[0];
+      if (clientWaba) { wabaId = clientWaba.id; break; }
     }
+
+    if (!wabaId) throw new Error("No se encontró WhatsApp Business Account asociada.");
   }
 
   // 4. Obtener phone numbers del WABA
