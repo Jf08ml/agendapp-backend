@@ -41,27 +41,26 @@ export async function connectOrg(orgId, code, redirectUri, providedWabaId, provi
   let wabaId = providedWabaId;
   console.log("[metaConnect] providedWabaId:", providedWabaId, "providedPhoneNumberId:", providedPhoneNumberId);
   if (!wabaId) {
-    // Intento 1: field expansion en /me
-    const meRes = await axios.get(`${GRAPH_URL}/me`, {
-      params: { access_token: accessToken, fields: "id,name,businesses{id,name,owned_whatsapp_business_accounts{id,name}}" },
-    }).catch((e) => { console.log("[metaConnect] /me expand error:", e.response?.data); return null; });
-    console.log("[metaConnect] /me expand:", JSON.stringify(meRes?.data));
-    const expandWaba = meRes?.data?.businesses?.data?.[0]?.owned_whatsapp_business_accounts?.data?.[0];
-    if (expandWaba) wabaId = expandWaba.id;
+    // El token es de un System User — obtener su negocio y buscar WABAs clientes
+    const suRes = await axios.get(`${GRAPH_URL}/me`, {
+      params: { access_token: accessToken, fields: "id,name,business" },
+    }).catch((e) => { console.log("[metaConnect] system user business error:", e.response?.data); return null; });
+    console.log("[metaConnect] system user:", JSON.stringify(suRes?.data));
+    const bizId = suRes?.data?.business?.id;
 
-    // Intento 2: me/businesses edge clásica
-    if (!wabaId) {
-      const bizRes = await axios.get(`${GRAPH_URL}/me/businesses`, {
+    if (bizId) {
+      const clientRes = await axios.get(`${GRAPH_URL}/${bizId}/client_whatsapp_business_accounts`, {
         params: { access_token: accessToken, fields: "id,name" },
-      }).catch((e) => { console.log("[metaConnect] me/businesses error:", e.response?.data); return null; });
-      console.log("[metaConnect] me/businesses:", JSON.stringify(bizRes?.data?.data));
-      const businesses = bizRes?.data?.data ?? [];
-      for (const biz of businesses) {
-        const ownedRes = await axios.get(`${GRAPH_URL}/${biz.id}/owned_whatsapp_business_accounts`, {
+      }).catch((e) => { console.log("[metaConnect] client WABAs error:", e.response?.data); return null; });
+      console.log("[metaConnect] client WABAs:", JSON.stringify(clientRes?.data?.data));
+      wabaId = clientRes?.data?.data?.[0]?.id;
+
+      if (!wabaId) {
+        const ownedRes = await axios.get(`${GRAPH_URL}/${bizId}/owned_whatsapp_business_accounts`, {
           params: { access_token: accessToken, fields: "id,name" },
-        }).catch(() => null);
-        const waba = ownedRes?.data?.data?.[0];
-        if (waba) { wabaId = waba.id; break; }
+        }).catch((e) => { console.log("[metaConnect] owned WABAs error:", e.response?.data); return null; });
+        console.log("[metaConnect] owned WABAs:", JSON.stringify(ownedRes?.data?.data));
+        wabaId = ownedRes?.data?.data?.[0]?.id;
       }
     }
 
