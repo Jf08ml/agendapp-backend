@@ -15,6 +15,7 @@ export async function connectOrg(orgId, code, redirectUri, providedWabaId, provi
     params: {
       client_id: APP_ID,
       client_secret: APP_SECRET,
+      redirect_uri: redirectUri,
       code,
     },
   });
@@ -33,11 +34,13 @@ export async function connectOrg(orgId, code, redirectUri, providedWabaId, provi
 
   // 3. Obtener WABA ID — usar el del callback si viene, si no consultar API
   let wabaId = providedWabaId;
+  console.log("[metaConnect] providedWabaId:", providedWabaId, "providedPhoneNumberId:", providedPhoneNumberId);
   if (!wabaId) {
     // Primero intentar /me/whatsapp_business_accounts (más directo)
     const directRes = await axios.get(`${GRAPH_URL}/me/whatsapp_business_accounts`, {
       params: { access_token: accessToken, fields: "id,name" },
-    }).catch(() => null);
+    }).catch((e) => { console.log("[metaConnect] me/whatsapp_business_accounts error:", e.response?.data); return null; });
+    console.log("[metaConnect] me/whatsapp_business_accounts:", JSON.stringify(directRes?.data));
     const directWaba = directRes?.data?.data?.[0];
 
     if (directWaba) {
