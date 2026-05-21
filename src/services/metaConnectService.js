@@ -31,11 +31,23 @@ export async function connectOrg(orgId, code, redirectUri, providedWabaId, provi
   });
   const accessToken = longRes.data.access_token;
 
-  // debug: verificar permisos del token
+  // debug: verificar permisos y extraer WABA ID de granular_scopes
   const debugRes = await axios.get(`${GRAPH_URL}/debug_token`, {
-    params: { input_token: accessToken, access_token: `${APP_ID}|${APP_SECRET}` },
+    params: { input_token: accessToken, access_token: `${APP_ID}|${APP_SECRET}`, fields: "scopes,granular_scopes" },
   }).catch(() => null);
   console.log("[metaConnect] token scopes:", debugRes?.data?.data?.scopes);
+  console.log("[metaConnect] granular_scopes:", JSON.stringify(debugRes?.data?.data?.granular_scopes));
+
+  // Extraer wabaId desde granular_scopes si no vino en authResponse
+  if (!providedWabaId) {
+    const wabaScope = debugRes?.data?.data?.granular_scopes?.find(
+      (s) => s.scope === "whatsapp_business_management"
+    );
+    if (wabaScope?.target_ids?.[0]) {
+      providedWabaId = wabaScope.target_ids[0];
+      console.log("[metaConnect] wabaId from granular_scopes:", providedWabaId);
+    }
+  }
 
   // 3. Obtener WABA ID — usar el del callback si viene, si no buscar via businesses
   let wabaId = providedWabaId;
