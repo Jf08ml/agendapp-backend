@@ -48,7 +48,7 @@ app.use(cors(dynamicCorsOptions));
 // 🔒 Rate limiting general (100 requests por 15 minutos)
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 100, // Límite de 100 requests por IP
+  max: 300, // Límite de 300 requests por IP
   message: {
     result: 'error',
     message: 'Demasiadas solicitudes desde esta IP, por favor intenta más tarde'
