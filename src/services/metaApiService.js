@@ -1,7 +1,7 @@
 import axios from "axios";
 import { createHmac, timingSafeEqual } from "crypto";
 
-const GRAPH_URL = "https://graph.facebook.com/v21.0";
+const GRAPH_URL = "https://graph.facebook.com/v25.0";
 
 function getConfig() {
   return {

@@ -642,12 +642,7 @@ const appointmentService = {
           );
 
           // Envío 1-a-1 (mensaje ya renderizado)
-          await waIntegrationService.sendMessage({
-            orgId: organizationId,
-            phone: phoneE164,
-            message: msg,
-            image: null,
-          });
+          await whatsappService.sendMessage(organizationId, phoneE164, msg);
           console.log(`✅ Confirmación batch enviada (${allGroupAppointments.length} citas)`);
         } else {
           console.log(`⏭️  Confirmación batch deshabilitada`);
@@ -765,12 +760,7 @@ const appointmentService = {
             'scheduleAppointmentBatch',
             templateData
           );
-          await waIntegrationService.sendMessage({
-            orgId: organizationId,
-            phone: phoneE164,
-            message: msg,
-            image: null,
-          });
+          await whatsappService.sendMessage(organizationId, phoneE164, msg);
           console.log(`✅ WA multi-profesional enviado (${groupAppts.length} citas, ${employeeNames.length} profesionales)`);
         }
       } catch (err) {

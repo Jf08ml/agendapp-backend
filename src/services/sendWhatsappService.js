@@ -6,6 +6,7 @@ import organizationService from "./organizationService.js";
 import membershipService from "./membershipService.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
 import { normalizePhoneNumber, toWhatsappFormat } from "../utils/phoneUtils.js";
+import { sendTextMessage as metaSendText, sendTemplateMessage as metaSendTemplate } from "./metaTemplateService.js";
 
 /** ===================== CONFIG ===================== */
 const BASE_URL = process.env.WA_API_URL;
@@ -135,19 +136,41 @@ const whatsappService = {
     }
 
     const org = await organizationService.getOrganizationById(organizationId);
+
+    // ── Routing híbrido ──────────────────────────────────────────────────────
+    if (org?.waConnectionType === "meta") {
+      const normalizedPhone = this.normalizePhoneForWhatsapp(phone, org.default_country || "CO");
+      return metaSendText(org, normalizedPhone, message);
+    }
+
+    // ── Baileys (comportamiento actual) ─────────────────────────────────────
     if (!org || !org.clientIdWhatsapp) {
-      throw new Error(
-        "La organización no tiene sesión de WhatsApp configurada"
-      );
+      throw new Error("La organización no tiene sesión de WhatsApp configurada");
     }
     const payload = {
       clientId: org.clientIdWhatsapp,
-      phone: this.normalizePhoneForWhatsapp(phone, org.default_country || 'CO'),
+      phone: this.normalizePhoneForWhatsapp(phone, org.default_country || "CO"),
       message,
     };
     if (image) payload.image = image;
 
-    return this.sendViaMultiSession(payload, opts); // <<— usa opts.longTimeout para jobs
+    return this.sendViaMultiSession(payload, opts);
+  },
+
+  /**
+   * Envía un mensaje usando plantilla Meta (solo para orgs con waConnectionType === 'meta').
+   */
+  async sendTemplateMessage(organizationId, phone, templateName, language, components = []) {
+    const planLimits = await membershipService.getPlanLimits(organizationId);
+    if (planLimits && planLimits.whatsappIntegration === false) {
+      return { blocked: true, reason: "plan_limit" };
+    }
+    const org = await organizationService.getOrganizationById(organizationId);
+    if (org?.waConnectionType !== "meta") {
+      throw new Error("sendTemplateMessage solo está disponible para orgs con Meta API configurada.");
+    }
+    const normalizedPhone = this.normalizePhoneForWhatsapp(phone, org.default_country || "CO");
+    return metaSendTemplate(org, normalizedPhone, templateName, language, components);
   },
 
   /**

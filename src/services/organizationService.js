@@ -162,6 +162,11 @@ const organizationService = {
       termsAndConditions,
       waPhone,
       waAgentEnabled,
+      waConnectionType,
+      metaWabaId,
+      metaPhoneNumberId,
+      metaAccessToken,
+      metaPhone,
     } = organizationData;
 
     const organization = await Organization.findById(id);
@@ -355,12 +360,15 @@ const organizationService = {
     }
 
     // 🤖 Agente WA (Baileys)
-    if (waPhone !== undefined) {
-      organization.waPhone = waPhone || null;
-    }
-    if (waAgentEnabled !== undefined) {
-      organization.waAgentEnabled = waAgentEnabled;
-    }
+    if (waPhone !== undefined) organization.waPhone = waPhone || null;
+    if (waAgentEnabled !== undefined) organization.waAgentEnabled = waAgentEnabled;
+
+    // 🔗 Conexión híbrida WA
+    if (waConnectionType !== undefined) organization.waConnectionType = waConnectionType;
+    if (metaWabaId !== undefined) organization.metaWabaId = metaWabaId || null;
+    if (metaPhoneNumberId !== undefined) organization.metaPhoneNumberId = metaPhoneNumberId || null;
+    if (metaAccessToken !== undefined) organization.metaAccessToken = metaAccessToken || null;
+    if (metaPhone !== undefined) organization.metaPhone = metaPhone || null;
 
     // Encriptar la contraseña solo si se proporciona una nueva
     if (password) {

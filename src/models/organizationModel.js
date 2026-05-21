@@ -246,6 +246,17 @@ const organizationSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  // Tipo de conexión WA activa: 'baileys' | 'meta' | null
+  waConnectionType: {
+    type: String,
+    enum: ['baileys', 'meta', null],
+    default: null,
+  },
+  // Credenciales Meta Business API por org (Embedded Signup)
+  metaWabaId: { type: String, required: false },          // WhatsApp Business Account ID
+  metaPhoneNumberId: { type: String, required: false, sparse: true }, // Phone Number ID de Meta
+  metaAccessToken: { type: String, required: false },     // Token de acceso por org
+  metaPhone: { type: String, required: false },           // Número E.164 del número Meta registrado
   branding: {
     type: BrandingSchema,
     default: {},

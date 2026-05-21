@@ -1,5 +1,6 @@
 import { processIncomingMessage, processOrgResponse, sanitizePhone } from "../services/waAgentService.js";
 import { validateMetaSignature } from "../services/metaApiService.js";
+import Organization from "../models/organizationModel.js";
 
 // ─── Meta Webhook ─────────────────────────────────────────────────────────────
 
@@ -44,16 +45,35 @@ export async function handleMetaIncoming(req, res) {
   // Ignorar notificaciones de estado (delivered, read, etc.) — solo procesar texto
   if (!message || message.type !== "text") return;
 
-  // message.from es el número que RESPONDIÓ — el admin de la org
-  // display_phone_number es el número de AgenditApp, no el de la org
-  const orgPhone = "+" + message.from.replace(/\D/g, "");
+  const receivingPhoneNumberId = change?.metadata?.phone_number_id;
+  const fromPhone = "+" + message.from.replace(/\D/g, "");
   const body = message.text?.body ?? "";
 
-  if (!body || !orgPhone) return;
+  if (!body || !fromPhone) return;
 
-  processOrgResponse({ orgPhone, body }).catch((err) =>
-    console.error("[WaAgent] Error procesando respuesta de org:", err)
-  );
+  // ── Routing: ¿es respuesta del admin a AgenditApp, o mensaje de cliente a org Meta? ──
+  if (receivingPhoneNumberId === process.env.META_PHONE_NUMBER_ID) {
+    // Respuesta del admin al bot de AgenditApp → continúa el diálogo del agente
+    processOrgResponse({ orgPhone: fromPhone, body }).catch((err) =>
+      console.error("[WaAgent] Error procesando respuesta de org:", err)
+    );
+  } else {
+    // Mensaje de cliente al número Meta de una org → detectar intención
+    const org = await Organization.findOne({ metaPhoneNumberId: receivingPhoneNumberId }).lean();
+    if (!org) {
+      console.warn(`[WaAgent] metaPhoneNumberId no registrado: ${receivingPhoneNumberId}`);
+      return;
+    }
+    if (!org.waAgentEnabled) return;
+
+    processIncomingMessage({
+      orgPhone: org.metaPhone || receivingPhoneNumberId,
+      clientPhone: fromPhone,
+      fromMe: false,
+      body,
+      timestamp: message.timestamp,
+    }).catch((err) => console.error("[WaAgent] Error procesando mensaje Meta entrante:", err));
+  }
 }
 
 // ─── Baileys Webhook ──────────────────────────────────────────────────────────

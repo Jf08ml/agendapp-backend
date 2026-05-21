@@ -37,6 +37,7 @@ import auditLogRoutes from "./auditLog.js";
 import chatRoutes from "./chatRoutes.js";
 import bookingChatRoutes from "./bookingChatRoutes.js";
 import waAgentRoutes from "./waAgentRoutes.js";
+import metaRoutes from "./metaRoutes.js";
 import membershipService from "../services/membershipService.js";
 import { organizationResolver } from "../middleware/organizationResolver";
 import { verifyToken } from "../middleware/authMiddleware.js";
@@ -146,6 +147,7 @@ router.use("/packages", packageRoutes);
 //    (admin necesita ver su org/notificaciones aunque esté vencido)
 // ═══════════════════════════════════════════════════
 router.use("/organizations", organizationResolver, verifyToken, organizationRoutes);
+router.use("/organizations", organizationResolver, verifyToken, metaRoutes);
 router.use("/notifications", verifyToken, notificationRoutes);
 router.use("/chat", organizationResolver, verifyToken, chatRoutes);
 
