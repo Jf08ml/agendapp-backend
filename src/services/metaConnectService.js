@@ -31,15 +31,26 @@ export async function connectOrg(orgId, code, redirectUri, providedWabaId, provi
   });
   const accessToken = longRes.data.access_token;
 
-  // 3. Obtener WABA ID — usar el del callback si viene, si no consultar me/businesses
+  // 3. Obtener WABA ID — usar el del callback si viene, si no consultar API
   let wabaId = providedWabaId;
   if (!wabaId) {
-    const wabaRes = await axios.get(`${GRAPH_URL}/me/businesses`, {
-      params: { access_token: accessToken, fields: "id,name,whatsapp_business_accounts" },
-    });
-    const waba = wabaRes.data?.data?.[0]?.whatsapp_business_accounts?.data?.[0];
-    if (!waba) throw new Error("No se encontró WhatsApp Business Account asociada.");
-    wabaId = waba.id;
+    // Primero intentar /me/whatsapp_business_accounts (más directo)
+    const directRes = await axios.get(`${GRAPH_URL}/me/whatsapp_business_accounts`, {
+      params: { access_token: accessToken, fields: "id,name" },
+    }).catch(() => null);
+    const directWaba = directRes?.data?.data?.[0];
+
+    if (directWaba) {
+      wabaId = directWaba.id;
+    } else {
+      // Fallback: buscar via me/businesses
+      const wabaRes = await axios.get(`${GRAPH_URL}/me/businesses`, {
+        params: { access_token: accessToken, fields: "id,name,whatsapp_business_accounts" },
+      });
+      const waba = wabaRes.data?.data?.[0]?.whatsapp_business_accounts?.data?.[0];
+      if (!waba) throw new Error("No se encontró WhatsApp Business Account asociada.");
+      wabaId = waba.id;
+    }
   }
 
   // 4. Obtener phone numbers del WABA
