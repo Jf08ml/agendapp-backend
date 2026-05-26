@@ -219,8 +219,9 @@ const plans = [
     slug: "plan-esencial-subdominio-legacy",
     // Solo actualizamos los límites nuevos, sin tocar el resto
     limits_patch: {
-      campaignsWhatsapp: true,
-      classesModule: true,
+      campaignsWhatsapp: false,
+      classesModule: false,
+      servicePackages: false,
       loyaltyProgram: true,
       professionalLanding: false,
       brandingVisible: false,
