@@ -4,6 +4,37 @@ import organizationModel from "../models/organizationModel.js";
 import planModel from "../models/planModel.js";
 import notificationModel from "../models/notificationModel.js";
 
+/**
+ * Construye los campos a resetear en la org cuando cambia a un plan con menos features.
+ * Solo resetea lo que el nuevo plan NO permite — no toca lo que sí está incluido.
+ */
+function buildPlanResetFields(plan) {
+  const limits = plan.limits || {};
+  const reset = {};
+
+  if (!limits.professionalLanding) {
+    reset.homeLayout = "modern";
+  }
+  if (!limits.autoConfirmations) {
+    reset.reservationPolicy = "manual";
+  }
+  if (!limits.loyaltyProgram) {
+    reset.showLoyaltyProgram = false;
+  }
+  if (!limits.customBranding) {
+    // Limpiar branding personalizado → frontend cae en defaults de AgenditApp
+    reset["branding.logoUrl"] = null;
+    reset["branding.faviconUrl"] = null;
+    reset["branding.pwaIcon"] = null;
+    reset["branding.primaryColor"] = null;
+    reset["branding.themeColor"] = null;
+    reset["branding.footerTextColor"] = null;
+    reset["branding.fontFamily"] = "inter";
+  }
+
+  return reset;
+}
+
 const membershipService = {
   /**
    * Crear una nueva membresía para una organización
@@ -72,8 +103,41 @@ const membershipService = {
   },
 
   /**
+   * Convierte una membresía de trial vencida al plan gratuito permanente.
+   * Se llama automáticamente desde checkExpiringMemberships.
+   */
+  convertTrialToFree: async (organizationId) => {
+    const freePlan = await planModel.findOne({ slug: "plan-gratuito", isActive: true });
+    if (!freePlan) throw new Error("[convertTrialToFree] plan-gratuito no encontrado en BD");
+
+    const membership = await membershipModel.create({
+      organizationId,
+      planId: freePlan._id,
+      startDate: new Date(),
+      currentPeriodStart: new Date(),
+      currentPeriodEnd: null,  // permanente, sin vencimiento
+      nextPaymentDue: null,
+      status: "active",
+    });
+
+    const orgUpdate = {
+      currentMembershipId: membership._id,
+      membershipStatus: "active",
+      hasAccessBlocked: false,
+      ...buildPlanResetFields(freePlan),
+    };
+
+    await organizationModel.findByIdAndUpdate(organizationId, orgUpdate);
+
+    console.log(`[convertTrialToFree] Org ${organizationId} convertida a plan gratuito`);
+    return membership;
+  },
+
+  /**
    * Verificar y actualizar estado de membresías que están por vencer.
    * IDEMPOTENTE: usa lastCheckedAt para no re-procesar el mismo día.
+   * - Membresías trial (plan-demo) que vencen → se convierten a plan-gratuito
+   * - Membresías de planes pagos que vencen → flujo normal past_due → suspended
    */
   checkExpiringMemberships: async () => {
     const now = new Date();
@@ -83,35 +147,63 @@ const membershipService = {
     const threeDaysAgo = new Date(now);
     threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
 
+    // Para trials vencidos: buscar hasta 60 días atrás (por si el cron no corrió varios días)
+    const sixtyDaysAgo = new Date(now);
+    sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+
     const startOfToday = new Date(now);
     startOfToday.setHours(0, 0, 0, 0);
 
-    // Buscar membresías activas/trial/past_due en ventana relevante
-    // Filtro de idempotencia: no procesar si ya se procesó hoy
-    const expiring = await membershipModel
-      .find({
-        status: { $in: ["active", "trial", "past_due"] },
-        currentPeriodEnd: { $lte: threeDaysFromNow, $gte: threeDaysAgo },
-        $or: [
-          { lastCheckedAt: { $lt: startOfToday } },
-          { lastCheckedAt: { $exists: false } },
-          { lastCheckedAt: null },
-        ],
-      })
-      .populate("organizationId planId");
+    const idempotencyFilter = {
+      $or: [
+        { lastCheckedAt: { $lt: startOfToday } },
+        { lastCheckedAt: { $exists: false } },
+        { lastCheckedAt: null },
+      ],
+    };
+
+    // Buscar en dos grupos: trials vencidos (ventana amplia) + planes pagos (ventana ±3 días)
+    const [expiredTrials, expiringPaid] = await Promise.all([
+      membershipModel
+        .find({
+          status: "trial",
+          currentPeriodEnd: { $lte: now, $gte: sixtyDaysAgo },
+          ...idempotencyFilter,
+        })
+        .populate("organizationId planId"),
+      membershipModel
+        .find({
+          status: { $in: ["active", "past_due"] },
+          currentPeriodEnd: { $lte: threeDaysFromNow, $gte: threeDaysAgo },
+          ...idempotencyFilter,
+        })
+        .populate("organizationId planId"),
+    ]);
+
+    // Deduplicar por _id (por si algún documento aparece en ambas consultas)
+    const seen = new Set();
+    const expiring = [...expiredTrials, ...expiringPaid].filter((m) => {
+      const id = m._id.toString();
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
 
     const results = {
       threeDays: [],
       oneDay: [],
       expired: [],
+      convertedToFree: [],
       pastDuePeriod: [],
       toSuspend: [],
     };
 
     for (const membership of expiring) {
       const daysLeft = membership.daysUntilExpiration();
+      const isTrial = membership.status === "trial";
+      const isTrialPlan = membership.planId?.slug === "plan-demo";
 
-      // 3 días antes de vencer
+      // 3 días antes de vencer — notificación con tono diferente si es trial
       if (daysLeft <= 3 && daysLeft > 1 && !membership.notifications.threeDaysSent) {
         results.threeDays.push(membership);
         membership.notifications.threeDaysSent = true;
@@ -123,15 +215,31 @@ const membershipService = {
         membership.notifications.oneDaySent = true;
       }
 
-      // Día de vencimiento: transición a past_due
-      if (daysLeft <= 0 && daysLeft > -1 && membership.status !== "past_due") {
+      // Trial de plan-demo vencido → convertir a plan gratuito (sin importar cuántos días hace)
+      if (daysLeft <= 0 && isTrial && isTrialPlan) {
+        try {
+          await membershipService.convertTrialToFree(membership.organizationId._id);
+          results.convertedToFree.push(membership);
+          membership.status = "expired";
+          membership.lastCheckedAt = now;
+          await membership.save();
+          continue;
+        } catch (err) {
+          console.error("[checkExpiring] Error convirtiendo trial a free:", err.message);
+          // Fallback: dejar caer al bloque past_due
+        }
+      }
+
+      // Día de vencimiento (planes pagos): transición a past_due
+      // daysLeft === 0 con Math.floor significa entre 0 y 24h restantes
+      if (daysLeft === 0 && !isTrial && membership.status !== "past_due") {
+        // Planes pagos que vencen → past_due (3 días de gracia, solo lectura)
         results.expired.push(membership);
         membership.status = "past_due";
         membership.notifications.expirationSent = true;
 
         await organizationModel.findByIdAndUpdate(membership.organizationId._id, {
           membershipStatus: "past_due",
-          // hasAccessBlocked sigue false: past_due permite lectura
         });
       }
 
@@ -244,12 +352,14 @@ const membershipService = {
       });
     }
 
-    // Sincronizar organización
-    await organizationModel.findByIdAndUpdate(organizationId, {
+    // Sincronizar organización y resetear features que el nuevo plan no incluye
+    const orgUpdate = {
       currentMembershipId: membership._id,
       membershipStatus: "active",
       hasAccessBlocked: false,
-    });
+      ...buildPlanResetFields(plan),
+    };
+    await organizationModel.findByIdAndUpdate(organizationId, orgUpdate);
 
     return membership;
   },

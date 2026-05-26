@@ -1462,12 +1462,18 @@ const appointmentService = {
         totalOk += r1.ok;
         totalSkipped += r1.skipped;
 
-        // Pasada 2: Segundo recordatorio (si habilitado)
+        // Pasada 2: Segundo recordatorio (si habilitado y si el plan lo permite)
         if (org.reminderSettings?.secondReminder?.enabled) {
-          const secondHoursBefore = org.reminderSettings.secondReminder.hoursBefore || 2;
-          const r2 = await processReminderPass(org, secondHoursBefore, 'secondReminderSent', 'secondReminderBulkId', 'Recordatorio 2', 'secondReminder');
-          totalOk += r2.ok;
-          totalSkipped += r2.skipped;
+          const planLimits2 = await membershipService.getPlanLimits(org._id);
+          const maxReminders = planLimits2?.maxRemindersPerAppointment ?? 2;
+          if (maxReminders < 2) {
+            console.log(`[Reminders] Org ${org.name}: 2do recordatorio bloqueado por plan (max=${maxReminders})`);
+          } else {
+            const secondHoursBefore = org.reminderSettings.secondReminder.hoursBefore || 2;
+            const r2 = await processReminderPass(org, secondHoursBefore, 'secondReminderSent', 'secondReminderBulkId', 'Recordatorio 2', 'secondReminder');
+            totalOk += r2.ok;
+            totalSkipped += r2.skipped;
+          }
         }
 
         // Pequeño respiro entre organizaciones

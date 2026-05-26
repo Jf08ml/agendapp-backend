@@ -98,7 +98,7 @@ const registrationController = {
 
       const savedOrg = await newOrg.save();
 
-      // 7. Crear trial automático de 7 días con plan-demo (acceso completo)
+      // 7. Crear trial automático de 30 días con plan-demo (acceso completo)
       const trialPlan = await Plan.findOne({ slug: "plan-demo", isActive: true });
       if (!trialPlan) {
         console.error("[register] No se encontró plan-demo para trial. Org:", savedOrg.slug);
@@ -106,7 +106,7 @@ const registrationController = {
         await membershipService.createMembership({
           organizationId: savedOrg._id,
           planId: trialPlan._id,
-          trialDays: 7,
+          trialDays: 30,
         });
       }
 

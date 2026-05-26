@@ -1,6 +1,7 @@
 // controllers/campaignController.js
 import { campaignService } from "../services/campaignService.js";
 import sendResponse from "../utils/sendResponse.js";
+import membershipService from "../services/membershipService.js";
 
 const campaignController = {
   /**
@@ -42,6 +43,15 @@ const campaignController = {
       const orgId = req.params.orgId;
       const userId = req.user?.id || req.user?._id;
       const { title, message, recipients, image, dryRun = false } = req.body;
+
+      // Verificar límite del plan
+      const limits = await membershipService.getPlanLimits(orgId);
+      if (!limits?.campaignsWhatsapp) {
+        return sendResponse(res, 403, null,
+          "Las campañas de WhatsApp requieren el Plan Marca/Pro.",
+          { reason: "plan_limit_campaigns" }
+        );
+      }
 
       // Validaciones
       if (!title || !message) {

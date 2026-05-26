@@ -43,7 +43,8 @@ const membershipSchema = new mongoose.Schema(
     },
     currentPeriodEnd: {
       type: Date,
-      required: true,
+      required: false,
+      default: null,
       index: true,
     },
     trialEnd: {

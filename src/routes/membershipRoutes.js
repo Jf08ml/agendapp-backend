@@ -11,6 +11,7 @@ router.get("/:organizationId/current", membershipController.getCurrentMembership
 router.get("/check-access/:organizationId", membershipController.checkAccess);
 
 // 🔒 Rutas PROTEGIDAS (requieren autenticación)
+router.get("/my-plan-info", organizationResolver, verifyToken, membershipController.getMyPlanInfo);
 router.post("/upgrade", organizationResolver, verifyToken, membershipController.upgrade);
 router.post("/", verifyToken, membershipController.createMembership);
 router.post("/:membershipId/renew", verifyToken, membershipController.renewMembership);

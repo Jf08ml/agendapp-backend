@@ -69,6 +69,12 @@ const planSchema = new mongoose.Schema(
       autoReminders: { type: Boolean, default: false },
       autoConfirmations: { type: Boolean, default: false },
       servicePackages: { type: Boolean, default: false },
+      campaignsWhatsapp: { type: Boolean, default: false },
+      classesModule: { type: Boolean, default: false },
+      loyaltyProgram: { type: Boolean, default: false },
+      professionalLanding: { type: Boolean, default: false },
+      brandingVisible: { type: Boolean, default: false },
+      maxRemindersPerAppointment: { type: Number, default: 0 },
     },
     
     // PayPal Subscription Plan ID (one per plan, created in PayPal dashboard)

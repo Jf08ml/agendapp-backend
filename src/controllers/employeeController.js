@@ -1,11 +1,24 @@
 import employeeService from "../services/employeeService.js";
 import sendResponse from "../utils/sendResponse.js";
 import { auditLogService } from "../services/auditLogService.js";
+import membershipService from "../services/membershipService.js";
+import Employee from "../models/employeeModel.js";
 
 const employeeController = {
   // Controlador para crear un nuevo empleado
   createEmployee: async (req, res) => {
     try {
+      const organizationId = req.organization?._id || req.body.organizationId;
+      const limits = await membershipService.getPlanLimits(organizationId);
+      if (limits?.maxEmployees !== null && limits?.maxEmployees !== undefined) {
+        const count = await Employee.countDocuments({ organizationId, isActive: true });
+        if (count >= limits.maxEmployees) {
+          return sendResponse(res, 403, null,
+            `Tu plan permite máximo ${limits.maxEmployees} profesional(es). Actualiza tu plan para agregar más.`,
+            { reason: "plan_limit_employees", limit: limits.maxEmployees }
+          );
+        }
+      }
       const newEmployee = await employeeService.createEmployee(req.body);
       sendResponse(res, 201, newEmployee, "Empleado creado exitosamente");
     } catch (error) {

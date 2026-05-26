@@ -1,10 +1,23 @@
 import serviceService from "../services/serviceService.js";
 import sendResponse from "../utils/sendResponse.js";
+import membershipService from "../services/membershipService.js";
+import Service from "../models/serviceModel.js";
 
 const serviceController = {
   // Crear un nuevo servicio
   createService: async (req, res) => {
     try {
+      const organizationId = req.organization?._id || req.body.organizationId;
+      const limits = await membershipService.getPlanLimits(organizationId);
+      if (limits?.maxServices !== null && limits?.maxServices !== undefined) {
+        const count = await Service.countDocuments({ organizationId });
+        if (count >= limits.maxServices) {
+          return sendResponse(res, 403, null,
+            `Tu plan permite máximo ${limits.maxServices} servicio(s). Actualiza tu plan para agregar más.`,
+            { reason: "plan_limit_services", limit: limits.maxServices }
+          );
+        }
+      }
       const newService = await serviceService.createService(req.body);
       sendResponse(res, 201, newService, "Servicio creado exitosamente");
     } catch (error) {

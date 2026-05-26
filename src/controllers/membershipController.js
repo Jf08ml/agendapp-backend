@@ -3,6 +3,9 @@ import membershipService from "../services/membershipService.js";
 import planModel from "../models/planModel.js";
 import sendResponse from "../utils/sendResponse.js";
 import { runMembershipCheck } from "../cron/membershipCheckJob.js";
+import Employee from "../models/employeeModel.js";
+import Service from "../models/serviceModel.js";
+import Appointment from "../models/appointmentModel.js";
 
 const membershipController = {
   /**
@@ -297,6 +300,56 @@ const membershipController = {
       return sendResponse(res, 200, result, "Verificación completada");
     } catch (error) {
       console.error("Error en verificación manual:", error);
+      return sendResponse(res, 500, null, error.message);
+    }
+  },
+
+  /**
+   * GET /api/memberships/my-plan-info
+   * Retorna el plan activo de la organización con conteos de uso reales.
+   * Requiere: organizationResolver + verifyToken
+   */
+  getMyPlanInfo: async (req, res) => {
+    try {
+      const organizationId = req.organization?._id;
+      if (!organizationId) {
+        return sendResponse(res, 400, null, "No se pudo identificar la organización");
+      }
+
+      const membership = await membershipService.getCurrentMembership(organizationId);
+
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+      const [employeeCount, serviceCount, appointmentsThisMonth] = await Promise.all([
+        Employee.countDocuments({ organizationId, isActive: true }),
+        Service.countDocuments({ organizationId }),
+        Appointment.countDocuments({
+          organizationId,
+          createdAt: { $gte: startOfMonth },
+        }),
+      ]);
+
+      const limits = membership?.planId?.limits || {};
+
+      return sendResponse(res, 200, {
+        membership: {
+          status: membership?.status,
+          currentPeriodEnd: membership?.currentPeriodEnd,
+          trialEnd: membership?.trialEnd,
+          plan: membership?.planId,
+        },
+        usage: {
+          employees: { current: employeeCount, max: limits.maxEmployees ?? null },
+          services: { current: serviceCount, max: limits.maxServices ?? null },
+          appointmentsThisMonth: {
+            current: appointmentsThisMonth,
+            max: limits.maxAppointmentsPerMonth ?? null,
+          },
+        },
+      }, "Info de plan obtenida");
+    } catch (error) {
+      console.error("[getMyPlanInfo] Error:", error);
       return sendResponse(res, 500, null, error.message);
     }
   },

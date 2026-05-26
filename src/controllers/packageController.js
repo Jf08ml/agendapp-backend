@@ -1,5 +1,6 @@
 import packageService from "../services/packageService.js";
 import sendResponse from "../utils/sendResponse.js";
+import membershipService from "../services/membershipService.js";
 
 const packageController = {
   // =============================================
@@ -8,7 +9,14 @@ const packageController = {
 
   createServicePackage: async (req, res) => {
     try {
-      const { organizationId } = req.body;
+      const organizationId = req.organization?._id || req.body.organizationId;
+      const limits = await membershipService.getPlanLimits(organizationId);
+      if (!limits?.servicePackages) {
+        return sendResponse(res, 403, null,
+          "Los paquetes de sesiones requieren el Plan Marca/Pro.",
+          { reason: "plan_limit_packages" }
+        );
+      }
       const result = await packageService.createServicePackage(req.body, organizationId);
       sendResponse(res, 201, result, "Paquete creado exitosamente");
     } catch (error) {
