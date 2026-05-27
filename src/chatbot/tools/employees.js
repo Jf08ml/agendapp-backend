@@ -53,19 +53,35 @@ export default [
     name: "assign_services_to_employee",
     description: "Asigna servicios a un profesional. El profesional solo podrá atender los servicios asignados.",
     parameters: {
-      employeeId: { type: "string", description: "ID del profesional", required: true },
+      employeeId: { type: "string", description: "ID o nombre del profesional", required: true },
       serviceNames: { type: "array", description: "Lista de nombres de servicios a asignar", required: true, items: { type: "string" } },
     },
     handler: async (params, context) => {
+      // Acepta tanto ObjectId como nombre parcial del profesional
+      let employee = null;
+      if (/^[a-f\d]{24}$/i.test(params.employeeId)) {
+        employee = await Employee.findOne({ _id: params.employeeId, organizationId: context.organizationId, isActive: true });
+      }
+      if (!employee) {
+        employee = await Employee.findOne({
+          organizationId: context.organizationId,
+          names: { $regex: params.employeeId, $options: "i" },
+          isActive: true,
+        });
+      }
+      if (!employee) {
+        return { success: false, error: `No se encontró el profesional "${params.employeeId}". Verifica el nombre.` };
+      }
+
       const services = await Service.find({
         organizationId: context.organizationId,
         name: { $in: params.serviceNames },
         isActive: true,
       }).select("_id name");
 
-      await Employee.findByIdAndUpdate(params.employeeId, { $addToSet: { services: { $each: services.map((s) => s._id) } } });
+      await Employee.findByIdAndUpdate(employee._id, { $addToSet: { services: { $each: services.map((s) => s._id) } } });
 
-      return { success: true, assigned: services.map((s) => s.name) };
+      return { success: true, employee: employee.names, assigned: services.map((s) => s.name) };
     },
   },
 ];
