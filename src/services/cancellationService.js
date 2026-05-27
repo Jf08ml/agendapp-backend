@@ -174,12 +174,10 @@ const cancellationService = {
               policyBlockedReason = `No se puede cancelar con menos de ${minHours} horas de anticipación`;
             }
 
-            // Verificar restricción de citas confirmadas (por admin o por cliente)
-            if (!policyBlocked && preventConfirmed && (apt.status === 'confirmed' || apt.clientConfirmed)) {
+            // Verificar restricción de citas confirmadas por el cliente
+            if (!policyBlocked && preventConfirmed && apt.clientConfirmed) {
               policyBlocked = true;
-              policyBlockedReason = apt.clientConfirmed
-                ? 'No se pueden cancelar citas que ya confirmaste'
-                : 'No se pueden cancelar citas confirmadas';
+              policyBlockedReason = 'No se pueden cancelar citas que ya confirmaste';
             }
           }
 
