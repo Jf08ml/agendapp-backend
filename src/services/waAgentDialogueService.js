@@ -168,7 +168,7 @@ async function runDialogueAgent({ org, services, employees, clientConvText, admi
     .join("\n");
 
   const employeesList = employees
-    .map((e) => `• ${e.name} | id:${e._id}`)
+    .map((e) => `• ${e.names} | id:${e._id}`)
     .join("\n");
 
   const adminConvText = adminConversation.length
@@ -356,7 +356,7 @@ async function loadClientInfo(clientPhone, orgId, identifierField) {
 async function loadOrgData(orgId) {
   const [services, employees] = await Promise.all([
     Service.find({ organizationId: orgId, isActive: true }).select("_id name duration price").lean(),
-    Employee.find({ organizationId: orgId, isActive: true }).select("_id name").lean(),
+    Employee.find({ organizationId: orgId, isActive: true }).select("_id names").lean(),
   ]);
   return { services, employees };
 }
