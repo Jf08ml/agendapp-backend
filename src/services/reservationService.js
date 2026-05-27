@@ -109,7 +109,7 @@ async function assertConcurrencyNotExceeded(reservation) {
     service: serviceObj._id,
     startDate: { $gte: startOfDay, $lt: endDate }, // misma jornada local Y antes de que termine la reserva
     endDate: { $gt: startDate },
-    status: { $in: ['pending', 'confirmed'] },
+    status: { $in: ['pending', 'confirmed'] }, // pending kept for legacy data compatibility
   };
 
   if (employeeId) {

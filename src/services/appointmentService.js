@@ -199,19 +199,11 @@ const appointmentService = {
       const isConfirmationEnabled = whatsappTemplate?.enabledTypes?.scheduleAppointment !== false;
 
       if (isConfirmationEnabled && (client?.phone_e164 || client?.phoneNumber)) {
-        const msg = await whatsappTemplates.getRenderedTemplate(
-          organizationId,
-          'scheduleAppointment',
-          {
-            ...appointmentDetails,
-            cancellationLink,
-          }
-        );
-
-        await whatsappService.sendMessage(
+        await whatsappService.sendNotification(
           organizationId,
           client?.phone_e164 || client?.phoneNumber,
-          msg
+          'scheduleAppointment',
+          { ...appointmentDetails, cancellationLink }
         );
         console.log(`✅ Confirmación enviada para cita ${newAppointment._id}`);
       } else if (!isConfirmationEnabled) {
@@ -468,7 +460,7 @@ const appointmentService = {
           customPrice: usingPackage ? 0 : customPrices[serviceId],
           additionalItems: usingPackage ? [] : additionalItems,
           totalPrice: finalTotalPrice,
-          status: "pending",
+          status: "confirmed",
           cancelTokenHash: groupCancelTokenHash, // 🔗 Mismo hash para todo el grupo
           cancellationLink: groupCancellationLink || undefined,
           clientPackageId: pkgIdForService || undefined,
@@ -634,15 +626,7 @@ const appointmentService = {
         const isBatchConfirmationEnabled = whatsappTemplate?.enabledTypes?.scheduleAppointmentBatch !== false;
 
         if (planAllowsConfirmations && isBatchConfirmationEnabled) {
-          // Usar template personalizado de la organización
-          const msg = await whatsappTemplates.getRenderedTemplate(
-            organizationId,
-            'scheduleAppointmentBatch',
-            templateData
-          );
-
-          // Envío 1-a-1 (mensaje ya renderizado)
-          await whatsappService.sendMessage(organizationId, phoneE164, msg);
+          await whatsappService.sendNotification(organizationId, phoneE164, 'scheduleAppointmentBatch', templateData);
           console.log(`✅ Confirmación batch enviada (${allGroupAppointments.length} citas)`);
         } else {
           console.log(`⏭️  Confirmación batch deshabilitada`);
@@ -755,12 +739,7 @@ const appointmentService = {
         const isBatchConfirmationEnabled = whatsappTemplate?.enabledTypes?.scheduleAppointmentBatch !== false;
 
         if (planAllowsConfirmations && isBatchConfirmationEnabled) {
-          const msg = await whatsappTemplates.getRenderedTemplate(
-            organizationId,
-            'scheduleAppointmentBatch',
-            templateData
-          );
-          await whatsappService.sendMessage(organizationId, phoneE164, msg);
+          await whatsappService.sendNotification(organizationId, phoneE164, 'scheduleAppointmentBatch', templateData);
           console.log(`✅ WA multi-profesional enviado (${groupAppts.length} citas, ${employeeNames.length} profesionales)`);
         }
       } catch (err) {
@@ -1628,6 +1607,34 @@ const appointmentService = {
     }
   },
   /**
+   * Auto-marca como attended las citas confirmed pasadas de una organización.
+   * Se ejecuta desde el cronjob nocturno solo si org.autoMarkAttended === true.
+   */
+  autoMarkAttendedAppointments: async (organizationId) => {
+    try {
+      const organization = await organizationService.getOrganizationById(organizationId);
+      if (!organization) throw new Error('Organización no encontrada');
+
+      const timezone = organization.timezone || 'America/Bogota';
+      const endOfYesterday = moment.tz(timezone).startOf('day').toDate();
+
+      const result = await appointmentModel.updateMany(
+        {
+          organizationId,
+          status: 'confirmed',
+          startDate: { $lt: endOfYesterday },
+        },
+        { $set: { status: 'attended' } }
+      );
+
+      return { updated: result.modifiedCount };
+    } catch (error) {
+      console.error('Error en autoMarkAttendedAppointments:', error);
+      throw error;
+    }
+  },
+
+  /**
    * Marca la asistencia de una cita (attended / no_show).
    * Solo aplica a citas no canceladas.
    */
@@ -1671,20 +1678,19 @@ const appointmentService = {
         const appointmentDate = moment.tz(appointment.startDate, timezone);
         const noShowTimeStr = noShowTimeFormat === '24h' ? 'HH:mm' : 'hh:mm A';
 
-        const message = await whatsappTemplates.getRenderedTemplate(
-          orgId.toString(),
-          'clientNoShowAck',
-          {
-            names: client.name || 'Cliente',
-            service: appointment.service?.name || 'Servicio',
-            date: appointmentDate.format(`DD/MM/YYYY ${noShowTimeStr}`),
-            organization: org.name,
-          }
-        );
-
         const phoneNumber = client.phone_e164 || client.phoneNumber;
         if (phoneNumber) {
-          await whatsappService.sendMessage(orgId.toString(), phoneNumber, message);
+          await whatsappService.sendNotification(
+            orgId.toString(),
+            phoneNumber,
+            'clientNoShowAck',
+            {
+              names: client.name || 'Cliente',
+              service: appointment.service?.name || 'Servicio',
+              date: appointmentDate.format(`DD/MM/YYYY ${noShowTimeStr}`),
+              organization: org.name,
+            }
+          );
           console.log(`✅ Mensaje de no asistencia enviado al cliente: ${client.name}`);
         }
       } catch (whatsappError) {

@@ -169,6 +169,7 @@ const organizationService = {
       metaPhoneNumberId,
       metaAccessToken,
       metaPhone,
+      autoMarkAttended,
     } = organizationData;
 
     const organization = await Organization.findById(id);
@@ -380,6 +381,9 @@ const organizationService = {
         }
       }
     }
+
+    // ✅ Auto-marcar asistencia
+    if (autoMarkAttended !== undefined) organization.autoMarkAttended = autoMarkAttended;
 
     // 🔗 Conexión híbrida WA
     if (waConnectionType !== undefined) organization.waConnectionType = waConnectionType;

@@ -273,12 +273,12 @@ const clientService = {
           const whatsappDoc = await WhatsappTemplate.findOne({ organizationId: organization._id });
           const isEnabled = whatsappDoc?.enabledTypes?.loyaltyServiceReward !== false;
           if (isEnabled) {
-            const msg = await whatsappTemplates.getRenderedTemplate(
+            await whatsappService.sendNotification(
               organization._id.toString(),
+              client.phone_e164,
               'loyaltyServiceReward',
               { names: client.name, reward: earned.reward, organization: organization.name }
             );
-            await whatsappService.sendMessage(organization._id.toString(), client.phone_e164, msg);
             console.log(`[registerService] WA de recompensa enviado a ${client.name}: ${earned.reward}`);
           }
         } catch (waError) {
@@ -312,12 +312,12 @@ const clientService = {
           const whatsappDoc = await WhatsappTemplate.findOne({ organizationId: organization._id });
           const isEnabled = whatsappDoc?.enabledTypes?.loyaltyReferralReward !== false;
           if (isEnabled) {
-            const msg = await whatsappTemplates.getRenderedTemplate(
+            await whatsappService.sendNotification(
               organization._id.toString(),
+              client.phone_e164,
               'loyaltyReferralReward',
               { names: client.name, reward: earned.reward, organization: organization.name }
             );
-            await whatsappService.sendMessage(organization._id.toString(), client.phone_e164, msg);
             console.log(`[registerReferral] WA de recompensa enviado a ${client.name}: ${earned.reward}`);
           }
         } catch (waError) {

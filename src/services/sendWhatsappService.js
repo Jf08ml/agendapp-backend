@@ -7,6 +7,7 @@ import membershipService from "./membershipService.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
 import { normalizePhoneNumber, toWhatsappFormat } from "../utils/phoneUtils.js";
 import { sendTextMessage as metaSendText, sendTemplateMessage as metaSendTemplate } from "./metaTemplateService.js";
+import { sendMetaTemplateNotification } from "./metaSendWhatsapp.js";
 
 /** ===================== CONFIG ===================== */
 const BASE_URL = process.env.WA_API_URL;
@@ -158,6 +159,56 @@ const whatsappService = {
   },
 
   /**
+   * High-level notification sender. Routes to Meta template or Baileys text.
+   *
+   * For Meta orgs: sends via an approved Meta template using structured data.
+   * Falls back to free-text (sendMessage) if the template is not found / not approved.
+   *
+   * For Baileys orgs: renders the template text and calls sendMessage as usual.
+   *
+   * @param {string} organizationId
+   * @param {string} phone
+   * @param {string} templateType    - e.g. "scheduleAppointmentBatch", "reminder"
+   * @param {Object} data            - variable data (names, date, organization, ...)
+   * @param {Object} [opts]
+   * @param {string} [opts.fallbackMessage] - pre-rendered text to use as fallback on Meta
+   */
+  async sendNotification(organizationId, phone, templateType, data, opts = {}) {
+    const planLimits = await membershipService.getPlanLimits(organizationId);
+    if (planLimits && planLimits.whatsappIntegration === false) {
+      console.log(`[sendNotification] WhatsApp bloqueado por plan para org ${organizationId}`);
+      return { blocked: true, reason: "plan_limit" };
+    }
+
+    const org = await organizationService.getOrganizationById(organizationId);
+
+    if (org?.waConnectionType === "meta") {
+      const normalizedPhone = this.normalizePhoneForWhatsapp(phone, org.default_country || "CO");
+
+      // Try Meta template first
+      try {
+        const result = await sendMetaTemplateNotification(org, normalizedPhone, templateType, data);
+        if (result) return result;
+      } catch (err) {
+        console.error(`[sendNotification] Meta template error for "${templateType}":`, err.message);
+      }
+
+      // Fall back to free text if template not available/approved
+      if (opts.fallbackMessage) {
+        console.warn(`[sendNotification] Falling back to free text for "${templateType}" on org ${org._id}`);
+        return metaSendText(org, normalizedPhone, opts.fallbackMessage);
+      }
+
+      console.warn(`[sendNotification] No template and no fallback for "${templateType}" on org ${org._id} — skipping`);
+      return null;
+    }
+
+    // Baileys: render and send as text
+    const msg = await whatsappTemplates.getRenderedTemplate(organizationId, templateType, data);
+    return this.sendMessage(organizationId, phone, msg, null, opts);
+  },
+
+  /**
    * Envía un mensaje usando plantilla Meta (solo para orgs con waConnectionType === 'meta').
    */
   async sendTemplateMessage(organizationId, phone, templateName, language, components = []) {
@@ -175,6 +226,7 @@ const whatsappService = {
 
   /**
    * Notifica estado de reserva (aprobada/rechazada) por la sesión WA de la organización.
+   * Soporta tanto Baileys como Meta.
    */
   async sendWhatsappStatusReservation(
     status,
@@ -183,11 +235,7 @@ const whatsappService = {
     opts = {}
   ) {
     const org = reservation?.organizationId;
-    if (!org?.clientIdWhatsapp) {
-      throw new Error(
-        "La organización no tiene sesión de WhatsApp configurada"
-      );
-    }
+    if (!org) throw new Error("La organización no está disponible en la reserva");
 
     // Verificar si el plan permite WhatsApp
     const planLimits = await membershipService.getPlanLimits(org._id);
@@ -196,20 +244,37 @@ const whatsappService = {
       return { blocked: true, reason: "plan_limit" };
     }
 
-    // Usar template personalizado si existe, o el por defecto
-    const templateType = status === "approved" 
-      ? 'statusReservationApproved' 
-      : 'statusReservationRejected';
-    
-    const msg = await whatsappTemplates.getRenderedTemplate(
-      org,
-      templateType,
-      reservationDetails
-    );
+    const templateType = status === "approved"
+      ? "statusReservationApproved"
+      : "statusReservationRejected";
 
+    const phone = reservation?.customerDetails?.phone;
+    const normalizedPhone = this.normalizePhoneForWhatsapp(phone, org.default_country);
+
+    // ── Meta routing ──────────────────────────────────────────────────────────
+    if (org?.waConnectionType === "meta") {
+      try {
+        const result = await sendMetaTemplateNotification(org, normalizedPhone, templateType, reservationDetails);
+        if (result) return result;
+      } catch (err) {
+        console.error(`[sendWhatsappStatusReservation] Meta template error:`, err.message);
+      }
+
+      // Fallback to free text for Meta
+      const fallbackMsg = await whatsappTemplates.getRenderedTemplate(org, templateType, reservationDetails);
+      console.warn(`[sendWhatsappStatusReservation] Falling back to free text for "${templateType}" on org ${org._id}`);
+      return metaSendText(org, normalizedPhone, fallbackMsg);
+    }
+
+    // ── Baileys ───────────────────────────────────────────────────────────────
+    if (!org.clientIdWhatsapp) {
+      throw new Error("La organización no tiene sesión de WhatsApp configurada");
+    }
+
+    const msg = await whatsappTemplates.getRenderedTemplate(org, templateType, reservationDetails);
     const payload = {
       clientId: org.clientIdWhatsapp,
-      phone: this.normalizePhoneForWhatsapp(reservation?.customerDetails?.phone, org.default_country),
+      phone: normalizedPhone,
       message: msg,
     };
 

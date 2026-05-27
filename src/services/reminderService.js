@@ -5,6 +5,7 @@ import organizationModel from "../models/organizationModel.js";
 import WhatsappTemplate from "../models/whatsappTemplateModel.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
 import { toWhatsappFormat } from "../utils/phoneUtils.js";
+import whatsappService from "./sendWhatsappService.js";
 import {
   getBogotaDayWindowUTC,
   getDayWindowUTC,
@@ -48,7 +49,7 @@ export const reminderService = {
         ...(orgId ? { organizationId: orgId } : {}),
         startDate: { $gte: dayStartUTC, $lt: dayEndUTC },
         reminderSent: false,
-        status: { $in: ['pending', 'confirmed'] },
+        status: 'confirmed',
       })
       .populate("client service employee organizationId");
 
@@ -84,10 +85,10 @@ export const reminderService = {
     for (const [_orgId, appts] of byOrg.entries()) {
       const org = appts[0]?.organizationId;
       const clientId = org?.clientIdWhatsapp;
-      if (!clientId) {
-        console.warn(
-          `[${_orgId}] Sin clientIdWhatsapp, omito ${appts.length}.`
-        );
+      const isMeta = org?.waConnectionType === "meta";
+
+      if (!clientId && !isMeta) {
+        console.warn(`[${_orgId}] Sin clientIdWhatsapp ni Meta configurado, omito ${appts.length}.`);
         continue;
       }
 
@@ -233,46 +234,71 @@ export const reminderService = {
 
       console.log(`[${_orgId}] Preparando ${items.length} mensajes para ${byPhone.size} números únicos`);
 
-      // 5) Obtener template personalizado (sin renderizar, con placeholders)
+      // 5) Verificar si el envío de recordatorio está habilitado
       const templateDoc = await WhatsappTemplate.findOne({ organizationId: _orgId });
+      const isReminderEnabled = templateDoc?.enabledTypes?.reminder !== false;
+      if (!isReminderEnabled) {
+        console.log(`[${_orgId}] Recordatorio deshabilitado para esta organización, omitiendo.`);
+        continue;
+      }
+
+      // ── Meta: envío individual por template aprobado ─────────────────────────
+      if (isMeta) {
+        console.log(`[${_orgId}] Enviando recordatorios vía Meta template (${items.length} destinatarios)`);
+        let metaSent = 0;
+        for (const item of items) {
+          try {
+            if (!dryRun) {
+              await whatsappService.sendNotification(_orgId, item.phone, 'reminder', item.vars);
+            }
+            metaSent++;
+          } catch (err) {
+            console.error(`[${_orgId}] Error enviando recordatorio Meta a ${item.phone}:`, err.message);
+          }
+          await sleep(200);
+        }
+        console.log(`[${_orgId}] Meta recordatorios enviados: ${metaSent}/${items.length}`);
+
+        if (!dryRun && includedIds.length) {
+          await appointmentModel.updateMany(
+            { _id: { $in: includedIds } },
+            { $set: { reminderSent: true } }
+          ).catch((e) => console.warn(`[${_orgId}] Error marcando reminderSent:`, e?.message));
+        }
+        results.push({ orgId: _orgId, prepared: metaSent, title: `Meta recordatorios (${org?.name})` });
+        continue;
+      }
+
+      // ── Baileys: envío en bulk ────────────────────────────────────────────────
+
+      // 6) Obtener template personalizado (sin renderizar, con placeholders)
       const messageTpl = templateDoc?.reminder || whatsappTemplates.getDefaultTemplate('reminder');
-      
       console.log(`[${_orgId}] 📤 Usando template:`, templateDoc?.reminder ? 'PERSONALIZADO' : 'POR DEFECTO');
 
-      // 6) (opcional) Sincronizar opt-in
+      // 7) (opcional) Sincronizar opt-in
       try {
         await waBulkOptIn(items.map((it) => it.phone));
       } catch (e) {
         console.warn(`[${_orgId}] OptIn falló: ${e?.message || e}`);
       }
 
-      // 7) Enviar campaña con vars y template (sin pre-renderizar)
+      // 8) Enviar campaña con vars y template (sin pre-renderizar)
       const targetDateForTitle = targetDate ? new Date(targetDate) : new Date();
       const titleDateStr = targetDateForTitle.toISOString().slice(0, 10);
-
       const title = `Recordatorios ${titleDateStr} (${org?.name || _orgId})`;
 
       const r = await waBulkSend({
         clientId,
         title,
         items,
-        messageTpl: messageTpl, // 🔧 FIX: Enviar template con placeholders
+        messageTpl,
         dryRun,
-        // Sin preRendered: true - el servidor renderizará con las vars
       });
 
-      console.log(
-        `[${_orgId}] Enviados ${r.prepared} mensajes (dryRun=${dryRun})`
-      );
+      console.log(`[${_orgId}] Enviados ${r.prepared} mensajes (dryRun=${dryRun})`);
+      results.push({ orgId: _orgId, bulkId: r.bulkId, prepared: r.prepared, title });
 
-      results.push({
-        orgId: _orgId,
-        bulkId: r.bulkId,
-        prepared: r.prepared,
-        title,
-      });
-
-      // 8) Marcar como recordatorio enviado SOLO las citas incluidas
+      // 9) Marcar como recordatorio enviado SOLO las citas incluidas
       try {
         if (includedIds.length) {
           await appointmentModel.updateMany(
@@ -281,12 +307,10 @@ export const reminderService = {
           );
         }
       } catch (e) {
-        console.warn(
-          `[${_orgId}] Error al marcar reminderSent: ${e?.message || e}`
-        );
+        console.warn(`[${_orgId}] Error al marcar reminderSent: ${e?.message || e}`);
       }
 
-      // 9) Pequeño respiro para no saturar
+      // 10) Pequeño respiro para no saturar
       await sleep(200);
     }
 

@@ -307,6 +307,12 @@ const organizationSchema = new mongoose.Schema({
     enum: ["manual", "auto_if_available"],
     default: "manual",
   },
+  // Si está activo, un cronjob nocturno marca automáticamente las citas pasadas confirmed → attended.
+  // Si está desactivado, el admin marca manualmente el estado de asistencia.
+  autoMarkAttended: {
+    type: Boolean,
+    default: true,
+  },
   showLoyaltyProgram: {
     type: Boolean,
     default: true,

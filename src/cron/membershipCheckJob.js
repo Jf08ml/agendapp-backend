@@ -129,44 +129,36 @@ const membershipCheckJob = cron.schedule(
       console.log(`Membresías suspendidas: ${results.toSuspend.length}`);
       console.log("=== Verificación completada ===\n");
 
-      // 8. Auto-confirmar citas del día para organizaciones activas
-      console.log("\n=== Iniciando auto-confirmación de citas del día ===");
+      // 8. Auto-marcar asistencia en citas confirmed pasadas (por org con autoMarkAttended=true)
+      console.log("\n=== Iniciando auto-mark attended ===");
       try {
         const activeOrgs = await Organization.find({
-          membershipStatus: { $nin: ['suspended', 'cancelled'] }
+          membershipStatus: { $nin: ['suspended', 'cancelled'] },
+          autoMarkAttended: true,
         }).select('_id name timezone');
 
-        let totalConfirmed = 0;
-        let totalFailed = 0;
+        let totalMarked = 0;
         let orgsProcessed = 0;
 
         for (const org of activeOrgs) {
           try {
-            const result = await appointmentService.autoConfirmTodayAppointments(org._id);
-
-            if (result.confirmed.length > 0) {
-              console.log(`  ✓ ${org.name}: ${result.confirmed.length} citas confirmadas`);
-              totalConfirmed += result.confirmed.length;
+            const result = await appointmentService.autoMarkAttendedAppointments(org._id);
+            if (result.updated > 0) {
+              console.log(`  ✓ ${org.name}: ${result.updated} citas marcadas como attended`);
+              totalMarked += result.updated;
             }
-
-            if (result.failed.length > 0) {
-              console.log(`  ✗ ${org.name}: ${result.failed.length} citas fallidas`);
-              totalFailed += result.failed.length;
-            }
-
             orgsProcessed++;
           } catch (err) {
             console.error(`  ✗ Error procesando ${org.name}:`, err.message);
           }
         }
 
-        console.log("\n=== Resumen de auto-confirmación ===");
+        console.log("\n=== Resumen de auto-mark attended ===");
         console.log(`Organizaciones procesadas: ${orgsProcessed}`);
-        console.log(`Total citas confirmadas: ${totalConfirmed}`);
-        console.log(`Total citas fallidas: ${totalFailed}`);
-        console.log("=== Auto-confirmación completada ===\n");
+        console.log(`Total citas marcadas attended: ${totalMarked}`);
+        console.log("=== Auto-mark attended completado ===\n");
       } catch (error) {
-        console.error("❌ Error en auto-confirmación de citas:", error);
+        console.error("❌ Error en auto-mark attended:", error);
       }
 
     } catch (error) {
@@ -188,7 +180,6 @@ export const runMembershipCheck = async () => {
     const results = await membershipService.checkExpiringMemberships();
 
     let totalNotifications = 0;
-    let totalAppointmentsConfirmed = 0;
 
     for (const membership of results.threeDays) {
       await membershipService.createMembershipNotification({
@@ -243,25 +234,27 @@ export const runMembershipCheck = async () => {
       });
     }
 
-    // Auto-confirmar citas
+    // Auto-marcar attended
+    let totalAppointmentsMarked = 0;
     try {
       const activeOrgs = await Organization.find({
-        membershipStatus: { $nin: ["suspended", "cancelled"] }
+        membershipStatus: { $nin: ["suspended", "cancelled"] },
+        autoMarkAttended: true,
       }).select("_id name");
 
       for (const org of activeOrgs) {
-        const result = await appointmentService.autoConfirmTodayAppointments(org._id);
-        totalAppointmentsConfirmed += result.confirmed.length;
+        const result = await appointmentService.autoMarkAttendedAppointments(org._id);
+        totalAppointmentsMarked += result.updated;
       }
     } catch (error) {
-      console.error("Error confirmando citas:", error);
+      console.error("Error marcando citas attended:", error);
     }
 
     return {
       success: true,
       notifications: totalNotifications,
       suspended: results.toSuspend.length,
-      appointmentsConfirmed: totalAppointmentsConfirmed,
+      appointmentsMarkedAttended: totalAppointmentsMarked,
       results,
     };
   } catch (error) {

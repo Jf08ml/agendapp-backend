@@ -568,19 +568,11 @@ const cancellationService = {
               })
               .join('\n');
 
-            const message = await whatsappTemplates.getRenderedTemplate(
-              organizationId.toString(),
-              'clientConfirmationAck',
-              {
-                names: clientName,
-                appointments_list,
-              }
-            );
-
-            await whatsappService.sendMessage(
+            await whatsappService.sendNotification(
               organizationId.toString(),
               clientPhone,
-              message
+              'clientConfirmationAck',
+              { names: clientName, appointments_list }
             );
             }
           }
@@ -975,19 +967,11 @@ const cancellationService = {
           if (!isEnabled) {
             console.log('⏭️  Envío de clientCancellationAck deshabilitado para la organización', organizationId.toString());
           } else {
-            const message = await whatsappTemplates.getRenderedTemplate(
-              organizationId.toString(),
-              'clientCancellationAck',
-              {
-                names: clientName,
-                appointments_list,
-              }
-            );
-
-            await whatsappService.sendMessage(
+            await whatsappService.sendNotification(
               organizationId.toString(),
               clientPhone,
-              message
+              'clientCancellationAck',
+              { names: clientName, appointments_list }
             );
           }
 
@@ -1160,24 +1144,13 @@ const cancellationService = {
           const appointmentDate = moment.tz(appointment.startDate, timezone);
           const appointmentsList = `• ${appointment.service?.name || 'Servicio'} - ${appointmentDate.format(`DD/MM/YYYY ${singleCancelTimeFmt}`)}`;
           
-          // Usar plantilla personalizada si existe, sino la por defecto
-          const message = await whatsappTemplates.getRenderedTemplate(
-            organizationId.toString(),
-            'clientCancellationAck',
-            {
-              names: client.name || 'Cliente',
-              appointments_list: appointmentsList,
-              organization: org.name,
-            }
-          );
-
-          // Enviar el mensaje
           const phoneNumber = client.phone_e164 || client.phoneNumber;
           if (phoneNumber) {
-            await whatsappService.sendMessage(
+            await whatsappService.sendNotification(
               organizationId.toString(),
               phoneNumber,
-              message
+              'clientCancellationAck',
+              { names: client.name || 'Cliente', appointments_list: appointmentsList, organization: org.name }
             );
             console.log(`✅ Mensaje de cancelación enviado al cliente: ${client.name} (${phoneNumber})`);
           }

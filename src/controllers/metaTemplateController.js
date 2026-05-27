@@ -43,7 +43,8 @@ export async function handleCreateTemplate(req, res) {
       } catch { /* ignore header parse errors */ }
     }
 
-    sendResponse(res, 400, extraData, metaError?.message || err.message);
+    const userMsg = metaError?.error_user_msg || metaError?.message || err.message;
+    sendResponse(res, 400, extraData, userMsg);
   }
 }
 

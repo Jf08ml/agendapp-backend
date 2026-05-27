@@ -13,6 +13,7 @@ import clientService from './clientService.js';
 import WhatsappTemplate from '../models/whatsappTemplateModel.js';
 import whatsappTemplates from '../utils/whatsappTemplates.js';
 import { waIntegrationService } from './waIntegrationService.js';
+import whatsappService from './sendWhatsappService.js';
 import cancellationService from './cancellationService.js';
 import { generateCancellationLink } from '../utils/cancellationUtils.js';
 
@@ -507,7 +508,7 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
           customPrice: baseAppointment.customPrices?.[serviceId],
           additionalItems: additionalItemsForService,
           totalPrice,
-          status: 'pending',
+          status: 'confirmed',
           // 🔁 Campos de serie
           seriesId,
           occurrenceNumber: occurrenceNumber + 1,
@@ -623,20 +624,12 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
           const isRecurringConfirmationEnabled = whatsappTemplate?.enabledTypes?.recurringAppointmentSeries !== false;
 
           if (isRecurringConfirmationEnabled) {
-            // Usar template específico para series recurrentes
-            const msg = await whatsappTemplates.getRenderedTemplate(
+            await whatsappService.sendNotification(
               baseAppointment.organizationId,
+              phoneE164,
               'recurringAppointmentSeries',
               templateData
             );
-            
-            // Enviar UN SOLO mensaje
-            await waIntegrationService.sendMessage({
-              orgId: baseAppointment.organizationId,
-              phone: phoneE164,
-              message: msg,
-              image: null,
-            });
             
             console.log(`✅ Confirmación de serie recurrente enviada: ${Object.keys(citasPorOcurrencia).length} ocurrencias (${created.length} citas totales)`);
           } else {
@@ -710,20 +703,12 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
               
               // Usar template batch o simple según cantidad de servicios
               const templateType = primerasCitas.length > 1 ? 'scheduleAppointmentBatch' : 'scheduleAppointment';
-              
-              const msg = await whatsappTemplates.getRenderedTemplate(
+              await whatsappService.sendNotification(
                 baseAppointment.organizationId,
+                phoneE164,
                 templateType,
                 templateData
               );
-              
-              // Enviar mensaje solo de la primera cita
-              await waIntegrationService.sendMessage({
-                orgId: baseAppointment.organizationId,
-                phone: phoneE164,
-                message: msg,
-                image: null,
-              });
               
               console.log(`📱 Mensaje enviado solo de primera ocurrencia (${primerasCitas.length} servicios)`);
             }
