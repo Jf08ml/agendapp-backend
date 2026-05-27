@@ -74,6 +74,12 @@ const waConversationSchema = new mongoose.Schema(
     },
 
     lastActivityAt: { type: Date, default: Date.now },
+
+    // Última vez que el admin respondió vía Meta (para validar ventana de 24h)
+    adminLastContactAt: { type: Date, default: null },
+
+    // true mientras esperamos que el admin responda la plantilla re_activacion_ia
+    awaitingWindowReopen: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

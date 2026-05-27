@@ -26,7 +26,24 @@ export async function handleCreateTemplate(req, res) {
     sendResponse(res, 201, result, "Plantilla enviada a revisión de Meta");
   } catch (err) {
     console.error("[metaTemplate] Error creando:", err.response?.data || err.message);
-    sendResponse(res, 400, null, err.response?.data?.error?.message || err.message);
+    const metaError = err.response?.data?.error;
+    const isRateLimit = metaError?.code === 80008;
+
+    let extraData = null;
+    if (isRateLimit) {
+      try {
+        const usageHeader = err.response?.headers?.["x-business-use-case-usage"];
+        if (usageHeader) {
+          const usage = JSON.parse(usageHeader);
+          const entries = Object.values(usage)[0];
+          if (Array.isArray(entries) && entries[0]?.estimated_time_to_regain_access != null) {
+            extraData = { rateLimitMinutes: entries[0].estimated_time_to_regain_access };
+          }
+        }
+      } catch { /* ignore header parse errors */ }
+    }
+
+    sendResponse(res, 400, extraData, metaError?.message || err.message);
   }
 }
 

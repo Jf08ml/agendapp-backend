@@ -2,6 +2,8 @@ import Organization from "../models/organizationModel.js";
 import bcrypt from "bcryptjs";
 import membershipService from "./membershipService.js";
 import Plan from "../models/planModel.js";
+import { sendTemplateMessage } from "./metaApiService.js";
+import { normalizePhone } from "./waAgentService.js";
 
 const organizationService = {
   // Crear una nueva organización
@@ -361,7 +363,23 @@ const organizationService = {
 
     // 🤖 Agente WA (Baileys)
     if (waPhone !== undefined) organization.waPhone = waPhone || null;
-    if (waAgentEnabled !== undefined) organization.waAgentEnabled = waAgentEnabled;
+    if (waAgentEnabled !== undefined) {
+      const activandoAgente = waAgentEnabled === true && organization.waAgentEnabled !== true;
+      organization.waAgentEnabled = waAgentEnabled;
+
+      if (activandoAgente) {
+        console.log("[WaAgent] Activando agente — phoneNumber:", organization.phoneNumber, "| waAgentEnabled anterior:", !activandoAgente);
+        if (organization.phoneNumber) {
+          const adminPhone = normalizePhone(organization.phoneNumber);
+          console.log("[WaAgent] Enviando agente_ia_activo a:", adminPhone);
+          sendTemplateMessage(adminPhone, "agente_ia_activo")
+            .then(() => console.log("[WaAgent] agente_ia_activo enviado OK a:", adminPhone))
+            .catch((err) => console.error("[WaAgent] Error enviando agente_ia_activo:", err?.response?.data || err.message));
+        } else {
+          console.warn("[WaAgent] No se envió agente_ia_activo — org sin phoneNumber");
+        }
+      }
+    }
 
     // 🔗 Conexión híbrida WA
     if (waConnectionType !== undefined) organization.waConnectionType = waConnectionType;

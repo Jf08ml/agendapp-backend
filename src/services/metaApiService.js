@@ -40,6 +40,39 @@ export async function sendTextMessage(toPhone, text) {
 }
 
 /**
+ * Envía un mensaje de plantilla aprobada por Meta.
+ * @param {string} toPhone - Número E.164 del destinatario
+ * @param {string} templateName - Nombre exacto de la plantilla en Meta Business
+ * @param {string} languageCode - Código de idioma de la plantilla (default: "es")
+ * @returns {Promise<{ messageId: string }>}
+ */
+export async function sendTemplateMessage(toPhone, templateName, languageCode = "es") {
+  const { phoneNumberId, accessToken } = getConfig();
+
+  const response = await axios.post(
+    `${GRAPH_URL}/${phoneNumberId}/messages`,
+    {
+      messaging_product: "whatsapp",
+      to: toPhone,
+      type: "template",
+      template: {
+        name: templateName,
+        language: { code: languageCode },
+      },
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+    }
+  );
+
+  const messageId = response.data?.messages?.[0]?.id;
+  return { messageId };
+}
+
+/**
  * Valida la firma HMAC-SHA256 que Meta incluye en cada webhook POST.
  * Usa req.rawBody que ya se captura en app.js.
  * @param {string} rawBody

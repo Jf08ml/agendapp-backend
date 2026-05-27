@@ -246,6 +246,8 @@ const organizationSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  // Última vez que el admin respondió a AgenditApp vía Meta (ventana de 24h a nivel de org)
+  agentAdminLastContactAt: { type: Date, default: null },
   // Tipo de conexión WA activa: 'baileys' | 'meta' | null
   waConnectionType: {
     type: String,

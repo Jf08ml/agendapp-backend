@@ -53,10 +53,20 @@ export async function handleMetaIncoming(req, res) {
 
   // ── Routing: ¿es respuesta del admin a AgenditApp, o mensaje de cliente a org Meta? ──
   if (receivingPhoneNumberId === process.env.META_PHONE_NUMBER_ID) {
-    // Respuesta del admin al bot de AgenditApp → continúa el diálogo del agente
+    // Respuesta del admin al bot de AgenditApp
+    // Primero intentar continuar un diálogo activo; si no hay ninguno, es confirmación
+    // de agente_ia_activo → actualizar ventana a nivel de org
     processOrgResponse({ orgPhone: fromPhone, body }).catch((err) =>
       console.error("[WaAgent] Error procesando respuesta de org:", err)
     );
+
+    // Registrar contacto a nivel de org para la ventana de 24h
+    // (aplica tanto para respuestas a agente_ia_activo como a cualquier reply del admin)
+    const phoneVariants = [fromPhone, fromPhone.replace(/^\+/, "")];
+    Organization.findOneAndUpdate(
+      { phoneNumber: { $in: phoneVariants } },
+      { agentAdminLastContactAt: new Date() }
+    ).catch((err) => console.error("[WaAgent] Error actualizando agentAdminLastContactAt:", err));
   } else {
     // Mensaje de cliente al número Meta de una org → detectar intención
     const org = await Organization.findOne({ metaPhoneNumberId: receivingPhoneNumberId }).lean();

@@ -6,20 +6,45 @@ import Employee from "../models/employeeModel.js";
 import Client from "../models/clientModel.js";
 import appointmentService from "./appointmentService.js";
 import clientService from "./clientService.js";
-import { sendTextMessage } from "./metaApiService.js";
+import { sendTextMessage, sendTemplateMessage } from "./metaApiService.js";
 import { normalizePhone } from "./waAgentService.js";
 
 const anthropic = new Anthropic();
 
+const WINDOW_24H_MS = 24 * 60 * 60 * 1000;
+
+function isAdminWindowOpen(convo, org) {
+  const now = Date.now();
+  const convWindow = convo.adminLastContactAt
+    ? now - new Date(convo.adminLastContactAt).getTime() < WINDOW_24H_MS
+    : false;
+  const orgWindow = org.agentAdminLastContactAt
+    ? now - new Date(org.agentAdminLastContactAt).getTime() < WINDOW_24H_MS
+    : false;
+  return convWindow || orgWindow;
+}
+
 // ─── Punto de entrada: primera vez que detectamos intención ──────────────────
 
 export async function startDialogue(convo, org, intent) {
+  const orgAdminPhone = normalizePhone(org.phoneNumber);
+
+  // Validar ventana de 24h antes de enviar texto libre
+  if (!isAdminWindowOpen(convo, org)) {
+    console.log(`[WaDialogue] Ventana de 24h vencida — enviando plantilla re_activacion_ia al admin: ${orgAdminPhone}`);
+    await sendTemplateMessage(orgAdminPhone, "re_activacion_ia");
+    await WaConversation.findByIdAndUpdate(convo._id, {
+      status: "summary_sent",
+      awaitingWindowReopen: true,
+    });
+    return;
+  }
+
   const identifierField = org.clientFormConfig?.identifierField || "phone";
   const [{ services, employees }, clientInfo] = await Promise.all([
     loadOrgData(org._id),
     loadClientInfo(convo.clientPhone, org._id, identifierField),
   ]);
-  const orgAdminPhone = normalizePhone(org.phoneNumber);
 
   const clientConvText = convo.messages
     .map((m) => `${m.role === "client" ? "Cliente" : "Negocio"}: ${m.body}`)
@@ -59,6 +84,25 @@ export async function continueDialogue(convo, org, adminReply) {
   // Ignorar mensajes automáticos de bienvenida — el admin aún no respondió realmente
   if (isAutoReply(adminReply, org.name)) {
     console.log("[WaDialogue] Mensaje automático ignorado, esperando respuesta real del admin");
+    return;
+  }
+
+  // El admin respondió → ventana de 24h está abierta ahora
+  await WaConversation.findByIdAndUpdate(convo._id, {
+    adminLastContactAt: new Date(),
+  });
+
+  // Si veníamos esperando que el admin reabriera la ventana, relanzar el diálogo
+  if (convo.awaitingWindowReopen) {
+    console.log(`[WaDialogue] Admin reactivó ventana — retomando diálogo de intención (conv: ${convo._id})`);
+    await WaConversation.findByIdAndUpdate(convo._id, {
+      awaitingWindowReopen: false,
+      status: "intent_detected",
+    });
+    const freshConvo = await WaConversation.findById(convo._id).lean();
+    await startDialogue(freshConvo, org, freshConvo.detectedIntent).catch((err) =>
+      console.error("[WaDialogue] Error relanzando diálogo tras reactivación:", err)
+    );
     return;
   }
 
