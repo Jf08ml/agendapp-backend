@@ -1,4 +1,4 @@
-import { connectOrg, disconnectOrg, getMetaStatus } from "../services/metaConnectService.js";
+import { connectOrg, disconnectOrg, getMetaStatus, registerPhone } from "../services/metaConnectService.js";
 import sendResponse from "../utils/sendResponse.js";
 
 export async function handleMetaConnect(req, res) {
@@ -22,6 +22,17 @@ export async function handleMetaDisconnect(req, res) {
   } catch (err) {
     console.error("[metaConnect] Error desconectando:", err.message);
     sendResponse(res, 500, null, err.message);
+  }
+}
+
+export async function handleRegisterPhone(req, res) {
+  try {
+    const { id } = req.params;
+    const result = await registerPhone(id);
+    sendResponse(res, 200, result, "Número registrado correctamente en la Cloud API");
+  } catch (err) {
+    console.error("[metaConnect] Error registrando número:", err.message, err.response?.data);
+    sendResponse(res, 500, null, err.response?.data?.error?.message || err.message);
   }
 }
 

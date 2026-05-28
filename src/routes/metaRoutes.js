@@ -1,11 +1,12 @@
 import express from "express";
-import { handleMetaConnect, handleMetaDisconnect, handleMetaStatus } from "../controllers/metaConnectController.js";
+import { handleMetaConnect, handleMetaDisconnect, handleMetaStatus, handleRegisterPhone } from "../controllers/metaConnectController.js";
 import { handleListTemplates, handleCreateTemplate, handleUpdateTemplate, handleDeleteTemplate, handleSyncTemplates } from "../controllers/metaTemplateController.js";
 
 const router = express.Router();
 
 // ── Conexión Meta por org ──────────────────────────────────────────
 router.post("/:id/meta-connect", handleMetaConnect);
+router.post("/:id/meta-register-phone", handleRegisterPhone);
 router.delete("/:id/meta-disconnect", handleMetaDisconnect);
 router.get("/:id/meta-status", handleMetaStatus);
 

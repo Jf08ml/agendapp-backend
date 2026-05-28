@@ -180,7 +180,13 @@ export async function sendMetaTemplateNotification(org, phone, templateType, dat
   try {
     return await sendTemplateMessage(org, phone, metaName, lang, components);
   } catch (err) {
-    console.error(`[metaSendWA] Error sending template "${metaName}" to ${phone}:`, err.response?.data || err.message);
-    throw err;
+    const metaCode = err.response?.data?.error?.code;
+    // 133010 = número no tiene WhatsApp — esperado, no es un error crítico
+    if (metaCode === 133010) {
+      console.warn(`[metaSendWA] ${phone} no tiene WhatsApp (133010) — omitiendo notificación`);
+    } else {
+      console.error(`[metaSendWA] Error sending template "${metaName}" to ${phone}:`, err.response?.data || err.message);
+    }
+    return null;
   }
 }

@@ -76,7 +76,25 @@ export async function connectOrg(orgId, code, redirectUri, providedWabaId, provi
     { params: { access_token: accessToken } }
   );
 
-  // 7. Guardar en la org
+  // 7. Registrar el número en la Cloud API (necesario para poder enviar mensajes)
+  const regPin = Math.floor(100000 + Math.random() * 900000).toString();
+  try {
+    await axios.post(
+      `${GRAPH_URL}/${phoneData.id}/register`,
+      { messaging_product: "whatsapp", pin: regPin },
+      { params: { access_token: accessToken } }
+    );
+    console.log(`[metaConnect] Número ${phoneData.display_phone_number} registrado en Cloud API`);
+  } catch (regErr) {
+    const errCode = regErr.response?.data?.error?.code;
+    if (errCode === 133016) {
+      console.log(`[metaConnect] Número ya estaba registrado (133016)`);
+    } else {
+      console.warn(`[metaConnect] Advertencia al registrar número:`, regErr.response?.data || regErr.message);
+    }
+  }
+
+  // 8. Guardar en la org
   await Organization.findByIdAndUpdate(
     orgId,
     {
@@ -122,6 +140,30 @@ export async function disconnectOrg(orgId) {
     metaAccessToken: null,
     metaPhone: null,
   });
+}
+
+/**
+ * Registra (o re-registra) el número de teléfono de una org ya conectada en la Cloud API.
+ * Necesario cuando el número tiene 133010 "Account not registered".
+ */
+export async function registerPhone(orgId) {
+  const org = await Organization.findById(orgId)
+    .select("waConnectionType metaPhoneNumberId metaAccessToken metaPhone")
+    .lean();
+
+  if (!org || org.waConnectionType !== "meta" || !org.metaPhoneNumberId) {
+    throw new Error("La organización no tiene una conexión Meta activa.");
+  }
+
+  const regPin = Math.floor(100000 + Math.random() * 900000).toString();
+  const res = await axios.post(
+    `${GRAPH_URL}/${org.metaPhoneNumberId}/register`,
+    { messaging_product: "whatsapp", pin: regPin },
+    { params: { access_token: org.metaAccessToken } }
+  );
+
+  console.log(`[metaConnect] registerPhone OK para ${org.metaPhone}:`, res.data);
+  return { success: true, phone: org.metaPhone };
 }
 
 /**
