@@ -199,18 +199,19 @@ INSTRUCCIONES:
 - Sugiere opciones reales de la lista cuando el admin no especifica (ej: "¿Con quién? Tenemos a Nataly y Mariana")
 - Si el cliente NO está registrado, extrae de la conversación lo que puedas (nombre, email, etc.) y pregunta al admin por los campos requeridos que falten. No preguntes por campos opcionales a menos que el admin los mencione.
 - Agrupa las preguntas de datos del cliente en un solo mensaje para no saturar al admin.
-- Cuando tengas servicio + profesional + fecha/hora confirmados y todos los campos requeridos del cliente, responde con create_appointment
+- Cuando tengas todos los datos confirmados (servicio(s), profesional(es), fecha/hora y datos del cliente), responde con create_appointment
+- Si son VARIAS citas, inclúyelas TODAS en el array "appointments" de UN SOLO JSON — nunca devuelvas múltiples JSONs separados
 - Si el admin rechaza o dice que no, responde con la acción reject
-- Responde SOLO con JSON sin markdown ni texto adicional
+- Responde SOLO con JSON válido, sin markdown, sin bloques de código, sin texto adicional
 
 FORMATOS DE RESPUESTA POSIBLES:
 {"action":"ask","message":"tu pregunta al admin aquí"}
-{"action":"create_appointment","serviceId":"id_exacto_de_la_lista","employeeId":"id_exacto_de_la_lista","startDate":"YYYY-MM-DDTHH:mm:ss","clientData":{"name":"nombre","email":"email o null","documentId":"doc o null","birthDate":"YYYY-MM-DD o null","notes":"notas o null"},"notes":"notas de la cita"}
+{"action":"create_appointment","appointments":[{"serviceId":"id_exacto","employeeId":"id_exacto","startDate":"YYYY-MM-DDTHH:mm:ss","notes":"nota opcional"}],"clientData":{"name":"nombre","email":"email o null","documentId":"doc o null","birthDate":"YYYY-MM-DD o null","notes":"notas o null"}}
 {"action":"reject"}`;
 
   const response = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
-    max_tokens: 400,
+    max_tokens: 800,
     system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
     messages: [
       {
@@ -222,7 +223,13 @@ FORMATOS DE RESPUESTA POSIBLES:
 
   const raw = response.content[0].text;
   try {
-    const jsonStr = raw.replace(/```(?:json)?\s*([\s\S]*?)\s*```/, "$1").trim();
+    // Extraer el primer bloque JSON (con o sin markdown) e ignorar el resto
+    const stripped = raw.replace(/```(?:json)?\s*/g, "").replace(/```/g, "").trim();
+    // Tomar solo el primer objeto JSON completo
+    const firstBrace = stripped.indexOf("{");
+    const lastBrace = stripped.lastIndexOf("}");
+    if (firstBrace === -1 || lastBrace === -1) throw new Error("No JSON found");
+    const jsonStr = stripped.slice(firstBrace, lastBrace + 1);
     return JSON.parse(jsonStr);
   } catch {
     console.error("[WaDialogue] LLM no devolvió JSON válido:", raw);
@@ -233,15 +240,11 @@ FORMATOS DE RESPUESTA POSIBLES:
 // ─── Creación de la cita ─────────────────────────────────────────────────────
 
 async function createAppointment(convo, org, agentData, orgAdminPhone, services) {
+  const tz = org.timezone || "America/Bogota";
+  const appointments = agentData.appointments || [];
+
   try {
-    const service = services.find((s) => s._id.toString() === agentData.serviceId);
-    if (!service) throw new Error(`Servicio no encontrado: ${agentData.serviceId}`);
-
-    const startMoment = moment.tz(agentData.startDate, "YYYY-MM-DDTHH:mm:ss", org.timezone || "America/Bogota");
-    const endMoment = startMoment.clone().add(service.duration, "minutes");
-    const endDate = endMoment.format("YYYY-MM-DDTHH:mm:ss");
-
-    // Buscar cliente usando el identificador configurado por la org
+    // Resolver/crear cliente
     const identifierField = org.clientFormConfig?.identifierField || "phone";
     const cd = agentData.clientData || {};
     const identifierValue = identifierField === "phone" ? convo.clientPhone : cd[identifierField];
@@ -262,34 +265,50 @@ async function createAppointment(convo, org, agentData, orgAdminPhone, services)
       });
     }
 
-    const appointment = await appointmentService.createAppointment({
-      service: agentData.serviceId,
-      employee: agentData.employeeId,
-      employeeRequestedByClient: false,
-      client: client,
-      startDate: agentData.startDate,
-      endDate,
-      organizationId: org._id,
-      notes: agentData.notes || "Cita gestionada por asistente WA de AgenditApp",
-    });
+    const createdIds = [];
+    const resumenLines = [];
+
+    for (const appt of appointments) {
+      const service = services.find((s) => s._id.toString() === appt.serviceId);
+      if (!service) throw new Error(`Servicio no encontrado: ${appt.serviceId}`);
+
+      const startMoment = moment.tz(appt.startDate, "YYYY-MM-DDTHH:mm:ss", tz);
+      const endMoment = startMoment.clone().add(service.duration, "minutes");
+
+      const created = await appointmentService.createAppointment({
+        service: appt.serviceId,
+        employee: appt.employeeId,
+        employeeRequestedByClient: false,
+        client,
+        startDate: appt.startDate,
+        endDate: endMoment.format("YYYY-MM-DDTHH:mm:ss"),
+        organizationId: org._id,
+        notes: appt.notes || "Cita gestionada por asistente WA de AgenditApp",
+        skipNotification: appointments.length > 1, // evitar WA por cada cita si son varias
+      });
+
+      createdIds.push(created._id);
+      resumenLines.push(`📅 ${startMoment.format("ddd D/MM [a las] HH:mm")} — ${service.name}`);
+    }
 
     await WaConversation.findByIdAndUpdate(convo._id, {
       status: "confirmed",
-      appointmentId: appointment._id,
+      appointmentId: createdIds[0],
     });
 
-    const dateLabel = startMoment.format("dddd D [de] MMMM [a las] HH:mm");
+    const resumen = resumenLines.join("\n");
+    const plural = appointments.length > 1 ? `${appointments.length} citas creadas` : "Cita creada";
     await sendTextMessage(
       orgAdminPhone,
-      `✅ Cita creada exitosamente\n📅 ${dateLabel}\n💆 Servicio: ${service.name}\n👩 Cliente: ${client.name || convo.clientPhone}`
+      `✅ ${plural} exitosamente para ${client.name || convo.clientPhone}\n${resumen}`
     );
 
-    console.log(`[WaDialogue] Cita creada — appointment: ${appointment._id}, conv: ${convo._id}`);
+    console.log(`[WaDialogue] ${appointments.length} cita(s) creada(s) — conv: ${convo._id}`);
   } catch (err) {
-    console.error("[WaDialogue] Error creando cita:", err.message);
+    console.error("[WaDialogue] Error creando cita(s):", err.message);
     await sendTextMessage(
       orgAdminPhone,
-      `❌ No pude crear la cita: ${err.message}\nPor favor creala manualmente en AgenditApp.`
+      `❌ No pude crear la(s) cita(s): ${err.message}\nPor favor créalas manualmente en AgenditApp.`
     );
     await WaConversation.findByIdAndUpdate(convo._id, { status: "rejected" });
   }
@@ -370,10 +389,15 @@ function isAutoReply(body, orgName) {
 }
 
 function validateAgentIds(agentMessage, services, employees, clientInfo, clientFormConfig) {
-  const serviceOk = services.some((s) => s._id.toString() === agentMessage.serviceId);
-  const employeeOk = employees.some((e) => e._id.toString() === agentMessage.employeeId);
-  if (!serviceOk) return `Servicio "${agentMessage.serviceId}" no encontrado.`;
-  if (!employeeOk) return `Profesional "${agentMessage.employeeId}" no encontrado.`;
+  const appointments = agentMessage.appointments || [];
+  if (!appointments.length) return "No se encontraron citas en el mensaje del agente.";
+
+  for (const appt of appointments) {
+    const serviceOk = services.some((s) => s._id.toString() === appt.serviceId);
+    const employeeOk = employees.some((e) => e._id.toString() === appt.employeeId);
+    if (!serviceOk) return `Servicio "${appt.serviceId}" no encontrado en la lista.`;
+    if (!employeeOk) return `Profesional "${appt.employeeId}" no encontrado en la lista.`;
+  }
 
   // Si el cliente no está confirmado como existente, verificar campos requeridos
   if (clientInfo.exists !== true) {
