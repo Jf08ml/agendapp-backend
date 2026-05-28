@@ -55,18 +55,34 @@ export async function processIncomingMessage({ orgPhone, clientPhone, fromMe, bo
 // ─── Entrada desde Meta (respuesta del admin de la org) ─────────────────────
 
 export async function processOrgResponse({ orgPhone, body }) {
+  // orgPhone = teléfono personal del admin (org.phoneNumber).
+  // Las conversaciones se guardan con orgPhone = org.waPhone (Baileys), que puede diferir.
+  // Buscamos por organizationId para no depender de qué número se usó en cada canal.
+  // phoneNumber puede estar sin código de país ("3218104634") mientras que
+  // waPhone suele estar en E.164 ("+573218104634") — buscamos en ambos campos.
+  const phoneVariants = [orgPhone, orgPhone.replace(/^\+/, "")];
+  const org = await Organization.findOne({
+    $or: [
+      { phoneNumber: { $in: phoneVariants } },
+      { waPhone: { $in: phoneVariants } },
+    ],
+    waAgentEnabled: true,
+  }).lean();
+
+  if (!org) {
+    console.warn(`[WaAgent] Respuesta de org sin conversación activa: ${orgPhone}`);
+    return;
+  }
+
   const convo = await WaConversation.findOne({
-    orgPhone,
+    organizationId: org._id,
     status: "summary_sent",
   }).sort({ lastActivityAt: -1 });
 
   if (!convo) {
-    console.warn(`[WaAgent] Respuesta de org sin conversación pendiente: ${orgPhone}`);
+    console.warn(`[WaAgent] Sin conversación pendiente para org: ${org._id}`);
     return;
   }
-
-  const org = await Organization.findById(convo.organizationId).lean();
-  if (!org) return;
 
   console.log(`[WaAgent] Admin respondió: "${body}" — conv: ${convo._id}`);
 

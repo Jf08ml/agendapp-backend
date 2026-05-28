@@ -42,12 +42,16 @@ export async function handleMetaIncoming(req, res) {
   const change = entry?.changes?.[0]?.value;
   const message = change?.messages?.[0];
 
-  // Ignorar notificaciones de estado (delivered, read, etc.) — solo procesar texto
-  if (!message || message.type !== "text") return;
+  // Solo procesar texto e interactivos (botones de template); ignorar estados, imágenes, etc.
+  if (!message || (message.type !== "text" && message.type !== "interactive")) return;
 
   const receivingPhoneNumberId = change?.metadata?.phone_number_id;
   const fromPhone = "+" + message.from.replace(/\D/g, "");
-  const body = message.text?.body ?? "";
+
+  // Para botones de template (quick_reply / button_reply) el texto está en interactive
+  const body = message.type === "interactive"
+    ? (message.interactive?.button_reply?.title ?? message.interactive?.list_reply?.title ?? "")
+    : (message.text?.body ?? "");
 
   if (!body || !fromPhone) return;
 
@@ -61,10 +65,13 @@ export async function handleMetaIncoming(req, res) {
     );
 
     // Registrar contacto a nivel de org para la ventana de 24h
-    // (aplica tanto para respuestas a agente_ia_activo como a cualquier reply del admin)
+    // phoneNumber puede no tener código de país, waPhone suele estar en E.164
     const phoneVariants = [fromPhone, fromPhone.replace(/^\+/, "")];
     Organization.findOneAndUpdate(
-      { phoneNumber: { $in: phoneVariants } },
+      { $or: [
+        { phoneNumber: { $in: phoneVariants } },
+        { waPhone: { $in: phoneVariants } },
+      ]},
       { agentAdminLastContactAt: new Date() }
     ).catch((err) => console.error("[WaAgent] Error actualizando agentAdminLastContactAt:", err));
   } else {
