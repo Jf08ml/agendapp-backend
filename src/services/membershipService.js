@@ -361,6 +361,12 @@ const membershipService = {
     };
     await organizationModel.findByIdAndUpdate(organizationId, orgUpdate);
 
+    // Registrar primera conversión a pago si la org tiene agente referidor
+    await organizationModel.updateOne(
+      { _id: organizationId, referredByAgent: { $ne: null }, convertedToPayingAt: null },
+      { $set: { convertedToPayingAt: new Date() } }
+    );
+
     return membership;
   },
 

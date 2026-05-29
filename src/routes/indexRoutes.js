@@ -33,6 +33,7 @@ import enrollmentRoutes from "./enrollmentRoutes.js";
 import expenseRoutes from "./expenseRoutes.js";
 import registrationRoutes from "./registrationRoutes.js";
 import adminRoutes from "./adminRoutes.js";
+import agentRoutes from "./agentRoutes.js";
 import auditLogRoutes from "./auditLog.js";
 import chatRoutes from "./chatRoutes.js";
 import bookingChatRoutes from "./bookingChatRoutes.js";
@@ -129,6 +130,9 @@ router.use(registrationRoutes);
 
 // Superadmin de plataforma: login + impersonation (endpoints propios manejan auth)
 router.use(adminRoutes);
+
+// Gestión de agentes/referidores externos (superadmin only)
+router.use("/admin/agents", agentRoutes);
 
 // ═══════════════════════════════════════════════════
 // 2. SEMI-PÚBLICAS (manejan auth internamente)

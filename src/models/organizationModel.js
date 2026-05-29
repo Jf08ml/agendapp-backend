@@ -175,6 +175,12 @@ const organizationSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  // Agente/referidor externo que trajo esta organización a la plataforma
+  referredByAgent: { type: mongoose.Schema.Types.ObjectId, ref: "Agent", default: null, index: true },
+  referredByCode: { type: String, default: null },
+  referredAt: { type: Date, default: null },
+  convertedToPayingAt: { type: Date, default: null },
+
   // Legacy — mantenidos para compatibilidad con datos anteriores
   referredCount: { type: Number, default: 0 },
   referredReward: { type: String, required: false },

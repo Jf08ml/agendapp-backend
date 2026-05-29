@@ -5,6 +5,7 @@ import Organization from "../models/organizationModel.js";
 import Role from "../models/roleModel.js";
 import ExchangeCode from "../models/exchangeCodeModel.js";
 import Plan from "../models/planModel.js";
+import Agent from "../models/agentModel.js";
 import membershipService from "../services/membershipService.js";
 import sendResponse from "../utils/sendResponse.js";
 import { isValidSlug, isSlugAvailable, suggestSlugs } from "../utils/reservedSlugs.js";
@@ -41,7 +42,7 @@ const registrationController = {
   register: async (req, res) => {
     try {
       const { slug, businessName, ownerName, email, password, phone, turnstileToken,
-              default_country, timezone, currency } = req.body;
+              default_country, timezone, currency, referralCode } = req.body;
 
       // 1. Validar campos requeridos
       if (!slug || !businessName || !email || !password || !phone) {
@@ -75,7 +76,13 @@ const registrationController = {
         return sendResponse(res, 500, null, "No se encontró el rol admin. Contacta soporte.");
       }
 
-      // 6. Crear organización
+      // 6. Resolver agente referidor (si viene código)
+      let referringAgent = null;
+      if (referralCode) {
+        referringAgent = await Agent.findOne({ code: referralCode.toUpperCase().trim(), status: "active" }).lean();
+      }
+
+      // 7. Crear organización
       const hashedPassword = await bcrypt.hash(password, 10);
       const newOrg = new Organization({
         name: businessName,
@@ -93,12 +100,18 @@ const registrationController = {
         ...(default_country && { default_country: default_country.trim().toUpperCase().slice(0, 2) }),
         ...(timezone && { timezone: timezone.trim() }),
         ...(currency && { currency: currency.trim().toUpperCase().slice(0, 3) }),
+        // Agente referidor (si el código era válido)
+        ...(referringAgent && {
+          referredByAgent: referringAgent._id,
+          referredByCode: referralCode.toUpperCase().trim(),
+          referredAt: new Date(),
+        }),
         // domains[] queda vacío — solo para custom domains
       });
 
       const savedOrg = await newOrg.save();
 
-      // 7. Crear trial automático de 7 días con plan-demo (acceso completo)
+      // 8. Crear trial automático de 7 días con plan-demo (acceso completo)
       const trialPlan = await Plan.findOne({ slug: "plan-demo", isActive: true });
       if (!trialPlan) {
         console.error("[register] No se encontró plan-demo para trial. Org:", savedOrg.slug);
