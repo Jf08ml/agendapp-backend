@@ -72,14 +72,14 @@ const organizationService = {
 
     const savedOrganization = await newOrganization.save();
 
-    // Crear trial automático de 30 días
+    // Crear trial automático de 7 días
     try {
       const trialPlan = await Plan.findOne({ slug: "plan-demo", isActive: true });
       if (trialPlan) {
         await membershipService.createMembership({
           organizationId: savedOrganization._id,
           planId: trialPlan._id,
-          trialDays: 30,
+          trialDays: 7,
         });
       }
     } catch (err) {
