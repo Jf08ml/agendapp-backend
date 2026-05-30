@@ -72,6 +72,11 @@ export const prepareReservation = {
       description: "Notas adicionales (opcional)",
       required: false,
     },
+    customerBirthDate: {
+      type: "string",
+      description: "Fecha de nacimiento del cliente en formato YYYY-MM-DD (opcional). Conviértela si el usuario la dio en otro formato.",
+      required: false,
+    },
   },
   handler: async (params, { organizationId }) => {
     const {
@@ -82,6 +87,7 @@ export const prepareReservation = {
       customerEmail,
       customerDocumentId,
       notes,
+      customerBirthDate,
     } = params;
 
     if (!services?.length || !startDate || !customerName) {
@@ -99,6 +105,13 @@ export const prepareReservation = {
       resolvedServices.push({ serviceId, employeeId });
     }
 
+    // Validar y normalizar birthDate si se proporcionó
+    let parsedBirthDate = null;
+    if (customerBirthDate) {
+      const d = new Date(customerBirthDate);
+      if (!isNaN(d.getTime())) parsedBirthDate = d.toISOString();
+    }
+
     const payload = {
       services: resolvedServices,
       startDate,
@@ -108,7 +121,7 @@ export const prepareReservation = {
         email: customerEmail || "",
         documentId: customerDocumentId || "",
         notes: notes || "",
-        birthDate: null,
+        birthDate: parsedBirthDate,
       },
       organizationId: organizationId.toString(),
     };

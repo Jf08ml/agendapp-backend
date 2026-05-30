@@ -11,6 +11,12 @@ const MODEL = "claude-haiku-4-5-20251001";
 const MAX_TOKENS = 1024;
 const MAX_TOOL_ROUNDS = 8;
 
+// Detecta cuando el bot afirma que la reserva fue confirmada/procesada sin haber
+// llamado prepare_reservation. Cubre tanto "reserva confirmada" como el mensaje
+// del botón que solo debe decirse DESPUÉS de llamar la tool.
+const BOOKING_HALLUCINATION_PATTERN =
+  /\b(reserva|turno|cita)\b.{0,150}\b(confirmad[ao]|procesad[ao]|cread[ao]|agendad[ao]|registrad[ao]|complet[ao]|exitosa|realizada)\b|\bbotón\b.{0,80}\b(confirmar|verificar)\b|haz clic.{0,60}(confirmar|sí)/i;
+
 const extractText = (content) => {
   const block = content.find((b) => b.type === "text");
   return block?.text || "";
@@ -48,6 +54,26 @@ export const processBookingChat = async (organization, messages) => {
 
     if (response.stop_reason !== "tool_use") {
       const reply = extractText(response.content);
+
+      // Guard: el bot dice que la reserva fue confirmada sin haber llamado
+      // prepare_reservation. Inyecta una corrección y continúa el loop.
+      if (
+        bookingPayload === null &&
+        BOOKING_HALLUCINATION_PATTERN.test(reply) &&
+        round < MAX_TOOL_ROUNDS - 1
+      ) {
+        currentMessages = [
+          ...currentMessages,
+          { role: "assistant", content: response.content },
+          {
+            role: "user",
+            content:
+              "[SISTEMA] Aún no llamaste prepare_reservation. Debes llamarla AHORA con todos los datos recopilados antes de dar esa respuesta al cliente.",
+          },
+        ];
+        continue;
+      }
+
       return {
         reply,
         bookingPayload,

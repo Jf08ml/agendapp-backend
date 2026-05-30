@@ -8,7 +8,7 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const MODEL = "claude-haiku-4-5-20251001";
 const MAX_TOKENS = 1024;
-const MAX_TOOL_ROUNDS = 5;
+const MAX_TOOL_ROUNDS = 8;
 
 const buildContext = async (organization, user) => {
   const [servicesCount, employeesCount] = await Promise.all([
@@ -106,9 +106,16 @@ export const processChat = async (organization, user, messages) => {
     ];
   }
 
+  const usedTools = [...executedTools];
+  const manualHint = usedTools.includes("create_appointments")
+    ? " Para crear la cita manualmente ve a Gestionar Agenda y usa el botón 'Crear cita'."
+    : usedTools.includes("cancel_or_delete_appointment")
+    ? " Para cancelar o eliminar la cita ve a Gestionar Agenda, haz clic sobre la cita y usa el menú de acciones."
+    : "";
+
   return {
-    reply: "Lo siento, no pude completar la acción. Por favor intenta de nuevo.",
+    reply: `No pude completar la operación en el tiempo disponible.${manualHint} Por favor intenta de nuevo con una solicitud más específica o realízalo directamente desde la interfaz.`,
     invalidates: [],
-    _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: true },
+    _meta: { rounds, toolsUsed: usedTools, inputTokens, outputTokens, hitRoundLimit: true },
   };
 };

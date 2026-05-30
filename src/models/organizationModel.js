@@ -150,6 +150,13 @@ const organizationSchema = new mongoose.Schema({
     required: false,
     default: '12h',
   },
+  // 🤖 Nombre del agente IA administrador (personalizable por organización)
+  aiAssistantName: {
+    type: String,
+    required: false,
+    default: 'Roxi',
+    trim: true,
+  },
   instagramUrl: {
     type: String,
     required: false,

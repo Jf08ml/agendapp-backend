@@ -115,6 +115,12 @@ export const getAvailableDates = {
         "Fecha de inicio de búsqueda en formato YYYY-MM-DD. Calcula la fecha exacta a partir de la fecha de hoy antes de llamar esta función.",
       required: false,
     },
+    fromTime: {
+      type: "string",
+      description:
+        "Hora mínima en formato HH:mm (24h). Si se especifica, solo devuelve fechas que tengan slots disponibles A PARTIR de esa hora. Úsalo cuando el cliente mencione preferencia horaria (ej: 'después de las 4:30pm' → '16:30', 'solo en la tarde' → '13:00', 'en la mañana' → '08:00').",
+      required: false,
+    },
   },
   handler: async (params, { organization, organizationId }) => {
     const timezone = organization.timezone || "America/Bogota";
@@ -140,6 +146,13 @@ export const getAvailableDates = {
       status: { $nin: ["cancelled_by_customer", "cancelled_by_admin"] },
     }).lean();
 
+    // Pre-calcular fromTime en minutos para filtro eficiente
+    let fromMinutes = null;
+    if (params.fromTime) {
+      const [fh, fm] = params.fromTime.split(":").map(Number);
+      if (!isNaN(fh) && !isNaN(fm)) fromMinutes = fh * 60 + fm;
+    }
+
     const availableDates = [];
     let daysChecked = 0;
 
@@ -163,7 +176,19 @@ export const getAvailableDates = {
         dayAppointments
       );
 
-      if (blocks.length > 0) availableDates.push(dateStr);
+      if (blocks.length === 0) continue;
+
+      if (fromMinutes !== null) {
+        // Solo cuenta el día si hay al menos un slot a partir de la hora indicada
+        const hasSlotAfterTime = blocks.some((b) => {
+          const timePart = b.start.slice(11, 16); // "HH:mm" de "YYYY-MM-DDTHH:mm:ss"
+          const [bh, bm] = timePart.split(":").map(Number);
+          return bh * 60 + bm >= fromMinutes;
+        });
+        if (hasSlotAfterTime) availableDates.push(dateStr);
+      } else {
+        availableDates.push(dateStr);
+      }
     }
 
     return { availableDates };
@@ -244,7 +269,7 @@ export const getAvailableSlots = {
     });
 
     // b.start is "YYYY-MM-DDTHH:mm:ss" local time (no offset) from findAvailableMultiServiceBlocks
-    const slots = blocks.map((b) => {
+    let slots = blocks.map((b) => {
       const dtMoment = moment.tz(b.start, "YYYY-MM-DDTHH:mm:ss", timezone);
       return {
         time: dtMoment.format("HH:mm"),
@@ -252,6 +277,59 @@ export const getAvailableSlots = {
         isoString: b.start,
       };
     });
+
+    // Si hay muchos slots (intervalos de 5 min), reducir a :00 y :30 para no
+    // abrumar al cliente ni consumir contexto innecesario.
+    if (slots.length > 12) {
+      const rounded = slots.filter((s) => {
+        const mins = parseInt(s.time.split(":")[1], 10);
+        return mins === 0 || mins === 30;
+      });
+      if (rounded.length > 0) slots = rounded;
+    }
+
+    // ── Añadir info de empleado disponible por slot ──────────────────────────
+    const allSpecified = enriched.every((svc) => svc.employeeId);
+    const noneSpecified = enriched.every((svc) => !svc.employeeId);
+
+    if (allSpecified) {
+      // Todos los servicios tienen empleado fijo: ese empleado va en todos los slots
+      const assignedNames = [
+        ...new Set(
+          enriched
+            .map((svc) => employees.find((e) => e._id.toString() === svc.employeeId)?.names)
+            .filter(Boolean)
+        ),
+      ];
+      slots = slots.map((s) => ({ ...s, assignedEmployees: assignedNames }));
+    } else if (noneSpecified && employees.length > 0) {
+      // Sin preferencia de empleado: calcular qué empleados están libres en cada slot
+      const empSlotSets = new Map();
+      for (const emp of employees) {
+        const empEnriched = enriched.map((svc) => ({
+          ...svc,
+          employeeId: emp._id.toString(),
+        }));
+        const empBlocks = scheduleService.findAvailableMultiServiceBlocks(
+          date,
+          organization,
+          empEnriched,
+          [emp],
+          appointments
+        );
+        empSlotSets.set(emp._id.toString(), {
+          names: emp.names,
+          starts: new Set(empBlocks.map((b) => b.start)),
+        });
+      }
+      slots = slots.map((s) => ({
+        ...s,
+        availableEmployees: employees
+          .filter((emp) => empSlotSets.get(emp._id.toString())?.starts.has(s.isoString))
+          .map((emp) => emp.names),
+      }));
+    }
+    // Caso mixto (parcialmente especificado): se devuelven slots sin info de empleado
 
     return { date, slots };
   },

@@ -1,6 +1,7 @@
 import { processChat } from "./chatService.js";
 import sendResponse from "../utils/sendResponse.js";
 import ChatLog from "../models/chatLogModel.js";
+import ChatbotFeedback from "../models/chatbotFeedbackModel.js";
 
 function extractTextMessages(messages) {
   return messages
@@ -66,4 +67,27 @@ export const chat = async (req, res) => {
   }
 
   return sendResponse(res, 200, { reply, invalidates });
+};
+
+export const submitFeedback = async (req, res) => {
+  const { type, message, sessionId } = req.body;
+
+  const VALID_TYPES = ["bug", "sugerencia", "comentario"];
+  if (!VALID_TYPES.includes(type)) {
+    return sendResponse(res, 400, null, "Tipo de feedback inválido.");
+  }
+  if (!message?.trim()) {
+    return sendResponse(res, 400, null, "El mensaje es requerido.");
+  }
+
+  await ChatbotFeedback.create({
+    organizationId: req.organization._id,
+    userId: req.user?._id,
+    type,
+    message: message.trim(),
+    sessionId: sessionId || undefined,
+    agentName: req.organization.aiAssistantName || "Roxi",
+  });
+
+  return sendResponse(res, 201, null, "Feedback recibido. ¡Gracias!");
 };

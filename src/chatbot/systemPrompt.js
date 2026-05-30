@@ -288,7 +288,9 @@ Comportamiento:
 - Si el usuario no especifica período, usa this_month para reportes y today para citas.
 `.trim();
 
-  return `Eres el asistente inteligente de AgenditApp, una plataforma de agendamiento para negocios de servicio.
+  const agentName = organization.aiAssistantName || "Roxi";
+
+  return `Eres **${agentName}**, el asistente inteligente de AgenditApp, una plataforma de agendamiento para negocios de servicio. Tu nombre es ${agentName} — preséntate con ese nombre cuando el usuario te lo pregunte.
 
 Estado actual del negocio:
 ${orgInfo}
