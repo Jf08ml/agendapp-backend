@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import moment from "moment-timezone";
 import { buildSystemPrompt } from "./systemPrompt.js";
 import { claudeTools, executeTool } from "./toolRegistry.js";
 import Service from "../models/serviceModel.js";
@@ -20,7 +21,7 @@ const buildContext = async (organization, user) => {
     organizationId: organization._id,
     organization,
     user,
-    currentDate: new Date().toISOString().slice(0, 10), // YYYY-MM-DD en UTC
+    currentDate: moment.tz(organization.timezone || "America/Bogota").format("YYYY-MM-DD"),
     setupStatus: {
       servicesCount,
       employeesCount,

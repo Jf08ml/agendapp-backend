@@ -170,6 +170,7 @@ const organizationService = {
       metaAccessToken,
       metaPhone,
       autoMarkAttended,
+      aiAssistantName,
     } = organizationData;
 
     const organization = await Organization.findById(id);
@@ -322,6 +323,11 @@ const organizationService = {
     // 🕐 Actualizar formato de hora si se proporciona
     if (timeFormat !== undefined) {
       organization.timeFormat = timeFormat;
+    }
+
+    // 🤖 Actualizar nombre del agente IA si se proporciona
+    if (aiAssistantName !== undefined) {
+      organization.aiAssistantName = aiAssistantName?.trim() || "Roxi";
     }
 
     // 🚫 Actualizar política de cancelación si se proporciona

@@ -1,3 +1,5 @@
+import moment from "moment-timezone";
+
 const FRONTEND_NAV_GUIDE = `
 ═══ GUÍA DE LA INTERFAZ ═══
 
@@ -162,14 +164,39 @@ export const buildSystemPrompt = (context) => {
   const { organization, setupStatus, currentDate } = context;
   const isOnboarding = !setupStatus?.setupCompleted;
 
+  const timezone = organization.timezone || "America/Bogota";
+  const now = moment.tz(timezone);
+  const dow = now.day(); // 0=Dom … 6=Sáb
+
+  const DAY_NAMES   = ["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
+  const MONTH_NAMES = ["enero","febrero","marzo","abril","mayo","junio","julio",
+                       "agosto","septiembre","octubre","noviembre","diciembre"];
+  const fmtRef = (d) =>
+    `${d.format("YYYY-MM-DD")} (${DAY_NAMES[d.day()]} ${d.date()} de ${MONTH_NAMES[d.month()]})`;
+  const nextOcc = (targetDow) => {
+    let diff = targetDow - dow;
+    if (diff < 0) diff += 7;
+    return now.clone().add(diff, "days");
+  };
+
+  const dateRefs = [
+    ["hoy",                    now.clone()],
+    ["mañana",                 now.clone().add(1, "days")],
+    ...DAY_NAMES.map((name, i) => [`este ${name} / el ${name}`, nextOcc(i)]),
+    ["próxima semana (lunes)", now.clone().add(7 - dow + 1, "days")],
+  ];
+
+  const dateRefsBlock = `Referencias de fechas (zona ${timezone}) — NUNCA calcules estas fechas tú mismo:\n` +
+    dateRefs.map(([l, d]) => `  - "${l}" → ${fmtRef(d)}`).join("\n");
+
   const orgInfo = `
 Organización: ${organization.name}
-Zona horaria: ${organization.timezone || "America/Bogota"}
+Zona horaria: ${timezone}
 Fecha actual: ${currentDate}
 Servicios configurados: ${setupStatus?.servicesCount ?? 0}
 Profesionales configurados: ${setupStatus?.employeesCount ?? 0}
 Configuración inicial completada: ${setupStatus?.setupCompleted ? "Sí" : "No"}
-`.trim();
+${dateRefsBlock}`.trim();
 
   const onboardingInstructions = `
 Estás en MODO ONBOARDING. Guía al usuario paso a paso en este orden exacto.
@@ -252,7 +279,7 @@ PASO 8 — FINALIZAR
 Estás en MODO SOPORTE. El usuario ya tiene su cuenta configurada.
 Puedes ayudar con cualquier consulta combinando filtros libremente:
 - Citas de un cliente en cualquier fecha o rango: usa query_appointments con clientName + dateFrom/dateTo.
-- Cuando el usuario mencione una fecha concreta ("el martes 7 de abril"), conviértela a YYYY-MM-DD.
+- Cuando el usuario mencione un día relativo ("el martes", "el viernes"), usa el valor YYYY-MM-DD de las referencias de fechas de arriba. Para fechas exactas ("3 de junio"), conviértelas tú a YYYY-MM-DD.
 - Ingresos y comisiones por período, profesional o servicio: usa query_revenue con groupBy.
 - Preguntas mixtas ("citas pendientes de cobro de Carlos esta semana"): combina filtros en query_appointments.
 - Crear o consultar servicios y profesionales.
@@ -264,7 +291,7 @@ Puedes ayudar con cualquier consulta combinando filtros libremente:
 Usa create_appointments cuando el usuario quiera agendar una o varias citas:
 - Recoge: nombre o teléfono del cliente, servicio(s), profesional(es), fecha(s) y hora(s).
 - Convierte siempre la hora a formato HH:mm (24h) antes de llamar la tool (ej: "3pm" → "15:00").
-- Convierte la fecha a YYYY-MM-DD (ej: "el viernes" → calcula la fecha exacta).
+- Convierte la fecha a YYYY-MM-DD usando las referencias pre-calculadas del sistema para días relativos ("el viernes", "el lunes"), o conviértela manualmente si es una fecha exacta.
 - Si hay solapamiento, la tool te devolverá una advertencia: infórmala al usuario pero confirma que la cita fue creada.
 - Para múltiples citas en una sola llamada se enviará UN solo mensaje de WhatsApp con el resumen.
 - Si el cliente no existe en el sistema, díselo al usuario y sugiérele crearlo desde Gestionar Clientes.
@@ -283,7 +310,7 @@ Usa cancel_or_delete_appointment cuando el usuario quiera cancelar o borrar una 
 
 Comportamiento:
 - NUNCA digas que no puedes consultar algo por fecha o cliente — siempre usa query_appointments/query_revenue con filtros flexibles.
-- Si el usuario menciona una fecha relativa ("el martes pasado"), calcúlala y pásala como YYYY-MM-DD.
+- Si el usuario menciona una fecha relativa ("el martes", "el viernes pasado"), usa las referencias pre-calculadas o deriva la fecha exacta, y pásala como YYYY-MM-DD.
 - Para ver detalle de citas individuales, usa includeDetails: true.
 - Si el usuario no especifica período, usa this_month para reportes y today para citas.
 `.trim();

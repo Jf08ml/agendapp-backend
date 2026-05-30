@@ -28,35 +28,57 @@ export const buildBookingSystemPrompt = (organization) => {
     day: "numeric",
   });
 
-  // Pre-calculate common relative date references so the AI never computes them itself
-  const DAY_NAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
-  const MONTH_NAMES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+  const DAY_NAMES   = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+  const MONTH_NAMES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+                       "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
   const fmtRef = (m) =>
     `${m.format("YYYY-MM-DD")} (${DAY_NAMES[m.day()]} ${m.date()} de ${MONTH_NAMES[m.month()]})`;
 
-  const dow = nowMoment.day(); // 0=Sun … 6=Sat
-  const daysUntilSat = dow === 6 ? 7 : (6 - dow);
-  const daysUntilSun = dow === 0 ? 7 : (7 - dow);
+  const dow = nowMoment.day(); // 0=Dom … 6=Sáb
+
+  // ── Próxima ocurrencia de cada día de la semana ─────────────────────────────
+  // diff < 0 → sumar 7 para ir a la próxima semana
+  // diff = 0 → es hoy
+  // diff > 0 → es esta semana
+  const nextOccurrence = (targetDow) => {
+    let diff = targetDow - dow;
+    if (diff < 0) diff += 7;
+    return nowMoment.clone().add(diff, "days");
+  };
 
   const refs = {
+    // Hoy y mañana
     "hoy / esta semana (fromDate)": nowMoment.clone(),
-    mañana:                         nowMoment.clone().add(1, "days"),
-    "este sábado":                  nowMoment.clone().add(daysUntilSat, "days"),
-    "este domingo":                 nowMoment.clone().add(daysUntilSun, "days"),
-    "próximo lunes":                nowMoment.clone().add(daysUntilSat + 2, "days"),
-    "en 2 semanas":                 nowMoment.clone().add(14, "days"),
+    mañana:                          nowMoment.clone().add(1, "days"),
+    // TODOS los días de la semana pre-calculados en la zona horaria de la org.
+    // El modelo NUNCA debe calcular estas fechas — debe leer el valor exacto de aquí.
+    "este domingo / el domingo":   nextOccurrence(0),
+    "este lunes / el lunes":       nextOccurrence(1),
+    "este martes / el martes":     nextOccurrence(2),
+    "este miércoles / el miércoles": nextOccurrence(3),
+    "este jueves / el jueves":     nextOccurrence(4),
+    "este viernes / el viernes":   nextOccurrence(5),
+    "este sábado / el sábado":     nextOccurrence(6),
+    // Semana siguiente
+    "próxima semana (lunes)":      nowMoment.clone().add(7 - dow + 1, "days"),
+    "en 2 semanas":                nowMoment.clone().add(14, "days"),
   };
 
   const dateRefLines = Object.entries(refs)
     .map(([label, m]) => `  - "${label}" → ${fmtRef(m)}`)
     .join("\n");
 
-  return `Eres el asistente de reservas en línea de **${organization.name}**.
+  const agentName = organization.aiAssistantName || "Roxi";
+
+  return `Eres **${agentName}**, el asistente de reservas en línea de **${organization.name}**. Tu nombre es ${agentName} — preséntate con ese nombre si el cliente te lo pregunta. Tu único rol es ayudar a los clientes a agendar citas; no puedes modificar configuraciones del negocio ni dar soporte administrativo.
 
 FECHA ACTUAL (zona horaria ${timezone}): **${now}** (${todayISO})
-Referencias de fechas PRE-CALCULADAS — úsalas directamente, NO las calcules tú:
+
+REFERENCIAS DE FECHAS PRE-CALCULADAS — zona horaria: ${timezone}
+REGLA CRÍTICA: NUNCA calcules fechas tú mismo. Consulta siempre la lista de abajo y usa el valor YYYY-MM-DD exacto.
 ${dateRefLines}
-Al llamar get_available_dates, pasa como fromDate el valor YYYY-MM-DD exacto de la referencia que corresponda.
+
+Cuando el cliente mencione un día ("martes", "el viernes", "este lunes"...) busca el valor YYYY-MM-DD correspondiente en la lista anterior y úsalo como fromDate en get_available_dates. Si menciona una fecha exacta como "3 de junio", conviértela a YYYY-MM-DD tú mismo solo si no está en la lista.
 Tu misión es guiar al cliente para que complete su reserva de forma rápida y amigable.
 
 ${policyNote}

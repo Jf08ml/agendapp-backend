@@ -1,6 +1,7 @@
 import { processBookingChat } from "./bookingChatService.js";
 import sendResponse from "../utils/sendResponse.js";
 import ChatLog from "../models/chatLogModel.js";
+import ChatbotFeedback from "../models/chatbotFeedbackModel.js";
 
 function extractTextMessages(messages) {
   return messages
@@ -71,4 +72,25 @@ export const bookingChat = async (req, res) => {
   }
 
   return sendResponse(res, 200, { reply, bookingPayload });
+};
+
+// POST /booking-chat/feedback — público (solo organizationResolver)
+export const submitBookingFeedback = async (req, res) => {
+  const { rating, message, sessionId } = req.body;
+
+  if (!rating || !Number.isInteger(rating) || rating < 1 || rating > 5) {
+    return sendResponse(res, 400, null, "Calificación inválida. Debe ser un número entre 1 y 5.");
+  }
+
+  await ChatbotFeedback.create({
+    organizationId: req.organization._id,
+    source: "booking",
+    type: "satisfaccion",
+    rating,
+    message: message?.trim() || undefined,
+    sessionId: sessionId || undefined,
+    agentName: req.organization.aiAssistantName || "Roxi",
+  });
+
+  return sendResponse(res, 201, null, "¡Gracias por tu opinión!");
 };

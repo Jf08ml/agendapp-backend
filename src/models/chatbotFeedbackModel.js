@@ -8,20 +8,36 @@ const chatbotFeedbackSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    // Solo disponible en feedback del panel admin (autenticado)
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       required: false,
     },
+    // "admin"   → feedback desde el panel administrativo
+    // "booking" → satisfacción post-reserva del cliente público
+    source: {
+      type: String,
+      enum: ["admin", "booking"],
+      default: "admin",
+    },
     type: {
       type: String,
-      enum: ["bug", "sugerencia", "comentario"],
+      enum: ["bug", "sugerencia", "comentario", "satisfaccion"],
       required: true,
     },
+    // Calificación numérica 1-5 (usada en feedback de booking)
+    rating: {
+      type: Number,
+      min: 1,
+      max: 5,
+      required: false,
+    },
+    // Comentario opcional (requerido en admin, opcional en booking)
     message: {
       type: String,
-      required: true,
       maxlength: 2000,
       trim: true,
+      required: false,
     },
     // Vincula el feedback a una sesión de chat específica
     sessionId: {
