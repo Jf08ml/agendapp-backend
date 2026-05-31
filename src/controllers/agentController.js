@@ -64,7 +64,7 @@ const agentController = {
    */
   createAgent: async (req, res) => {
     try {
-      const { name, email, phone, type, notes, code: customCode } = req.body;
+      const { name, email, phone, type, notes, code: customCode, trialDays } = req.body;
 
       if (!name || !email || !type) {
         return sendResponse(res, 400, null, "Nombre, email y tipo son requeridos");
@@ -75,7 +75,10 @@ const agentController = {
 
       const code = customCode ? customCode.toUpperCase().trim() : await generateCode();
 
-      const agent = new Agent({ name, email, phone: phone || null, type, code, notes: notes || null });
+      const agent = new Agent({
+        name, email, phone: phone || null, type, code, notes: notes || null,
+        ...(trialDays !== undefined && { trialDays: Number(trialDays) }),
+      });
       await agent.save();
 
       return sendResponse(res, 201, agent, "Agente creado exitosamente");
@@ -97,7 +100,7 @@ const agentController = {
   updateAgent: async (req, res) => {
     try {
       const { id } = req.params;
-      const { name, email, phone, type, notes, status } = req.body;
+      const { name, email, phone, type, notes, status, trialDays } = req.body;
 
       const agent = await Agent.findById(id);
       if (!agent) return sendResponse(res, 404, null, "Agente no encontrado");
@@ -108,6 +111,7 @@ const agentController = {
       if (type !== undefined) agent.type = type;
       if (notes !== undefined) agent.notes = notes || null;
       if (status !== undefined) agent.status = status;
+      if (trialDays !== undefined) agent.trialDays = Number(trialDays);
 
       await agent.save();
       return sendResponse(res, 200, agent, "Agente actualizado");

@@ -12,6 +12,7 @@ const agentSchema = new mongoose.Schema(
     },
     code: { type: String, required: true, unique: true, uppercase: true, trim: true },
     status: { type: String, enum: ["active", "inactive"], default: "active" },
+    trialDays: { type: Number, default: 7, min: 1 },
     notes: { type: String, default: null },
   },
   { timestamps: true }
