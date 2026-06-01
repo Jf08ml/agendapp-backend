@@ -22,7 +22,7 @@
  *   recommendations → recomendaciones
  */
 
-import { listTemplates, sendTemplateMessage } from "./metaTemplateService.js";
+import { listTemplates, sendTemplateMessage, getOrgPrefix } from "./metaTemplateService.js";
 
 // ── Template name mapping ────────────────────────────────────────────────────
 
@@ -136,7 +136,11 @@ function buildComponents(metaTemplateName, data) {
  * Sends a WhatsApp notification via an approved Meta template.
  * Returns null (and logs a warning) if the template is not found or not APPROVED.
  *
- * @param {Object} org          - Organization document (must have metaPhoneNumberId, metaAccessToken, metaWabaId)
+ * Template names are stored in Meta with an org-specific prefix (e.g. "abcd1234_confirmacion_cita").
+ * listTemplates() returns them WITHOUT prefix (stripped), so we match by the base name.
+ * sendTemplateMessage() receives the base name and adds the prefix internally.
+ *
+ * @param {Object} org          - Organization document (must have metaPhoneNumberId)
  * @param {string} phone        - Phone in E.164 format
  * @param {string} templateType - Internal template type (e.g. "scheduleAppointmentBatch")
  * @param {Object} data         - Variable data (same keys used for Baileys rendering)
@@ -158,14 +162,14 @@ export async function sendMetaTemplateNotification(org, phone, templateType, dat
     return null;
   }
 
-  // Match by name and language (or any language if not found for exact code)
+  // listTemplates returns names WITHOUT prefix — match by base name
   const template =
     templates.find((t) => t.name === metaName && t.language === language) ||
     templates.find((t) => t.name === metaName && t.language.startsWith(language.split("_")[0])) ||
     templates.find((t) => t.name === metaName);
 
   if (!template) {
-    console.warn(`[metaSendWA] Template "${metaName}" not found in org ${org._id} templates`);
+    console.warn(`[metaSendWA] Template "${metaName}" not found for org ${org._id} (prefix: ${getOrgPrefix(org)})`);
     return null;
   }
 
@@ -178,6 +182,7 @@ export async function sendMetaTemplateNotification(org, phone, templateType, dat
   const lang = template.language || language;
 
   try {
+    // sendTemplateMessage adds the org prefix to metaName internally
     return await sendTemplateMessage(org, phone, metaName, lang, components);
   } catch (err) {
     const metaCode = err.response?.data?.error?.code;

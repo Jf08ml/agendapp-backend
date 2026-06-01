@@ -1,122 +1,175 @@
+/**
+ * metaTemplateService.js
+ *
+ * Gestión de plantillas Meta en el WABA único de AgenditApp.
+ * Todas las orgs comparten el mismo WABA; los nombres de plantilla se prefiján
+ * automáticamente con los últimos 8 chars del org ID para evitar colisiones.
+ *
+ * Ejemplo: template "confirmacion_cita" de org "...abcd1234" → "abcd1234_confirmacion_cita"
+ * El prefijo es transparente para el frontend: se agrega al crear/enviar y se quita al listar.
+ */
+
 import axios from "axios";
 import Organization from "../models/organizationModel.js";
 
 const GRAPH_URL = "https://graph.facebook.com/v25.0";
 
-function graphClient(accessToken) {
-  return axios.create({
-    baseURL: GRAPH_URL,
-    params: { access_token: accessToken },
-  });
+function platformToken() {
+  const token = process.env.META_SYSTEM_USER_TOKEN;
+  if (!token) throw new Error("META_SYSTEM_USER_TOKEN no configurado.");
+  return token;
 }
 
-function getOrgMeta(org) {
-  if (!org.metaWabaId || !org.metaAccessToken) {
+function platformWabaId() {
+  const wabaId = process.env.META_WABA_ID;
+  if (!wabaId) throw new Error("META_WABA_ID no configurado.");
+  return wabaId;
+}
+
+
+/** Prefijo único por org (8 últimos chars del ObjectID, siempre hex minúscula) */
+export function getOrgPrefix(org) {
+  return org._id.toString().slice(-8);
+}
+
+/** Agrega prefijo a un nombre de plantilla */
+function prefixName(org, name) {
+  return `${getOrgPrefix(org)}_${name}`;
+}
+
+/** Quita el prefijo de un nombre de plantilla (para mostrar al frontend) */
+function stripPrefix(org, name) {
+  const p = `${getOrgPrefix(org)}_`;
+  return name.startsWith(p) ? name.slice(p.length) : name;
+}
+
+/** Valida que la org tiene Meta activo */
+function assertMetaActive(org) {
+  if (org.waConnectionType !== "meta" || !org.metaPhoneNumberId) {
     throw new Error("La organización no tiene Meta API configurada.");
   }
-  return { wabaId: org.metaWabaId, token: org.metaAccessToken };
 }
 
 /**
- * Lista todas las plantillas del WABA de la org.
+ * Selecciona credenciales Meta según el modo de conexión de la org.
+ *
+ * Embedded Signup (org.metaWabaId presente):
+ *   - Usa META_SYSTEM_USER_TOKEN (el system user fue agregado al WABA del cliente
+ *     en connectOrgEmbedded, así el billing va a AgenditApp).
+ *   - Fallback a org.metaAccessToken si el system user no se pudo agregar.
+ *   - WABA es el del cliente → no necesita prefijo (aislado por WABA).
+ *
+ * SMS / WABA de plataforma:
+ *   - Usa META_SYSTEM_USER_TOKEN + META_WABA_ID.
+ *   - Requiere prefijo porque todas las orgs comparten el mismo WABA.
+ */
+function getOrgCredentials(org) {
+  const systemToken = process.env.META_SYSTEM_USER_TOKEN;
+
+  if (org.metaWabaId) {
+    return {
+      token: systemToken || org.metaAccessToken,
+      wabaId: org.metaWabaId,
+      usePrefix: false,
+    };
+  }
+
+  return {
+    token: systemToken,
+    wabaId: platformWabaId(),
+    usePrefix: true,
+  };
+}
+
+/**
+ * Lista las plantillas de la org.
+ * - WABA propio (Embedded Signup): lista todas sin filtro de prefijo.
+ * - WABA de plataforma: filtra por prefijo de org y devuelve nombres sin prefijo.
  */
 export async function listTemplates(org) {
-  const { wabaId, token } = getOrgMeta(org);
-  const client = graphClient(token);
-  const res = await client.get(`/${wabaId}/message_templates`, {
-    params: {
-      fields: "id,name,status,category,language,components",
-      limit: 100,
-    },
-  });
-  return res.data?.data || [];
+  assertMetaActive(org);
+  const { token, wabaId, usePrefix } = getOrgCredentials(org);
+  const client = axios.create({ baseURL: GRAPH_URL, params: { access_token: token } });
+  const params = { fields: "id,name,status,category,language,components", limit: 100 };
+  if (usePrefix) params.name_prefix = getOrgPrefix(org);
+  const res = await client.get(`/${wabaId}/message_templates`, { params });
+  const templates = res.data?.data || [];
+  if (!usePrefix) return templates;
+  return templates.map((t) => ({ ...t, name: stripPrefix(org, t.name) }));
 }
 
 /**
- * Crea una plantilla en Meta y devuelve el resultado.
- * @param {Object} org
- * @param {Object} template
- * @param {string} template.name          - Nombre único en minúsculas y guiones bajos
- * @param {string} template.category      - UTILITY | MARKETING | AUTHENTICATION
- * @param {string} template.language      - es | en_US | pt_BR etc.
- * @param {Array}  template.components    - Array de componentes (HEADER, BODY, FOOTER, BUTTONS)
+ * Crea una plantilla (prefixa el nombre si usa WABA de plataforma).
  */
 export async function createTemplate(org, template) {
-  const { wabaId, token } = getOrgMeta(org);
-  const client = graphClient(token);
+  assertMetaActive(org);
+  const { token, wabaId, usePrefix } = getOrgCredentials(org);
+  const client = axios.create({ baseURL: GRAPH_URL, params: { access_token: token } });
+  const fullName = usePrefix ? prefixName(org, template.name) : template.name;
   const res = await client.post(`/${wabaId}/message_templates`, {
-    name: template.name,
+    name: fullName,
     category: template.category,
     language: template.language,
     components: template.components,
   });
-  return res.data; // { id, status }
+  return res.data;
 }
 
 /**
- * Edita una plantilla existente (solo se puede editar el contenido, no nombre/categoría).
+ * Edita los componentes de una plantilla existente (por ID, sin prefijo).
  */
 export async function updateTemplate(org, templateId, components) {
-  const { token } = getOrgMeta(org);
-  const client = graphClient(token);
+  assertMetaActive(org);
+  const { token } = getOrgCredentials(org);
+  const client = axios.create({ baseURL: GRAPH_URL, params: { access_token: token } });
   const res = await client.post(`/${templateId}`, { components });
   return res.data;
 }
 
 /**
- * Elimina una plantilla.
+ * Elimina una plantilla por nombre (prefixa si aplica).
  */
 export async function deleteTemplate(org, templateName) {
-  const { wabaId, token } = getOrgMeta(org);
-  const client = graphClient(token);
-  const res = await client.delete(`/${wabaId}/message_templates`, {
-    params: { name: templateName },
-  });
+  assertMetaActive(org);
+  const { token, wabaId, usePrefix } = getOrgCredentials(org);
+  const client = axios.create({ baseURL: GRAPH_URL, params: { access_token: token } });
+  const fullName = usePrefix ? prefixName(org, templateName) : templateName;
+  const res = await client.delete(`/${wabaId}/message_templates`, { params: { name: fullName } });
   return res.data;
 }
 
 /**
- * Sincroniza el estado de aprobación de las plantillas desde Meta.
- * Devuelve el listado actualizado.
+ * Sincroniza el estado de aprobación de las plantillas.
  */
 export async function syncTemplateStatus(org) {
   return listTemplates(org);
 }
 
 /**
- * Envía un mensaje usando una plantilla aprobada de Meta.
- * @param {Object} org
- * @param {string} toPhone  - E.164
- * @param {string} templateName
- * @param {string} language - es | en_US etc.
- * @param {Array}  components - componentes con parámetros variables
+ * Envía un mensaje usando una plantilla aprobada.
+ * El templateName se recibe SIN prefijo; se agrega internamente si aplica.
  */
 export async function sendTemplateMessage(org, toPhone, templateName, language, components = []) {
-  if (!org.metaPhoneNumberId || !org.metaAccessToken) {
-    throw new Error("La organización no tiene Meta API configurada.");
-  }
-  const client = graphClient(org.metaAccessToken);
+  if (!org.metaPhoneNumberId) throw new Error("La organización no tiene Meta API configurada.");
+  const { token, usePrefix } = getOrgCredentials(org);
+  const client = axios.create({ baseURL: GRAPH_URL, params: { access_token: token } });
+  const fullName = usePrefix ? prefixName(org, templateName) : templateName;
   const res = await client.post(`/${org.metaPhoneNumberId}/messages`, {
     messaging_product: "whatsapp",
     to: toPhone,
     type: "template",
-    template: {
-      name: templateName,
-      language: { code: language || "es" },
-      components,
-    },
+    template: { name: fullName, language: { code: language || "es" }, components },
   });
   return { messageId: res.data?.messages?.[0]?.id };
 }
 
 /**
- * Envía un mensaje de texto libre (solo permitido en ventana de 24h de conversación activa).
+ * Envía texto libre (solo dentro de ventana de 24h de conversación activa).
  */
 export async function sendTextMessage(org, toPhone, text) {
-  if (!org.metaPhoneNumberId || !org.metaAccessToken) {
-    throw new Error("La organización no tiene Meta API configurada.");
-  }
-  const client = graphClient(org.metaAccessToken);
+  if (!org.metaPhoneNumberId) throw new Error("La organización no tiene Meta API configurada.");
+  const { token } = getOrgCredentials(org);
+  const client = axios.create({ baseURL: GRAPH_URL, params: { access_token: token } });
   try {
     const res = await client.post(`/${org.metaPhoneNumberId}/messages`, {
       messaging_product: "whatsapp",

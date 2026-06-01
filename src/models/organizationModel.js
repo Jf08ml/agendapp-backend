@@ -267,12 +267,16 @@ const organizationSchema = new mongoose.Schema({
     enum: ['baileys', 'meta', null],
     default: null,
   },
-  // Credenciales Meta Business API por org (Embedded Signup)
-  metaWabaId: { type: String, required: false },          // WhatsApp Business Account ID
-  metaPhoneNumberId: { type: String, required: false, sparse: true }, // Phone Number ID de Meta
-  metaAccessToken: { type: String, required: false },     // Token de acceso por org
-  metaPhone: { type: String, required: false },           // Número E.164 del número Meta registrado
-  metaBusinessName: { type: String, required: false },    // Nombre del negocio del WABA (de business_management)
+  // Conexión Meta por org
+  metaPhoneNumberId: { type: String, required: false, sparse: true }, // Phone Number ID (en WABA propio o de plataforma)
+  metaPhone: { type: String, required: false },           // Número en formato E.164
+  // Campos del WABA propio (solo para orgs conectadas via Embedded Signup)
+  // Null = org usa el WABA único de AgenditApp (conexión via SMS)
+  metaWabaId: { type: String, required: false },
+  metaAccessToken: { type: String, required: false },
+  // true = coexistencia (número activo en app Y en Cloud API)
+  // false = solo Cloud API (número migrado, fuera de la app)
+  metaCoexistenceEnabled: { type: Boolean, default: false },
   branding: {
     type: BrandingSchema,
     default: {},

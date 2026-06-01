@@ -5,8 +5,8 @@ const GRAPH_URL = "https://graph.facebook.com/v25.0";
 
 function getConfig() {
   return {
-    phoneNumberId: process.env.META_PHONE_NUMBER_ID,
-    accessToken: process.env.META_ACCESS_TOKEN,
+    phoneNumberId: process.env.META_PLATFORM_PHONE_NUMBER_ID,
+    accessToken: process.env.META_PLATFORM_ACCESS_TOKEN,
   };
 }
 

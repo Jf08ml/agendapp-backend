@@ -165,9 +165,7 @@ const organizationService = {
       waPhone,
       waAgentEnabled,
       waConnectionType,
-      metaWabaId,
       metaPhoneNumberId,
-      metaAccessToken,
       metaPhone,
       autoMarkAttended,
       aiAssistantName,
@@ -391,11 +389,9 @@ const organizationService = {
     // ✅ Auto-marcar asistencia
     if (autoMarkAttended !== undefined) organization.autoMarkAttended = autoMarkAttended;
 
-    // 🔗 Conexión híbrida WA
+    // 🔗 Conexión híbrida WA (Meta/Baileys)
     if (waConnectionType !== undefined) organization.waConnectionType = waConnectionType;
-    if (metaWabaId !== undefined) organization.metaWabaId = metaWabaId || null;
     if (metaPhoneNumberId !== undefined) organization.metaPhoneNumberId = metaPhoneNumberId || null;
-    if (metaAccessToken !== undefined) organization.metaAccessToken = metaAccessToken || null;
     if (metaPhone !== undefined) organization.metaPhone = metaPhone || null;
 
     // Encriptar la contraseña solo si se proporciona una nueva
