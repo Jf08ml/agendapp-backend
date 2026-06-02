@@ -27,5 +27,6 @@ const checkSlugLimiter = rateLimit({
 router.post("/register", registerLimiter, registrationController.register);
 router.post("/exchange", registrationController.exchange);
 router.get("/check-slug/:slug", checkSlugLimiter, registrationController.checkSlug);
+router.get("/agent-info/:code", registrationController.getAgentInfo);
 
 export default router;

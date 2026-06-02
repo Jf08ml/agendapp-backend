@@ -4,6 +4,61 @@ import organizationModel from "../models/organizationModel.js";
 import clientModel from "../models/clientModel.js";
 import { waBulkSend, waBulkGet, waBulkOptIn } from "./waHttpService.js";
 import { normalizePhoneNumber, toWhatsappFormat } from "../utils/phoneUtils.js";
+import { sendTemplateMessage } from "./metaTemplateService.js";
+
+/**
+ * Envía una campaña vía Meta Cloud API usando una plantilla aprobada.
+ * Las variables del template (si las hay) se llenan así:
+ *   {{1}} → nombre del destinatario
+ *   {{2}}+ → cadena vacía (el org debe diseñar el template con una sola variable)
+ * Retorna { sent, failed }.
+ */
+async function _sendViaMetaTemplate(org, campaign) {
+  const templateName = campaign.metaTemplateName;
+  const language = campaign.metaTemplateLanguage || "es";
+
+  // Contar variables en el cuerpo guardado (ej: "Hola {{1}}, ..." → 1 variable)
+  const varCount = (campaign.message.match(/\{\{(\d+)\}\}/g) || []).length;
+
+  let sent = 0;
+  let failed = 0;
+
+  for (const item of campaign.items) {
+    if (campaign.isDryRun) {
+      item.status = "sent";
+      item.sentAt = new Date();
+      sent++;
+      continue;
+    }
+
+    try {
+      let components = [];
+      if (varCount > 0) {
+        const parameters = Array.from({ length: varCount }, (_, i) => ({
+          type: "text",
+          text: i === 0 ? (item.name || "") : "",
+        }));
+        components = [{ type: "body", parameters }];
+      }
+
+      await sendTemplateMessage(org, item.phone, templateName, language, components);
+      item.status = "sent";
+      item.sentAt = new Date();
+      sent++;
+    } catch (err) {
+      const metaCode = err.response?.data?.error?.code;
+      item.status = "failed";
+      item.errorMessage =
+        metaCode === 133010
+          ? "El número no tiene WhatsApp"
+          : err.response?.data?.error?.message || err.message;
+      failed++;
+      console.warn(`[Campaign] Error enviando a ${item.phone}:`, item.errorMessage);
+    }
+  }
+
+  return { sent, failed };
+}
 
 export const campaignService = {
   /**
@@ -67,26 +122,34 @@ export const campaignService = {
   },
 
   /**
-   * Crea y envía una campaña de WhatsApp
+   * Crea y envía una campaña de WhatsApp.
+   * Solo soporta orgs con waConnectionType === 'meta'.
+   * templateName y templateLanguage son obligatorios para campañas Meta.
    */
   createAndSend: async ({
     orgId,
     userId,
     title,
-    message,
-    recipients, // [{ phone, name? }]
+    message,       // Cuerpo de la plantilla (para display/referencia)
+    recipients,    // [{ phone, name? }]
     image,
     dryRun = false,
+    templateName,
+    templateLanguage,
   }) => {
-    // 1. Validar organización y obtener clientId de WhatsApp + país por defecto
-    const org = await organizationModel.findById(orgId).select('clientIdWhatsapp default_country');
+    // 1. Validar organización — campañas solo con Meta
+    const org = await organizationModel.findById(orgId)
+      .select('waConnectionType metaPhoneNumberId metaWabaId metaAccessToken default_country');
     if (!org) throw new Error("Organización no encontrada");
 
-    const clientId = org.clientIdWhatsapp;
-    if (!clientId) {
+    if (org.waConnectionType !== "meta" || !org.metaPhoneNumberId) {
       throw new Error(
-        "La organización no tiene configurada una sesión de WhatsApp"
+        "Las campañas de WhatsApp requieren conexión Meta activa. Ve a Gestionar WhatsApp para conectar tu número."
       );
+    }
+
+    if (!templateName) {
+      throw new Error("Debes seleccionar una plantilla aprobada para la campaña.");
     }
 
     const defaultCountry = org.default_country || 'CO';
@@ -136,64 +199,30 @@ export const campaignService = {
       organizationId: orgId,
       createdBy: userId,
       title,
-      message,
-      image,
+      message: message || "",  // Cuerpo del template para display
+      metaTemplateName: templateName,
+      metaTemplateLanguage: templateLanguage || "es",
       isDryRun: dryRun,
       status: dryRun ? "dry-run" : "running",
-      stats: {
-        total: items.length,
-        pending: items.length,
-      },
+      stats: { total: items.length, pending: items.length },
       items,
       startedAt: dryRun ? null : new Date(),
     });
 
-    // 4. Agregar números a la lista de opt-in del microservicio
-    // Esto es CRÍTICO: el microservicio solo envía a números que estén en opt-in
+    // 4. Enviar vía Meta Cloud API (síncrono — pasa por cada destinatario)
     try {
-      const phonesToOptIn = items.map((it) => it.phone);
-      console.log(`[Campaign] Agregando ${phonesToOptIn.length} números a opt-in...`);
-      await waBulkOptIn(phonesToOptIn);
-      console.log(`[Campaign] Opt-in completado`);
-    } catch (error) {
-      console.error('[Campaign] Error agregando números a opt-in:', error);
-      // No lanzamos error aquí, intentamos enviar de todas formas
-    }
+      const { sent, failed } = await _sendViaMetaTemplate(org, campaign);
 
-    // 5. Enviar al microservicio Baileys
-    try {
-      const bulkItems = items.map((it) => ({
-        phone: it.phone,
-        message: it.message,
-      }));
-
-      const result = await waBulkSend({
-        clientId,
-        title,
-        items: bulkItems,
-        messageTpl: message, // Mensaje original como template (requerido por el microservicio)
-        image,
-        dryRun,
-        preRendered: true, // Mensajes ya renderizados
-      });
-
-      // Actualizar campaña con bulkId
-      campaign.bulkId = result.bulkId;
+      campaign.stats = {
+        total: items.length,
+        sent,
+        failed,
+        pending: 0,
+        skipped: 0,
+      };
+      campaign.status = "completed";
+      campaign.completedAt = new Date();
       await campaign.save();
-
-      // Si es Dry Run, el microservicio simula todo instantáneamente
-      // Debemos marcar los items como "enviados" inmediatamente
-      if (dryRun) {
-        campaign.items.forEach((item) => {
-          item.status = "sent";
-          item.sentAt = new Date();
-        });
-        campaign.status = "completed";
-        campaign.stats.sent = campaign.stats.total;
-        campaign.stats.pending = 0;
-        campaign.completedAt = new Date();
-        await campaign.save();
-      }
 
       return {
         ok: true,
@@ -439,15 +468,15 @@ export const campaignService = {
       name: item.name,
     }));
 
-    // Crear y enviar la campaña real usando la función existente
     return await campaignService.createAndSend({
       orgId,
       userId,
       title: `${dryRunCampaign.title} (Real)`,
       message: dryRunCampaign.message,
       recipients,
-      image: dryRunCampaign.image,
       dryRun: false,
+      templateName: dryRunCampaign.metaTemplateName,
+      templateLanguage: dryRunCampaign.metaTemplateLanguage,
     });
   },
 

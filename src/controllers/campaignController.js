@@ -42,7 +42,7 @@ const campaignController = {
     try {
       const orgId = req.params.orgId;
       const userId = req.user?.id || req.user?._id;
-      const { title, message, recipients, image, dryRun = false } = req.body;
+      const { title, message, recipients, dryRun = false, templateName, templateLanguage } = req.body;
 
       // Verificar límite del plan
       const limits = await membershipService.getPlanLimits(orgId);
@@ -53,32 +53,16 @@ const campaignController = {
         );
       }
 
-      // Validaciones
-      if (!title || !message) {
-        return sendResponse(
-          res,
-          400,
-          null,
-          "Título y mensaje son obligatorios"
-        );
+      if (!title) {
+        return sendResponse(res, 400, null, "El título es obligatorio");
+      }
+
+      if (!templateName) {
+        return sendResponse(res, 400, null, "Debes seleccionar una plantilla aprobada para la campaña");
       }
 
       if (!Array.isArray(recipients) || recipients.length === 0) {
-        return sendResponse(
-          res,
-          400,
-          null,
-          "Debes proporcionar al menos un destinatario"
-        );
-      }
-
-      if (message.length > 1000) {
-        return sendResponse(
-          res,
-          400,
-          null,
-          "El mensaje no puede exceder 1000 caracteres"
-        );
+        return sendResponse(res, 400, null, "Debes proporcionar al menos un destinatario");
       }
 
       const result = await campaignService.createAndSend({
@@ -87,8 +71,9 @@ const campaignController = {
         title,
         message,
         recipients,
-        image,
         dryRun,
+        templateName,
+        templateLanguage,
       });
 
       return sendResponse(

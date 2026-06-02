@@ -249,6 +249,33 @@ const registrationController = {
       sendResponse(res, 500, null, "Error al verificar slug");
     }
   },
+
+  /**
+   * GET /agent-info/:code — Información pública de un agente referidor.
+   * Solo expone nombre y días de trial (sin datos sensibles).
+   * Endpoint público — no requiere auth.
+   */
+  getAgentInfo: async (req, res) => {
+    try {
+      const code = req.params.code?.toUpperCase().trim();
+      if (!code) return sendResponse(res, 400, null, "Código requerido");
+
+      const agent = await Agent.findOne({ code, status: "active" })
+        .select("name trialDays")
+        .lean();
+
+      if (!agent) return sendResponse(res, 200, { found: false, name: null });
+
+      sendResponse(res, 200, {
+        found: true,
+        name: agent.name,
+        trialDays: agent.trialDays ?? 7,
+      });
+    } catch (err) {
+      console.error("[getAgentInfo] Error:", err);
+      sendResponse(res, 500, null, "Error al obtener info del agente");
+    }
+  },
 };
 
 export default registrationController;

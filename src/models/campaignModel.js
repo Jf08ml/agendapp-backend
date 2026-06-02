@@ -56,11 +56,14 @@ const campaignSchema = new Schema(
     image: String, // Legacy - URL or base64
     media: mediaSchema, // New - supports image, gif, video
     
-    // Referencia al bulk del microservicio
+    // Referencia al bulk del microservicio (Baileys)
     bulkId: {
       type: String,
       index: true,
     },
+    // Plantilla Meta usada (solo campañas Meta)
+    metaTemplateName: { type: String },
+    metaTemplateLanguage: { type: String, default: "es" },
     
     status: {
       type: String,
