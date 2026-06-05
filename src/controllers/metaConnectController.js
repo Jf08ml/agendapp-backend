@@ -19,7 +19,10 @@ export async function handleRequestVerification(req, res) {
     sendResponse(res, 200, result, "Código de verificación enviado");
   } catch (err) {
     console.error("[metaConnect] requestVerification error:", err.response?.data || err.message);
-    sendResponse(res, 500, null, err.response?.data?.error?.message || err.message);
+    const metaErr = err.response?.data?.error;
+    const userMsg = metaErr?.error_user_msg || metaErr?.message || err.message;
+    const status = metaErr?.code === 136024 ? 429 : 500;
+    sendResponse(res, status, null, userMsg);
   }
 }
 

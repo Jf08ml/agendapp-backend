@@ -1,6 +1,7 @@
 import { processIncomingMessage, processOrgResponse, sanitizePhone } from "../services/waAgentService.js";
 import { validateMetaSignature } from "../services/metaApiService.js";
 import Organization from "../models/organizationModel.js";
+import { disconnectOrg } from "../services/metaConnectService.js";
 
 // ─── Meta Webhook ─────────────────────────────────────────────────────────────
 
@@ -39,8 +40,21 @@ export async function handleMetaIncoming(req, res) {
 
   // Meta envuelve todo en entry[].changes[].value
   const entry = req.body?.entry?.[0];
-  const change = entry?.changes?.[0]?.value;
+  const changeObj = entry?.changes?.[0];
+  const change = changeObj?.value;
   const message = change?.messages?.[0];
+
+  // account_update: cliente se desconectó de la API desde su WA Business App
+  if (changeObj?.field === "account_update" && change?.event === "PARTNER_REMOVED") {
+    const phone = change.phone_number ? `+${String(change.phone_number).replace(/\D/g, "")}` : null;
+    if (phone) {
+      Organization.findOne({ metaPhone: phone })
+        .then((org) => { if (org) return disconnectOrg(String(org._id)); })
+        .then(() => console.log(`[WaAgent] PARTNER_REMOVED: org desconectada — ${phone}`))
+        .catch((err) => console.error("[WaAgent] Error al desconectar org por PARTNER_REMOVED:", err));
+    }
+    return;
+  }
 
   // Solo procesar texto e interactivos (botones de template); ignorar estados, imágenes, etc.
   if (!message || (message.type !== "text" && message.type !== "interactive")) return;

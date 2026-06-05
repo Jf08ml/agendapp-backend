@@ -67,14 +67,13 @@ export async function requestVerification(orgId, cc, phoneNumber, verifiedName, 
       cc: cleanCc,
       phone_number: cleanPhone,
       verified_name: verifiedName || "AgenditApp",
-      method,
     });
     phoneNumberId = res.data.id;
   } catch (err) {
     const code = err.response?.data?.error?.code;
     const subcode = err.response?.data?.error?.error_subcode;
 
-    // 2388085: el número ya existe en el WABA — obtener su ID y re-enviar código
+    // 2388085: el número ya existe en el WABA — obtener su ID
     if (code === 2388085 || subcode === 2388085) {
       const listRes = await client.get(`/${wabaId}/phone_numbers`, {
         params: { fields: "id,display_phone_number" },
@@ -84,18 +83,17 @@ export async function requestVerification(orgId, cc, phoneNumber, verifiedName, 
       );
       if (!existing) throw new Error("Número ya registrado pero no encontrado en el WABA.");
       phoneNumberId = existing.id;
-      // Re-enviar código al número existente
-      await client.post(`/${wabaId}/phone_numbers`, {
-        cc: cleanCc,
-        phone_number: cleanPhone,
-        verified_name: verifiedName || "AgenditApp",
-        method,
-      }).catch(() => null); // silencioso — puede fallar si ya está verificado
     } else {
       console.error("[metaConnect] Error al agregar número:", err.response?.data);
       throw err;
     }
   }
+
+  // Solicitar el código de verificación (SMS o Voz) — paso siempre requerido
+  await client.post(`/${phoneNumberId}/request_code`, {
+    code_method: method,
+    language: "es",
+  });
 
   // Guardar phoneNumberId pendiente (waConnectionType permanece sin cambio hasta activar)
   await Organization.findByIdAndUpdate(orgId, {
@@ -337,7 +335,23 @@ export async function connectOrgEmbedded(orgId, code, redirectUri, providedWabaI
     }
   }
 
-  // 7. Guardar en la org (pendiente de activación — NO se llama /register)
+  // 7. Asignar línea de crédito de AgenditApp al WABA del cliente
+  const creditLineId = process.env.META_CREDIT_LINE_ID;
+  if (creditLineId) {
+    try {
+      await axios.post(
+        `${GRAPH_URL}/${creditLineId}/whatsapp_credit_sharing_and_attach`,
+        { waba_id: wabaId, waba_currency: "COP" },
+        { params: { access_token: platformToken() } }
+      );
+      console.log(`[metaConnect] Línea de crédito ${creditLineId} asignada al WABA ${wabaId}`);
+    } catch (creditErr) {
+      // Ya asignada o error no bloqueante — el cliente puede conectar igual, solo billing queda pendiente
+      console.warn(`[metaConnect] No se pudo asignar línea de crédito al WABA ${wabaId}:`, creditErr.response?.data?.error?.message || creditErr.message);
+    }
+  }
+
+  // 8. Guardar en la org (pendiente de activación — NO se llama /register)
   await Organization.findByIdAndUpdate(orgId, {
     metaWabaId: wabaId,
     metaPhoneNumberId: phoneData.id,
