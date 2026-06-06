@@ -35,6 +35,8 @@ import registrationRoutes from "./registrationRoutes.js";
 import adminRoutes from "./adminRoutes.js";
 import agentRoutes from "./agentRoutes.js";
 import auditLogRoutes from "./auditLog.js";
+import announcementRoutes from "./announcementRoutes.js";
+import announcementAdminRoutes from "./announcementAdminRoutes.js";
 import chatRoutes from "./chatRoutes.js";
 import bookingChatRoutes from "./bookingChatRoutes.js";
 import waAgentRoutes from "./waAgentRoutes.js";
@@ -168,6 +170,8 @@ router.use("/reminders", verifyToken, requireActiveMembership, reminderRoutes);
 router.use("/campaigns", verifyToken, requireActiveMembership, campaignRoutes);
 router.use("/expenses", organizationResolver, verifyToken, requireActiveMembership, expenseRoutes);
 router.use("/audit-logs", organizationResolver, verifyToken, auditLogRoutes);
+router.use("/announcements", verifyToken, announcementRoutes);
+router.use("/admin/announcements", announcementAdminRoutes);
 
 // ═══════════════════════════════════════════════════
 // 5. MÓDULO DE CLASES

@@ -11,26 +11,34 @@ Sección "Explora" (páginas públicas del negocio):
   · "Reserva en línea"      → /online-reservation
   · "Reservar clase"        → /reservar-clase
 
-Sección "Gestión de cuenta":
-  · "Gestión de caja"              → /gestion-caja
+Sección "Operaciones":
   · "Gestionar agenda"             → /gestionar-agenda
   · "Gestionar reservas online"    → /gestionar-reservas-online
+  · "Gestión de caja"              → /gestion-caja
+
+Sección "Gestión":
+  · "Gestionar clientes"      → /gestionar-clientes
+  · "Gestionar servicios"     → /gestionar-servicios
+  · "Gestionar profesionales" → /gestionar-profesionales
+  · "Paquetes / Planes"       → /gestionar-paquetes
+  · "Módulo de Clases"        → /gestionar-clases
+
+Sección "Comunicación":
+  · "Gestionar WhatsApp"    → /gestionar-whatsapp
+  · "Mensajes de WhatsApp"  → /mensajes-whatsapp
+  · "Campañas WhatsApp"     → /admin/campaigns
+
+Sección "Reportes":
+  · "Analíticas del negocio" → /analytics-dashboard
+
+Sección "Configuración":
   · "Configuración del negocio"    → /informacion-negocio
   · "Información del profesional"  → /informacion-profesional
-  · "Instrucciones y ayuda"        → /instrucciones
+  · "Mi Membresía"                 → /my-membership
 
-Sección "Sección administrativa":
-  · "Gestionar clientes"         → /gestionar-clientes
-  · "Gestionar servicios"        → /gestionar-servicios
-  · "Gestionar profesionales"    → /gestionar-profesionales
-  · "Paquetes / Planes"          → /gestionar-paquetes
-  · "Módulo de Clases"           → /gestionar-clases
-  · "Gestionar WhatsApp"         → /gestionar-whatsapp
-  · "Mensajes de WhatsApp"       → /mensajes-whatsapp
-  · "Campañas WhatsApp"          → /admin/campaigns
-  · "Analíticas del negocio"     → /analytics-dashboard
-  · "Mi Membresía"               → /my-membership
+Sección "Sistema":
   · "Historial de eliminaciones" → /historial-eliminaciones
+  · "Novedades del sistema"      → /novedades
 
 ─────────────────────────────────────
 PÁGINAS — botones y acciones clave:
