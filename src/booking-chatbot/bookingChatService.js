@@ -12,10 +12,10 @@ const MAX_TOKENS = 1024;
 const MAX_TOOL_ROUNDS = 8;
 
 // Detecta cuando el bot afirma que la reserva fue confirmada/procesada sin haber
-// llamado prepare_reservation. Cubre tanto "reserva confirmada" como el mensaje
-// del botón que solo debe decirse DESPUÉS de llamar la tool.
+// llamado prepare_reservation. Cubre "reserva confirmada", tiempo pasado del verbo
+// ("reservé", "agendé") y el mensaje del botón que solo debe decirse DESPUÉS de la tool.
 const BOOKING_HALLUCINATION_PATTERN =
-  /\b(reserva|turno|cita)\b.{0,150}\b(confirmad[ao]|procesad[ao]|cread[ao]|agendad[ao]|registrad[ao]|complet[ao]|exitosa|realizada)\b|\bbotón\b.{0,80}\b(confirmar|verificar)\b|haz clic.{0,60}(confirmar|sí)/i;
+  /\b(reserva|turno|cita)\b.{0,150}\b(confirmad[ao]|procesad[ao]|cread[ao]|agendad[ao]|registrad[ao]|complet[ao]|exitosa|realizada)\b|\bbotón\b.{0,80}\b(confirmar|verificar)\b|haz clic.{0,60}(confirmar|s[ií])|\b(reservé|agendé|confirmé)\b/i;
 
 const extractText = (content) => {
   const block = content.find((b) => b.type === "text");
@@ -53,7 +53,15 @@ export const processBookingChat = async (organization, messages) => {
     outputTokens += response.usage?.output_tokens ?? 0;
 
     if (response.stop_reason !== "tool_use") {
-      const reply = extractText(response.content);
+      // Fallback: si prepare_reservation ya fue llamada pero el reply quedó vacío
+      // (el modelo generó el mensaje del botón en la misma ronda que la tool call),
+      // inyectar mensaje genérico de confirmación.
+      const rawReply = extractText(response.content);
+      const reply =
+        rawReply ||
+        (bookingPayload !== null
+          ? "¡Listo! Toca el botón **'Sí, confirmar'** para finalizar tu reserva."
+          : "");
 
       // Guard: el bot dice que la reserva fue confirmada sin haber llamado
       // prepare_reservation. Inyecta una corrección y continúa el loop.
