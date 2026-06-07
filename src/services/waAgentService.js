@@ -34,7 +34,11 @@ export async function processIncomingMessage({ orgPhone, clientPhone, fromMe, bo
     {
       orgPhone,
       clientPhone,
-      status: { $in: ["monitoring", "intent_detected"] },
+      // Incluye "summary_sent": si ya se notificó al admin y el cliente sigue
+      // escribiendo, el mensaje debe sumarse a esa MISMA conversación (no crear
+      // una nueva vía upsert) — así el guard de abajo evita re-disparar el
+      // análisis/notificación mientras el admin no haya respondido o concluido.
+      status: { $in: ["monitoring", "intent_detected", "summary_sent"] },
     },
     {
       $setOnInsert: { organizationId: org._id },
@@ -135,7 +139,7 @@ async function runLLMAnalysis(convId) {
       {
         type: "text",
         text: `Eres un asistente que analiza conversaciones de WhatsApp de negocios de belleza y servicios.
-Tu única tarea es detectar si el cliente está solicitando una cita o turno.
+Tu única tarea es detectar si el cliente está solicitando agendar, cancelar o reprogramar una cita o turno.
 Responde SOLO con JSON válido. No uses bloques de código, no uses markdown, no agregues texto antes ni después del JSON.`,
         cache_control: { type: "ephemeral" },
       },
@@ -143,9 +147,9 @@ Responde SOLO con JSON válido. No uses bloques de código, no uses markdown, no
     messages: [
       {
         role: "user",
-        content: `Conversación de WhatsApp:\n${conversationText}\n\n¿El cliente está solicitando una cita? Responde exactamente con este JSON:
+        content: `Conversación de WhatsApp:\n${conversationText}\n\n¿Qué quiere hacer el cliente? Responde exactamente con este JSON:
 {
-  "intent": "book_appointment" o "none",
+  "intent": "book_appointment" o "cancel_appointment" o "reschedule_appointment" o "none",
   "confidence": "high" o "medium" o "low",
   "serviceHint": "nombre del servicio mencionado, o null",
   "dateHint": "fecha u hora mencionada, o null",
@@ -165,12 +169,19 @@ Responde SOLO con JSON válido. No uses bloques de código, no uses markdown, no
 
   console.log(`[WaAgent] Intención detectada:`, intent);
 
-  if (intent.intent !== "book_appointment") return;
+  const ACTIONABLE_INTENTS = {
+    book_appointment: "book",
+    cancel_appointment: "cancel",
+    reschedule_appointment: "reschedule",
+  };
+  const intentType = ACTIONABLE_INTENTS[intent.intent];
+  if (!intentType) return;
   if (intent.confidence === "low") return;
 
   await WaConversation.findByIdAndUpdate(convId, {
     status: "intent_detected",
     detectedIntent: {
+      type: intentType,
       serviceHint: intent.serviceHint,
       dateHint: intent.dateHint,
       employeeHint: intent.employeeHint,

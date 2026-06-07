@@ -11,6 +11,7 @@ const MessageSchema = new mongoose.Schema(
 
 const DetectedIntentSchema = new mongoose.Schema(
   {
+    type: { type: String, enum: ["book", "cancel", "reschedule"], default: "book" }, // qué quiere hacer el cliente
     serviceHint: { type: String },    // "press on", "manicure", etc.
     dateHint: { type: String },        // "lunes a las 8am"
     employeeHint: { type: String },    // "Natalia"

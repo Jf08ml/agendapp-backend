@@ -4,14 +4,17 @@ import WaConversation from "../models/waConversationModel.js";
 import Service from "../models/serviceModel.js";
 import Employee from "../models/employeeModel.js";
 import Client from "../models/clientModel.js";
+import Appointment from "../models/appointmentModel.js";
 import appointmentService from "./appointmentService.js";
 import clientService from "./clientService.js";
+import cancellationService from "./cancellationService.js";
 import { sendTextMessage, sendTemplateMessage } from "./metaApiService.js";
 import { normalizePhone } from "./waAgentService.js";
 
 const anthropic = new Anthropic();
 
 const WINDOW_24H_MS = 24 * 60 * 60 * 1000;
+const CANCELLED_STATUSES = ["cancelled", "cancelled_by_customer", "cancelled_by_admin"];
 
 function isAdminWindowOpen(convo, org) {
   const now = Date.now();
@@ -41,9 +44,11 @@ export async function startDialogue(convo, org, intent) {
   }
 
   const identifierField = org.clientFormConfig?.identifierField || "phone";
-  const [{ services, employees }, clientInfo] = await Promise.all([
+  const tz = org.timezone || "America/Bogota";
+  const [{ services, employees }, clientInfo, clientAppointments] = await Promise.all([
     loadOrgData(org._id),
     loadClientInfo(convo.clientPhone, org._id, identifierField),
+    loadClientAppointments(convo.clientPhone, org._id, tz),
   ]);
 
   const clientConvText = convo.messages
@@ -58,6 +63,7 @@ export async function startDialogue(convo, org, intent) {
     adminConversation: [],
     clientPhone: convo.clientPhone,
     clientInfo,
+    clientAppointments,
   });
 
   if (!agentMessage) return;
@@ -75,6 +81,28 @@ export async function startDialogue(convo, org, intent) {
     }
     const freshConvo = await WaConversation.findById(convo._id).lean();
     await createAppointment(freshConvo, org, agentMessage, orgAdminPhone, services);
+  }
+
+  if (agentMessage.action === "cancel_appointment") {
+    const validationError = validateAppointmentId(agentMessage, clientAppointments);
+    if (validationError) {
+      console.error("[WaDialogue] Validación fallida en startDialogue (cancel):", validationError, agentMessage);
+      await sendAndRecord(convo, orgAdminPhone, `No pude identificar la cita a cancelar: ${validationError}`);
+      return;
+    }
+    const freshConvo = await WaConversation.findById(convo._id).lean();
+    await cancelAppointmentViaAgent(freshConvo, org, agentMessage, orgAdminPhone, clientAppointments);
+  }
+
+  if (agentMessage.action === "reschedule_appointment") {
+    const validationError = validateAppointmentId(agentMessage, clientAppointments);
+    if (validationError) {
+      console.error("[WaDialogue] Validación fallida en startDialogue (reschedule):", validationError, agentMessage);
+      await sendAndRecord(convo, orgAdminPhone, `No pude identificar la cita a reprogramar: ${validationError}`);
+      return;
+    }
+    const freshConvo = await WaConversation.findById(convo._id).lean();
+    await rescheduleAppointmentViaAgent(freshConvo, org, agentMessage, orgAdminPhone, clientAppointments);
   }
 }
 
@@ -106,8 +134,12 @@ export async function continueDialogue(convo, org, adminReply) {
     return;
   }
 
-  const [{ services, employees }] = await Promise.all([
+  const tz = org.timezone || "America/Bogota";
+  const identifierField = org.clientFormConfig?.identifierField || "phone";
+  const [{ services, employees }, clientInfo, clientAppointments] = await Promise.all([
     loadOrgData(org._id),
+    loadClientInfo(convo.clientPhone, org._id, identifierField),
+    loadClientAppointments(convo.clientPhone, org._id, tz),
   ]);
   const orgAdminPhone = normalizePhone(org.phoneNumber);
 
@@ -117,8 +149,6 @@ export async function continueDialogue(convo, org, adminReply) {
   });
 
   const updatedConvo = await WaConversation.findById(convo._id).lean();
-  const identifierField = org.clientFormConfig?.identifierField || "phone";
-  const clientInfo = await loadClientInfo(convo.clientPhone, org._id, identifierField);
 
   const clientConvText = updatedConvo.messages
     .map((m) => `${m.role === "client" ? "Cliente" : "Negocio"}: ${m.body}`)
@@ -132,13 +162,14 @@ export async function continueDialogue(convo, org, adminReply) {
     adminConversation: updatedConvo.adminConversation,
     clientPhone: convo.clientPhone,
     clientInfo,
+    clientAppointments,
   });
 
   if (!agentMessage) return;
 
   if (agentMessage.action === "reject") {
     await WaConversation.findByIdAndUpdate(convo._id, { status: "rejected" });
-    await sendTextMessage(orgAdminPhone, "Ok, no se creará la cita.");
+    await sendTextMessage(orgAdminPhone, "Ok, no se realizará ningún cambio en la agenda.");
     return;
   }
 
@@ -156,12 +187,33 @@ export async function continueDialogue(convo, org, adminReply) {
     }
     await createAppointment(updatedConvo, org, agentMessage, orgAdminPhone, services);
   }
+
+  if (agentMessage.action === "cancel_appointment") {
+    const validationError = validateAppointmentId(agentMessage, clientAppointments);
+    if (validationError) {
+      console.error("[WaDialogue] Validación fallida en continueDialogue (cancel):", validationError, agentMessage);
+      await sendAndRecord(updatedConvo, orgAdminPhone, `No pude identificar la cita a cancelar: ${validationError}`);
+      return;
+    }
+    await cancelAppointmentViaAgent(updatedConvo, org, agentMessage, orgAdminPhone, clientAppointments);
+  }
+
+  if (agentMessage.action === "reschedule_appointment") {
+    const validationError = validateAppointmentId(agentMessage, clientAppointments);
+    if (validationError) {
+      console.error("[WaDialogue] Validación fallida en continueDialogue (reschedule):", validationError, agentMessage);
+      await sendAndRecord(updatedConvo, orgAdminPhone, `No pude identificar la cita a reprogramar: ${validationError}`);
+      return;
+    }
+    await rescheduleAppointmentViaAgent(updatedConvo, org, agentMessage, orgAdminPhone, clientAppointments);
+  }
 }
 
 // ─── LLM: orquestador del diálogo ───────────────────────────────────────────
 
-async function runDialogueAgent({ org, services, employees, clientConvText, adminConversation, clientPhone, clientInfo }) {
+async function runDialogueAgent({ org, services, employees, clientConvText, adminConversation, clientPhone, clientInfo, clientAppointments = [] }) {
   const now = moment().tz(org.timezone || "America/Bogota").format("dddd D [de] MMMM [de] YYYY, HH:mm");
+  const tz = org.timezone || "America/Bogota";
 
   const servicesList = services
     .map((s) => `• ${s.name} — ${s.duration}min — $${s.price} | id:${s._id}`)
@@ -170,6 +222,15 @@ async function runDialogueAgent({ org, services, employees, clientConvText, admi
   const employeesList = employees
     .map((e) => `• ${e.names} | id:${e._id}`)
     .join("\n");
+
+  const appointmentsList = clientAppointments.length
+    ? clientAppointments
+        .map((a) => {
+          const fecha = moment(a.startDate).tz(tz).format("dddd D/MM [a las] HH:mm");
+          return `• ${a.service?.name || "?"} con ${a.employee?.names || "?"} el ${fecha} | id:${a._id}`;
+        })
+        .join("\n")
+    : "(el cliente no tiene citas próximas registradas)";
 
   const adminConvText = adminConversation.length
     ? adminConversation.map((m) => `${m.role === "agent" ? "Agente" : "Admin"}: ${m.body}`).join("\n")
@@ -180,7 +241,7 @@ async function runDialogueAgent({ org, services, employees, clientConvText, admi
     : buildNewClientSection(clientPhone, org.clientFormConfig);
 
   const systemPrompt = `Eres el asistente de agenda de AgenditApp para ${org.name}.
-Un cliente escribió al WhatsApp del negocio solicitando una cita. Tu trabajo es confirmar los detalles con el administrador por WhatsApp y crear la cita cuando todo esté confirmado.
+Un cliente escribió al WhatsApp del negocio para agendar, cancelar o reprogramar una cita. Tu trabajo es confirmar los detalles con el administrador por WhatsApp y ejecutar la acción cuando todo esté confirmado.
 
 FECHA Y HORA ACTUAL (${org.timezone || "America/Bogota"}): ${now}
 
@@ -190,23 +251,41 @@ ${servicesList || "(ninguno registrado)"}
 PROFESIONALES DISPONIBLES (ÚNICAMENTE ESTOS — no inventes otros):
 ${employeesList || "(ninguno registrado)"}
 
+CITAS PRÓXIMAS DE ESTE CLIENTE (ÚNICAMENTE ESTAS — usa el id_exacto para cancelar/reprogramar):
+${appointmentsList}
+
 ${clientSection}
 
 INSTRUCCIONES:
 - Escribe en español. Mensajes cortos y directos para WhatsApp.
 - SOLO usa los IDs exactos de las listas de arriba. NUNCA inventes ni uses IDs que no aparezcan en esas listas.
-- Si el admin menciona un profesional o servicio que no está en la lista, pregúntale cuál de los disponibles prefiere.
+- Si el admin menciona un profesional, servicio o cita que no está en las listas, pregúntale cuál de los disponibles prefiere.
 - Sugiere opciones reales de la lista cuando el admin no especifica (ej: "¿Con quién? Tenemos a Nataly y Mariana")
+
+PARA AGENDAR (create_appointment):
 - Si el cliente NO está registrado, extrae de la conversación lo que puedas (nombre, email, etc.) y pregunta al admin por los campos requeridos que falten. No preguntes por campos opcionales a menos que el admin los mencione.
 - Agrupa las preguntas de datos del cliente en un solo mensaje para no saturar al admin.
-- Cuando tengas todos los datos confirmados (servicio(s), profesional(es), fecha/hora y datos del cliente), responde con create_appointment
-- Si son VARIAS citas, inclúyelas TODAS en el array "appointments" de UN SOLO JSON — nunca devuelvas múltiples JSONs separados
-- Si el admin rechaza o dice que no, responde con la acción reject
-- Responde SOLO con JSON válido, sin markdown, sin bloques de código, sin texto adicional
+- Cuando tengas todos los datos confirmados (servicio(s), profesional(es), fecha/hora y datos del cliente), responde con create_appointment.
+- Si son VARIAS citas, inclúyelas TODAS en el array "appointments" de UN SOLO JSON — nunca devuelvas múltiples JSONs separados.
+
+PARA CANCELAR (cancel_appointment):
+- Identifica la cita exacta en la lista "CITAS PRÓXIMAS DE ESTE CLIENTE" usando lo que dice el cliente (servicio, fecha, profesional).
+- Si hay una sola coincidencia clara, pregúntale al admin si confirma la cancelación describiéndola (servicio, fecha/hora, profesional). Solo responde cancel_appointment cuando el admin confirme explícitamente.
+- Si hay varias citas que podrían coincidir o ninguna, pregúntale al admin cuál es (o avísale que no encontraste ninguna).
+
+PARA REPROGRAMAR (reschedule_appointment):
+- Identifica la cita exacta igual que para cancelar, y la nueva fecha/hora que pide el cliente.
+- Confírmale al admin la cita actual y el nuevo horario propuesto antes de ejecutar. Solo responde reschedule_appointment cuando el admin confirme explícitamente.
+- El reagendamiento solo cambia la fecha/hora — mantiene el mismo servicio y profesional.
+
+- Si el admin rechaza o dice que no, responde con la acción reject.
+- Responde SOLO con JSON válido, sin markdown, sin bloques de código, sin texto adicional.
 
 FORMATOS DE RESPUESTA POSIBLES:
 {"action":"ask","message":"tu pregunta al admin aquí"}
 {"action":"create_appointment","appointments":[{"serviceId":"id_exacto","employeeId":"id_exacto","startDate":"YYYY-MM-DDTHH:mm:ss","notes":"nota opcional"}],"clientData":{"name":"nombre","email":"email o null","documentId":"doc o null","birthDate":"YYYY-MM-DD o null","notes":"notas o null"}}
+{"action":"cancel_appointment","appointmentId":"id_exacto","reason":"motivo mencionado por el cliente, o null"}
+{"action":"reschedule_appointment","appointmentId":"id_exacto","newStartDate":"YYYY-MM-DDTHH:mm:ss","notes":"nota opcional o null"}
 {"action":"reject"}`;
 
   const response = await anthropic.messages.create({
@@ -314,6 +393,104 @@ async function createAppointment(convo, org, agentData, orgAdminPhone, services)
   }
 }
 
+// ─── Cancelación de cita existente ──────────────────────────────────────────
+
+async function cancelAppointmentViaAgent(convo, org, agentData, orgAdminPhone, clientAppointments) {
+  const tz = org.timezone || "America/Bogota";
+  const target = clientAppointments.find((a) => a._id.toString() === agentData.appointmentId);
+  const fecha = moment(target.startDate).tz(tz).format("ddd D/MM [a las] HH:mm");
+  const resumen = `${target.service?.name || "?"} con ${target.employee?.names || "?"} el ${fecha}`;
+
+  try {
+    const result = await cancellationService.cancelAppointment(
+      agentData.appointmentId,
+      "admin",
+      agentData.reason || null,
+      true // notifica al cliente — fue quien originó la solicitud
+    );
+
+    if (!result.success) {
+      throw new Error(result.message);
+    }
+
+    await WaConversation.findByIdAndUpdate(convo._id, {
+      status: "confirmed",
+      appointmentId: agentData.appointmentId,
+    });
+
+    await sendTextMessage(orgAdminPhone, `✅ Cita cancelada\n${resumen}`);
+    console.log(`[WaDialogue] Cita cancelada — conv: ${convo._id}`);
+  } catch (err) {
+    console.error("[WaDialogue] Error cancelando cita:", err.message);
+    await sendTextMessage(
+      orgAdminPhone,
+      `❌ No pude cancelar la cita (${resumen}): ${err.message}\nPor favor cancélala manualmente en AgenditApp.`
+    );
+    await WaConversation.findByIdAndUpdate(convo._id, { status: "rejected" });
+  }
+}
+
+// ─── Reprogramación de cita existente ───────────────────────────────────────
+
+async function rescheduleAppointmentViaAgent(convo, org, agentData, orgAdminPhone, clientAppointments) {
+  const tz = org.timezone || "America/Bogota";
+  const target = clientAppointments.find((a) => a._id.toString() === agentData.appointmentId);
+  const fechaActual = moment(target.startDate).tz(tz).format("ddd D/MM [a las] HH:mm");
+
+  const newStart = moment.tz(agentData.newStartDate, "YYYY-MM-DDTHH:mm:ss", tz);
+  if (!newStart.isValid()) {
+    await sendTextMessage(orgAdminPhone, `❌ La nueva fecha/hora "${agentData.newStartDate}" no es válida.`);
+    return;
+  }
+  const fechaNueva = newStart.format("ddd D/MM [a las] HH:mm");
+  const duracionMs = new Date(target.endDate).getTime() - new Date(target.startDate).getTime();
+  const newEnd = new Date(newStart.toDate().getTime() + Math.max(duracionMs, 0));
+
+  try {
+    // Advertencia de solapamiento (informativa, no bloqueante) — mismo criterio
+    // que usa el chatbot del admin en create_appointments
+    const overlapping = await Appointment.find({
+      _id: { $ne: agentData.appointmentId },
+      employee: target.employee?._id,
+      status: { $nin: CANCELLED_STATUSES },
+      startDate: { $lt: newEnd },
+      endDate: { $gt: newStart.toDate() },
+    })
+      .populate("client", "name")
+      .populate("service", "name");
+
+    const advertencia = overlapping.length
+      ? `\n⚠️ ${target.employee?.names || "El profesional"} ya tiene cita(s) en ese horario: ` +
+        overlapping.map((o) => `${o.service?.name || "?"} con ${o.client?.name || "?"} a las ${moment(o.startDate).tz(tz).format("HH:mm")}`).join(", ")
+      : "";
+
+    await appointmentService.updateAppointment(agentData.appointmentId, {
+      startDate: newStart.format("YYYY-MM-DDTHH:mm:ss"),
+      endDate: moment(newEnd).tz(tz).format("YYYY-MM-DDTHH:mm:ss"),
+      organizationId: org._id,
+      notes: agentData.notes || target.notes,
+    });
+
+    await WaConversation.findByIdAndUpdate(convo._id, {
+      status: "confirmed",
+      appointmentId: agentData.appointmentId,
+    });
+
+    await sendTextMessage(
+      orgAdminPhone,
+      `✅ Cita reprogramada\n${target.service?.name || "?"} con ${target.employee?.names || "?"}\nDe: ${fechaActual}\nA: ${fechaNueva}${advertencia}`
+    );
+    console.log(`[WaDialogue] Cita reprogramada — conv: ${convo._id}`);
+  } catch (err) {
+    console.error("[WaDialogue] Error reprogramando cita:", err.message);
+    await sendTextMessage(
+      orgAdminPhone,
+      `❌ No pude reprogramar la cita (${fechaActual} → ${fechaNueva}): ${err.message}\nPor favor hazlo manualmente en AgenditApp.`
+    );
+    await WaConversation.findByIdAndUpdate(convo._id, { status: "rejected" });
+  }
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const FIELD_LABELS = {
@@ -372,6 +549,29 @@ async function loadClientInfo(clientPhone, orgId, identifierField) {
   return { exists: "unknown", name: null, identifierField };
 }
 
+// Citas próximas (no canceladas) del cliente — le dan al LLM IDs reales para
+// poder identificar a cuál se refiere cuando pide cancelar/reprogramar.
+async function loadClientAppointments(clientPhone, orgId, timezone) {
+  const client = await Client.findOne({
+    organizationId: orgId,
+    $or: [{ phone_e164: clientPhone }, { phoneNumber: clientPhone }],
+  }).select("_id");
+  if (!client) return [];
+
+  const now = moment.tz(timezone).toDate();
+  return Appointment.find({
+    organizationId: orgId,
+    client: client._id,
+    status: { $nin: CANCELLED_STATUSES },
+    startDate: { $gte: now },
+  })
+    .populate("service", "name")
+    .populate("employee", "names")
+    .sort({ startDate: 1 })
+    .limit(10)
+    .lean();
+}
+
 async function loadOrgData(orgId) {
   const [services, employees] = await Promise.all([
     Service.find({ organizationId: orgId, isActive: true }).select("_id name duration price").lean(),
@@ -414,6 +614,15 @@ function validateAgentIds(agentMessage, services, employees, clientInfo, clientF
     }
   }
 
+  return null;
+}
+
+// Valida que el appointmentId que devolvió el LLM corresponda a una de las
+// citas próximas reales del cliente (evita que actúe sobre IDs alucinados).
+function validateAppointmentId(agentMessage, clientAppointments) {
+  if (!agentMessage.appointmentId) return "No se especificó qué cita.";
+  const found = clientAppointments.some((a) => a._id.toString() === agentMessage.appointmentId);
+  if (!found) return `La cita "${agentMessage.appointmentId}" no está en la lista de citas próximas del cliente.`;
   return null;
 }
 
