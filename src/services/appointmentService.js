@@ -1228,11 +1228,13 @@ const appointmentService = {
 
         console.log(`[${org.name}] [${label}] Procesando ${appointments.length} citas (${hoursBefore}h antes)`);
 
-        // Verificar sesión de WhatsApp
+        // Verificar canal de envío configurado — Meta tiene prioridad sobre Baileys
+        // (org.waConnectionType === "meta" es la fuente de verdad, no la mera presencia de clientIdWhatsapp)
+        const isMeta = org?.waConnectionType === "meta";
         const orgClientId = org.clientIdWhatsapp;
-        if (!orgClientId) {
+        if (!isMeta && !orgClientId) {
           console.warn(
-            `[${org.name}] [${label}] Sin clientIdWhatsapp. Se omiten ${appointments.length} recordatorios.`
+            `[${org.name}] [${label}] Sin Meta ni clientIdWhatsapp configurado. Se omiten ${appointments.length} recordatorios.`
           );
           return { ok: 0, skipped: appointments.length };
         }
@@ -1350,15 +1352,10 @@ const appointmentService = {
           return { ok: 0, skipped: 0 };
         }
 
-        // Enviar campaña
+        // Enviar recordatorios
         try {
           const targetDateFmt = targetTimeStart.toISOString().slice(0, 10);
           const title = `${label} ${targetDateFmt} ${currentHourOrg}:00 (${org.name})`;
-
-          const { waBulkSend, waBulkOptIn } = await import("./waHttpService.js");
-
-          const templateDoc = await WhatsappTemplate.findOne({ organizationId: org._id });
-          const messageTpl = templateDoc?.[templateType] || whatsappTemplates.getDefaultTemplate(templateType);
 
           // Marcar citas ANTES de enviar para evitar duplicados por race condition
           // (dos ejecuciones del cron solapadas o fallo de escritura post-envío)
@@ -1378,7 +1375,32 @@ const appointmentService = {
             }
           }
 
+          // Meta Cloud API tiene prioridad sobre Baileys cuando waConnectionType === "meta"
+          // (mismo criterio que sendWhatsappService.sendNotification y reminderService.sendDailyRemindersViaCampaign)
+          if (isMeta) {
+            console.log(`[${org.name}] [${label}] 📤 Enviando vía Meta template: ${items.length} mensajes`);
+            let metaSent = 0;
+            for (const item of items) {
+              try {
+                await whatsappService.sendNotification(org._id, item.phone, templateType, item.vars);
+                metaSent++;
+              } catch (err) {
+                console.error(`[${org.name}] [${label}] Error enviando a ${item.phone} vía Meta:`, err.message);
+              }
+              await sleep(200);
+            }
+
+            console.log(`[${org.name}] [${label}] Envío Meta completado: ${metaSent}/${items.length} mensajes`);
+
+            return { ok: markedCount, skipped: 0 };
+          }
+
           console.log(`[${org.name}] [${label}] 📤 Enviando campaña: ${items.length} mensajes`);
+
+          const { waBulkSend, waBulkOptIn } = await import("./waHttpService.js");
+
+          const templateDoc = await WhatsappTemplate.findOne({ organizationId: org._id });
+          const messageTpl = templateDoc?.[templateType] || whatsappTemplates.getDefaultTemplate(templateType);
 
           try {
             await waBulkOptIn(items.map((it) => it.phone));
