@@ -31,31 +31,41 @@ async function _sendViaMetaTemplate(org, campaign) {
       continue;
     }
 
-    try {
-      let components = [];
-      if (varCount > 0) {
-        const vars = campaign.templateVariables || {};
-        const parameters = Array.from({ length: varCount }, (_, i) => ({
-          type: "text",
-          // {{1}} → nombre del destinatario; {{2}}+ → valor fijo definido al crear la campaña
-          text: i === 0 ? (item.name || "") : (vars[String(i + 1)] ?? ""),
-        }));
-        components = [{ type: "body", parameters }];
-      }
+    // Declarado fuera del try: con regenerator-runtime, un `let` del bloque try
+    // no es visible dentro del catch (ReferenceError al loggear el error)
+    let components = [];
+    if (varCount > 0) {
+      const vars = campaign.templateVariables || {};
+      const parameters = Array.from({ length: varCount }, (_, i) => ({
+        type: "text",
+        // {{1}} → nombre del destinatario; {{2}}+ → valor fijo definido al crear la campaña
+        text: i === 0 ? (item.name || "") : (vars[String(i + 1)] ?? ""),
+      }));
+      components = [{ type: "body", parameters }];
+    }
 
+    try {
       await sendTemplateMessage(org, item.phone, templateName, language, components);
       item.status = "sent";
       item.sentAt = new Date();
       sent++;
     } catch (err) {
-      const metaCode = err.response?.data?.error?.code;
+      const metaError = err.response?.data?.error;
+      const metaCode = metaError?.code;
       item.status = "failed";
       item.errorMessage =
         metaCode === 133010
           ? "El número no tiene WhatsApp"
-          : err.response?.data?.error?.message || err.message;
+          : metaError?.message || err.message;
       failed++;
-      console.warn(`[Campaign] Error enviando a ${item.phone}:`, item.errorMessage);
+      // Meta suele incluir el detalle específico (ej. qué parámetro falta o no coincide) en error_data.details
+      console.warn(
+        `[Campaign] Error enviando a ${item.phone}:`,
+        item.errorMessage,
+        metaError
+          ? JSON.stringify({ code: metaError.code, type: metaError.type, error_data: metaError.error_data, components })
+          : ""
+      );
     }
   }
 
@@ -153,6 +163,19 @@ export const campaignService = {
 
     if (!templateName) {
       throw new Error("Debes seleccionar una plantilla aprobada para la campaña.");
+    }
+
+    // Validar que las variables fijas ({{2}}, {{3}}, ...) tengan un valor —
+    // Meta rechaza el envío completo si un parámetro de texto llega vacío (#131008)
+    const varIndices = [...new Set(
+      (message.match(/\{\{(\d+)\}\}/g) || []).map((m) => parseInt(m.replace(/\{\{|\}\}/g, ""), 10))
+    )];
+    const fixedVarIndices = varIndices.filter((i) => i > 1);
+    const missingVars = fixedVarIndices.filter((i) => !(templateVariables?.[String(i)] || "").trim());
+    if (missingVars.length > 0) {
+      throw new Error(
+        `Debes completar el texto fijo para: ${missingVars.map((i) => `{{${i}}}`).join(", ")}`
+      );
     }
 
     const defaultCountry = org.default_country || 'CO';
@@ -478,9 +501,11 @@ export const campaignService = {
       title: `${dryRunCampaign.title} (Real)`,
       message: dryRunCampaign.message,
       recipients,
+      image: dryRunCampaign.image,
       dryRun: false,
       templateName: dryRunCampaign.metaTemplateName,
       templateLanguage: dryRunCampaign.metaTemplateLanguage,
+      templateVariables: dryRunCampaign.templateVariables,
     });
   },
 

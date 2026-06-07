@@ -42,7 +42,7 @@ const campaignController = {
     try {
       const orgId = req.params.orgId;
       const userId = req.user?.id || req.user?._id;
-      const { title, message, recipients, dryRun = false, templateName, templateLanguage } = req.body;
+      const { title, message, recipients, image, dryRun = false, templateName, templateLanguage, templateVariables } = req.body;
 
       // Verificar límite del plan
       const limits = await membershipService.getPlanLimits(orgId);
@@ -71,9 +71,11 @@ const campaignController = {
         title,
         message,
         recipients,
+        image,
         dryRun,
         templateName,
         templateLanguage,
+        templateVariables,
       });
 
       return sendResponse(
