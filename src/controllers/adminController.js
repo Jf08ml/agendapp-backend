@@ -29,6 +29,11 @@ import ClassSession from "../models/classSessionModel.js";
 import Room from "../models/roomModel.js";
 import Enrollment from "../models/enrollmentModel.js";
 import sendResponse from "../utils/sendResponse.js";
+import {
+  getPlatformOverview,
+  getPlatformTimeSeries,
+  getOrganizationRanking,
+} from "../services/platformAnalyticsService.js";
 
 /** TTL del ExchangeCode de impersonación (90 segundos) */
 const IMPERSONATION_CODE_TTL_MS = 90 * 1000;
@@ -285,6 +290,67 @@ const adminController = {
     } catch (error) {
       console.error("[admin/deleteOrganization] Error:", error);
       sendResponse(res, 500, null, "Error al eliminar la organización");
+    }
+  },
+
+  // ─── Analítica global de plataforma ────────────────────────────────────────
+
+  /** Resuelve startDate/endDate de query params, con default de últimos 30 días */
+  _resolveDateRange: (query) => {
+    const endDate = query.endDate || new Date().toISOString().slice(0, 10);
+    const startDate =
+      query.startDate ||
+      new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    return { startDate, endDate };
+  },
+
+  /**
+   * GET /api/admin/analytics/overview
+   * KPIs globales: nuevas orgs, citas/ingresos, reservas, salud de membresías, MRR.
+   */
+  getPlatformOverview: async (req, res) => {
+    try {
+      const { startDate, endDate } = adminController._resolveDateRange(req.query);
+      const data = await getPlatformOverview({ startDate, endDate });
+      sendResponse(res, 200, data);
+    } catch (error) {
+      console.error("[admin/getPlatformOverview] Error:", error);
+      sendResponse(res, 500, null, "Error al obtener resumen de plataforma");
+    }
+  },
+
+  /**
+   * GET /api/admin/analytics/timeseries
+   * Serie temporal global por granularidad (day | week | month).
+   */
+  getPlatformTimeSeries: async (req, res) => {
+    try {
+      const { startDate, endDate } = adminController._resolveDateRange(req.query);
+      const granularity = ["day", "week", "month"].includes(req.query.granularity)
+        ? req.query.granularity
+        : "day";
+      const data = await getPlatformTimeSeries({ startDate, endDate, granularity });
+      sendResponse(res, 200, data);
+    } catch (error) {
+      console.error("[admin/getPlatformTimeSeries] Error:", error);
+      sendResponse(res, 500, null, "Error al obtener serie temporal de plataforma");
+    }
+  },
+
+  /**
+   * GET /api/admin/analytics/organizations
+   * Ranking de organizaciones por citas o ingresos en el rango.
+   */
+  getOrganizationRanking: async (req, res) => {
+    try {
+      const { startDate, endDate } = adminController._resolveDateRange(req.query);
+      const sortBy = req.query.sortBy === "ingresos" ? "ingresos" : "citas";
+      const limit = req.query.limit;
+      const data = await getOrganizationRanking({ startDate, endDate, sortBy, limit });
+      sendResponse(res, 200, data);
+    } catch (error) {
+      console.error("[admin/getOrganizationRanking] Error:", error);
+      sendResponse(res, 500, null, "Error al obtener ranking de organizaciones");
     }
   },
 };

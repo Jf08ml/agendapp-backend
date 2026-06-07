@@ -64,6 +64,9 @@ const campaignSchema = new Schema(
     // Plantilla Meta usada (solo campañas Meta)
     metaTemplateName: { type: String },
     metaTemplateLanguage: { type: String, default: "es" },
+    // Valores fijos para variables {{2}}, {{3}}... de la plantilla.
+    // {{1}} siempre es el nombre del destinatario (automático).
+    templateVariables: { type: Object, default: {} },
     
     status: {
       type: String,

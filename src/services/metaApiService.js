@@ -44,9 +44,10 @@ export async function sendTextMessage(toPhone, text) {
  * @param {string} toPhone - Número E.164 del destinatario
  * @param {string} templateName - Nombre exacto de la plantilla en Meta Business
  * @param {string} languageCode - Código de idioma de la plantilla (default: "es")
+ * @param {Array} [components] - Componentes con parámetros (ej: [{ type: "body", parameters: [...] }])
  * @returns {Promise<{ messageId: string }>}
  */
-export async function sendTemplateMessage(toPhone, templateName, languageCode = "es") {
+export async function sendTemplateMessage(toPhone, templateName, languageCode = "es", components = []) {
   const { phoneNumberId, accessToken } = getConfig();
 
   const response = await axios.post(
@@ -58,6 +59,7 @@ export async function sendTemplateMessage(toPhone, templateName, languageCode = 
       template: {
         name: templateName,
         language: { code: languageCode },
+        ...(components.length > 0 && { components }),
       },
     },
     {
@@ -70,6 +72,42 @@ export async function sendTemplateMessage(toPhone, templateName, languageCode = 
 
   const messageId = response.data?.messages?.[0]?.id;
   return { messageId };
+}
+
+// ── Notificación interna: nuevo registro ────────────────────────────────────
+
+const NEW_SIGNUP_NOTIFY_PHONE = process.env.WHATSAPP_NEW_SIGNUP_NOTIFY_PHONE;
+const NEW_SIGNUP_TEMPLATE_NAME = "nuevo_registro";
+
+/**
+ * Notifica al WhatsApp de contacto de AgenditApp (WHATSAPP_NEW_SIGNUP_NOTIFY_PHONE)
+ * cuando una nueva organización se registra en la plataforma.
+ *
+ * Requiere una plantilla aprobada por Meta llamada "nuevo_registro" con un
+ * componente BODY de 4 variables en este orden: nombre del negocio, nombre
+ * del dueño, teléfono, email. Si la plantilla no existe o no está aprobada,
+ * Meta devuelve error y este helper solo lo registra (no afecta el registro).
+ *
+ * @param {{ businessName: string, ownerName?: string, phone: string, email: string }} data
+ */
+export async function notifyNewRegistration({ businessName, ownerName, phone, email }) {
+  if (!NEW_SIGNUP_NOTIFY_PHONE) return;
+
+  try {
+    await sendTemplateMessage(NEW_SIGNUP_NOTIFY_PHONE, NEW_SIGNUP_TEMPLATE_NAME, "es", [
+      {
+        type: "body",
+        parameters: [
+          { type: "text", text: businessName },
+          { type: "text", text: ownerName || businessName },
+          { type: "text", text: phone },
+          { type: "text", text: email },
+        ],
+      },
+    ]);
+  } catch (err) {
+    console.error("[metaApi] Error notificando nuevo registro:", err.response?.data || err.message);
+  }
 }
 
 /**

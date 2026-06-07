@@ -34,9 +34,11 @@ async function _sendViaMetaTemplate(org, campaign) {
     try {
       let components = [];
       if (varCount > 0) {
+        const vars = campaign.templateVariables || {};
         const parameters = Array.from({ length: varCount }, (_, i) => ({
           type: "text",
-          text: i === 0 ? (item.name || "") : "",
+          // {{1}} → nombre del destinatario; {{2}}+ → valor fijo definido al crear la campaña
+          text: i === 0 ? (item.name || "") : (vars[String(i + 1)] ?? ""),
         }));
         components = [{ type: "body", parameters }];
       }
@@ -130,12 +132,13 @@ export const campaignService = {
     orgId,
     userId,
     title,
-    message,       // Cuerpo de la plantilla (para display/referencia)
-    recipients,    // [{ phone, name? }]
+    message,           // Cuerpo de la plantilla (para display/referencia)
+    recipients,        // [{ phone, name? }]
     image,
     dryRun = false,
     templateName,
     templateLanguage,
+    templateVariables, // { "2": "valor fijo", "3": "otro valor" }
   }) => {
     // 1. Validar organización — campañas solo con Meta
     const org = await organizationModel.findById(orgId)
@@ -202,6 +205,7 @@ export const campaignService = {
       message: message || "",  // Cuerpo del template para display
       metaTemplateName: templateName,
       metaTemplateLanguage: templateLanguage || "es",
+      templateVariables: templateVariables || {},
       isDryRun: dryRun,
       status: dryRun ? "dry-run" : "running",
       stats: { total: items.length, pending: items.length },

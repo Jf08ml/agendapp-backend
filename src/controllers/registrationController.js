@@ -7,6 +7,7 @@ import ExchangeCode from "../models/exchangeCodeModel.js";
 import Plan from "../models/planModel.js";
 import Agent from "../models/agentModel.js";
 import membershipService from "../services/membershipService.js";
+import { notifyNewRegistration } from "../services/metaApiService.js";
 import sendResponse from "../utils/sendResponse.js";
 import { isValidSlug, isSlugAvailable, suggestSlugs } from "../utils/reservedSlugs.js";
 
@@ -110,6 +111,14 @@ const registrationController = {
       });
 
       const savedOrg = await newOrg.save();
+
+      // Notificar al WhatsApp de contacto de AgenditApp (no bloquea ni falla el registro)
+      notifyNewRegistration({
+        businessName: savedOrg.name,
+        ownerName: savedOrg.ownerName,
+        phone: savedOrg.phoneNumber,
+        email: savedOrg.email,
+      });
 
       // 8. Crear trial automático con plan-demo (días configurados por el agente, default 7)
       const trialPlan = await Plan.findOne({ slug: "plan-demo", isActive: true });

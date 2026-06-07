@@ -60,4 +60,27 @@ router.delete(
   adminController.deleteOrganization
 );
 
+// ─── Analítica global de plataforma (solo superadmins) ──────────────────────
+
+router.get(
+  "/admin/analytics/overview",
+  verifyToken,
+  requireSuperAdmin,
+  adminController.getPlatformOverview
+);
+
+router.get(
+  "/admin/analytics/timeseries",
+  verifyToken,
+  requireSuperAdmin,
+  adminController.getPlatformTimeSeries
+);
+
+router.get(
+  "/admin/analytics/organizations",
+  verifyToken,
+  requireSuperAdmin,
+  adminController.getOrganizationRanking
+);
+
 export default router;

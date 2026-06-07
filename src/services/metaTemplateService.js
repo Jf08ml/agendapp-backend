@@ -99,19 +99,46 @@ export async function listTemplates(org) {
 }
 
 /**
+ * Crea un cliente axios para un token dado.
+ */
+function makeClient(token) {
+  return axios.create({ baseURL: GRAPH_URL, params: { access_token: token } });
+}
+
+/**
+ * Si la org tiene metaWabaId (Embedded Signup) y el token primario falla
+ * con código 100 (permiso insuficiente del system user sobre el WABA del cliente),
+ * reintenta con metaAccessToken (token del dueño del negocio, que siempre tiene admin).
+ */
+async function withOwnerTokenFallback(org, primaryToken, fn) {
+  try {
+    return await fn(primaryToken);
+  } catch (err) {
+    const isPermissionError = err.response?.data?.error?.code === 100;
+    const hasOwnerToken = org.metaWabaId && org.metaAccessToken && org.metaAccessToken !== primaryToken;
+    if (isPermissionError && hasOwnerToken) {
+      console.warn("[metaTemplate] System user sin permisos de admin en el WABA del cliente — reintentando con metaAccessToken");
+      return fn(org.metaAccessToken);
+    }
+    throw err;
+  }
+}
+
+/**
  * Crea una plantilla (prefixa el nombre si usa WABA de plataforma).
  */
 export async function createTemplate(org, template) {
   assertMetaActive(org);
   const { token, wabaId, usePrefix } = getOrgCredentials(org);
-  const client = axios.create({ baseURL: GRAPH_URL, params: { access_token: token } });
   const fullName = usePrefix ? prefixName(org, template.name) : template.name;
-  const res = await client.post(`/${wabaId}/message_templates`, {
-    name: fullName,
-    category: template.category,
-    language: template.language,
-    components: template.components,
-  });
+  const res = await withOwnerTokenFallback(org, token, (t) =>
+    makeClient(t).post(`/${wabaId}/message_templates`, {
+      name: fullName,
+      category: template.category,
+      language: template.language,
+      components: template.components,
+    })
+  );
   return res.data;
 }
 
@@ -121,8 +148,9 @@ export async function createTemplate(org, template) {
 export async function updateTemplate(org, templateId, components) {
   assertMetaActive(org);
   const { token } = getOrgCredentials(org);
-  const client = axios.create({ baseURL: GRAPH_URL, params: { access_token: token } });
-  const res = await client.post(`/${templateId}`, { components });
+  const res = await withOwnerTokenFallback(org, token, (t) =>
+    makeClient(t).post(`/${templateId}`, { components })
+  );
   return res.data;
 }
 
@@ -132,9 +160,10 @@ export async function updateTemplate(org, templateId, components) {
 export async function deleteTemplate(org, templateName) {
   assertMetaActive(org);
   const { token, wabaId, usePrefix } = getOrgCredentials(org);
-  const client = axios.create({ baseURL: GRAPH_URL, params: { access_token: token } });
   const fullName = usePrefix ? prefixName(org, templateName) : templateName;
-  const res = await client.delete(`/${wabaId}/message_templates`, { params: { name: fullName } });
+  const res = await withOwnerTokenFallback(org, token, (t) =>
+    makeClient(t).delete(`/${wabaId}/message_templates`, { params: { name: fullName } })
+  );
   return res.data;
 }
 

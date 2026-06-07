@@ -64,7 +64,10 @@ export async function handleDeleteTemplate(req, res) {
     await deleteTemplate(org, req.params.templateName);
     sendResponse(res, 200, null, "Plantilla eliminada");
   } catch (err) {
-    sendResponse(res, 400, null, err.message);
+    console.error("[metaTemplate] Error eliminando:", err.response?.data || err.message);
+    const metaError = err.response?.data?.error;
+    const userMsg = metaError?.error_user_msg || metaError?.message || err.message;
+    sendResponse(res, 400, null, userMsg);
   }
 }
 
