@@ -1144,13 +1144,21 @@ const cancellationService = {
           
           const phoneNumber = client.phone_e164 || client.phoneNumber;
           if (phoneNumber) {
-            await whatsappService.sendNotification(
+            const notifyResult = await whatsappService.sendNotification(
               organizationId.toString(),
               phoneNumber,
               'clientCancellationAck',
               { names: client.name || 'Cliente', appointments_list: appointmentsList, organization: org.name }
             );
-            console.log(`✅ Mensaje de cancelación enviado al cliente: ${client.name} (${phoneNumber})`);
+            if (notifyResult?.blocked) {
+              console.warn(`⏭️  Aviso de cancelación NO enviado a ${client.name} (${phoneNumber}) — bloqueado por plan: ${notifyResult.reason}`);
+            } else if (!notifyResult) {
+              console.warn(`⚠️  Aviso de cancelación NO enviado a ${client.name} (${phoneNumber}) — sendNotification devolvió null (revisa si la plantilla "aviso_cancelacion"/"clientCancellationAck" existe y está aprobada para esta org)`);
+            } else {
+              console.log(`✅ Aviso de cancelación enviado a ${client.name} (${phoneNumber}) — messageId: ${notifyResult?.messageId || notifyResult?.id || "?"}`);
+            }
+          } else {
+            console.warn(`⚠️  Aviso de cancelación NO enviado — el cliente ${client.name || appointment.client} no tiene teléfono registrado`);
           }
         } catch (whatsappError) {
           console.error('[cancelAppointment] Error al enviar WhatsApp:', whatsappError);

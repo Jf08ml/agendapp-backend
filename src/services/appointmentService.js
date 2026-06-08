@@ -199,15 +199,23 @@ const appointmentService = {
       const isConfirmationEnabled = whatsappTemplate?.enabledTypes?.scheduleAppointment !== false;
 
       if (isConfirmationEnabled && (client?.phone_e164 || client?.phoneNumber)) {
-        await whatsappService.sendNotification(
+        const notifyResult = await whatsappService.sendNotification(
           organizationId,
           client?.phone_e164 || client?.phoneNumber,
           'scheduleAppointment',
           { ...appointmentDetails, cancellationLink }
         );
-        console.log(`✅ Confirmación enviada para cita ${newAppointment._id}`);
+        if (notifyResult?.blocked) {
+          console.warn(`⏭️  Confirmación NO enviada (bloqueada por plan: ${notifyResult.reason}) para cita ${newAppointment._id}`);
+        } else if (!notifyResult) {
+          console.warn(`⚠️  Confirmación NO enviada para cita ${newAppointment._id} — sendNotification devolvió null (revisa si la plantilla "confirmacion_cita"/"scheduleAppointment" existe y está aprobada para esta org)`);
+        } else {
+          console.log(`✅ Confirmación enviada para cita ${newAppointment._id} — messageId: ${notifyResult?.messageId || notifyResult?.id || "?"}`);
+        }
       } else if (!isConfirmationEnabled) {
-        console.log(`⏭️  Confirmación deshabilitada para cita ${newAppointment._id}`);
+        console.log(`⏭️  Confirmación deshabilitada (enabledTypes.scheduleAppointment) para cita ${newAppointment._id}`);
+      } else {
+        console.warn(`⚠️  Confirmación NO enviada para cita ${newAppointment._id} — el cliente no tiene teléfono registrado`);
       }
       } // cierre del else (planLimits check)
     } catch (error) {

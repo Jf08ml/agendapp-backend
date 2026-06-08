@@ -27,6 +27,48 @@ function isAdminWindowOpen(convo, org) {
   return convWindow || orgWindow;
 }
 
+// ─── Tabla de referencias de fechas pre-calculadas ───────────────────────────
+// El LLM (Haiku) calcula mal fechas relativas ("el viernes" → día equivocado)
+// si se le deja hacer la aritmética de día-de-semana por su cuenta. En vez de
+// eso, le damos la tabla ya resuelta y la regla de "nunca calcules tú mismo"
+// — mismo patrón ya probado en bookingSystemPrompt.js.
+const DAY_NAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+const MONTH_NAMES = [
+  "enero", "febrero", "marzo", "abril", "mayo", "junio",
+  "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+];
+
+function buildDateReferenceLines(tz) {
+  const nowMoment = moment().tz(tz);
+  const dow = nowMoment.day(); // 0=Dom … 6=Sáb
+
+  const fmtRef = (m) => `${m.format("YYYY-MM-DD")} (${DAY_NAMES[m.day()]} ${m.date()} de ${MONTH_NAMES[m.month()]})`;
+
+  const nextOccurrence = (targetDow) => {
+    let diff = targetDow - dow;
+    if (diff < 0) diff += 7;
+    return nowMoment.clone().add(diff, "days");
+  };
+
+  const refs = {
+    "hoy": nowMoment.clone(),
+    "mañana": nowMoment.clone().add(1, "days"),
+    "este domingo / el domingo": nextOccurrence(0),
+    "este lunes / el lunes": nextOccurrence(1),
+    "este martes / el martes": nextOccurrence(2),
+    "este miércoles / el miércoles": nextOccurrence(3),
+    "este jueves / el jueves": nextOccurrence(4),
+    "este viernes / el viernes": nextOccurrence(5),
+    "este sábado / el sábado": nextOccurrence(6),
+    "próxima semana (lunes)": nowMoment.clone().add(7 - dow + 1, "days"),
+    "en 2 semanas": nowMoment.clone().add(14, "days"),
+  };
+
+  return Object.entries(refs)
+    .map(([label, m]) => `  - "${label}" → ${fmtRef(m)}`)
+    .join("\n");
+}
+
 // ─── Punto de entrada: primera vez que detectamos intención ──────────────────
 
 export async function startDialogue(convo, org, intent) {
@@ -240,8 +282,9 @@ export async function continueDialogue(convo, org, adminReply) {
 // ─── LLM: orquestador del diálogo ───────────────────────────────────────────
 
 async function runDialogueAgent({ org, services, employees, clientConvText, adminConversation, clientPhone, clientInfo, clientAppointments = [] }) {
-  const now = moment().tz(org.timezone || "America/Bogota").format("dddd D [de] MMMM [de] YYYY, HH:mm");
   const tz = org.timezone || "America/Bogota";
+  const now = moment().tz(tz).format("dddd D [de] MMMM [de] YYYY, HH:mm");
+  const dateRefLines = buildDateReferenceLines(tz);
 
   const servicesList = services
     .map((s) => `• ${s.name} — ${s.duration}min — $${s.price} | id:${s._id}`)
@@ -271,7 +314,11 @@ async function runDialogueAgent({ org, services, employees, clientConvText, admi
   const systemPrompt = `Eres el asistente de agenda de AgenditApp para ${org.name}.
 Un cliente escribió al WhatsApp del negocio para agendar, cancelar o reprogramar una cita. Tu trabajo es confirmar los detalles con el administrador por WhatsApp y ejecutar la acción cuando todo esté confirmado.
 
-FECHA Y HORA ACTUAL (${org.timezone || "America/Bogota"}): ${now}
+FECHA Y HORA ACTUAL (${tz}): ${now}
+
+REFERENCIAS DE FECHAS PRE-CALCULADAS — zona horaria: ${tz}
+REGLA CRÍTICA: NUNCA calcules fechas tú mismo (ni "qué día cae el viernes", ni sumas de días). Cuando el cliente o el admin mencionen un día relativo ("el viernes", "mañana", "este lunes"...), busca la etiqueta correspondiente en esta lista y usa EXACTAMENTE el valor YYYY-MM-DD que aparece junto a ella — no lo recalcules ni lo ajustes.
+${dateRefLines}
 
 SERVICIOS DISPONIBLES (ÚNICAMENTE ESTOS — no inventes otros):
 ${servicesList || "(ninguno registrado)"}
