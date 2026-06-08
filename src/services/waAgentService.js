@@ -17,6 +17,16 @@ const analyzeDebounce = new Map();
 // ─── Entrada desde Baileys ───────────────────────────────────────────────────
 
 export async function processIncomingMessage({ orgPhone, clientPhone, fromMe, body, timestamp }) {
+  // El canal Meta entrega el teléfono de la org en su formato de despliegue
+  // (con espacios, ej. "+57 321 8104634"), mientras que `waPhone` se guarda en
+  // E.164 (ej. "+573218104634"). A diferencia de `normalizePhone` (que asume
+  // Colombia para números locales de 10 dígitos), aquí solo limpiamos el
+  // formato: el número que llega ya es internacional completo (Meta siempre
+  // incluye el código de país), así que adivinar el país sería incorrecto
+  // — p.ej. un número de Singapur (+65 + 8 dígitos = 10 dígitos) terminaría
+  // con un "+57" agregado por error. Esto también unifica `orgPhone` entre
+  // canales (Baileys/Meta) para evitar conversaciones duplicadas.
+  orgPhone = `+${orgPhone.replace(/\D/g, "")}`;
   const org = await Organization.findOne({ waPhone: orgPhone }).lean();
   if (!org) {
     console.warn(`[WaAgent] orgPhone no registrado: ${orgPhone}`);
