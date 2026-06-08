@@ -70,7 +70,7 @@ export async function handleMetaIncoming(req, res) {
   if (!body || !fromPhone) return;
 
   // ── Routing: ¿es respuesta del admin a AgenditApp, o mensaje de cliente a org Meta? ──
-  if (receivingPhoneNumberId === process.env.META_PHONE_NUMBER_ID) {
+  if (receivingPhoneNumberId === process.env.META_PLATFORM_PHONE_NUMBER_ID) {
     // Respuesta del admin al bot de AgenditApp
     // Primero intentar continuar un diálogo activo; si no hay ninguno, es confirmación
     // de agente_ia_activo → actualizar ventana a nivel de org
