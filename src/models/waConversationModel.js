@@ -81,6 +81,11 @@ const waConversationSchema = new mongoose.Schema(
 
     // true mientras esperamos que el admin responda la plantilla re_activacion_ia
     awaitingWindowReopen: { type: Boolean, default: false },
+
+    // Momento en que se envió la plantilla re_activacion_ia — usado para expirar
+    // la espera si el admin nunca responde (la plantilla no lleva contexto, así
+    // que es fácil que el admin la ignore sin saber que hay algo pendiente)
+    awaitingWindowReopenSince: { type: Date, default: null },
   },
   { timestamps: true }
 );

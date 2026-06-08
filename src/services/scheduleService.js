@@ -732,8 +732,6 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
     }
   }
   
-  console.log(`[DEBUG] Rango efectivo calculado: ${minutesToTime(startMin)} - ${minutesToTime(endMin)}`);
-  
   // 🔧 Recopilar TODOS los breaks relevantes (org + empleados asignados)
   const allBreaksSet = new Set();
   
@@ -774,9 +772,6 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
     })
     .sort((a, b) => a.startMin - b.startMin);
 
-  console.log(`[DEBUG] Horario org: ${orgSchedule.start} - ${orgSchedule.end}`);
-  console.log(`[DEBUG] Breaks combinados (org + empleados):`, sortedBreaks.map(b => `${minutesToTime(b.startMin)}-${minutesToTime(b.endMin)}`));
-
   // 🔧 Crear segmentos de tiempo (periodos sin breaks)
   const segments = [];
   let currentSegmentStart = startMin;
@@ -801,17 +796,12 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
     });
   }
 
-  console.log(`[DEBUG] Segmentos creados:`, segments.map(s => `${minutesToTime(s.start)}-${minutesToTime(s.end)}`));
-  console.log(`[DEBUG] Step: ${stepMinutes}min, TotalDuration: ${totalDuration}min`);
-  
   const blocks = [];
-  
+
   // 🔧 Iterar sobre cada segmento y generar bloques
   for (const segment of segments) {
-    console.log(`[DEBUG] Procesando segmento ${minutesToTime(segment.start)}-${minutesToTime(segment.end)}`);
     // Generar bloques en este segmento
     for (let currentMin = segment.start; currentMin <= segment.end - totalDuration; currentMin += stepMinutes) {
-    console.log(`[DEBUG]   Intentando bloque: ${minutesToTime(currentMin)} - ${minutesToTime(currentMin + totalDuration)}`);
     let blockValid = true;
     const intervals = [];
     
@@ -879,7 +869,6 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
         // El inicio debe estar dentro del rango, el fin puede coincidir exactamente con el cierre
         if (!isTimeInRange(slotStart, effectiveStart, effectiveEnd) ||
             !isTimeInRangeInclusive(slotEnd, effectiveStart, effectiveEnd)) {
-          console.log(`[DEBUG]       ❌ Fuera de rango empleado (${effectiveStart}-${effectiveEnd})`);
           blockValid = false;
           break;
         }
@@ -887,7 +876,6 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
         // 🔧 Solo verificar breaks del empleado (no de la organización)
         // Los breaks de la organización ya están excluidos en los segmentos
         if (employeeBreaks.length > 0 && isSlotInBreak(slotStart, service.duration, employeeBreaks, dayOfWeek)) {
-          console.log(`[DEBUG]       ❌ En break del empleado`);
           blockValid = false;
           break;
         }
@@ -908,7 +896,6 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
         }).length;
 
         if (overlapCount >= maxConcurrent) {
-          console.log(`[DEBUG]       ❌ Conflicto con cita existente (${overlapCount}/${maxConcurrent} simultáneas)`);
           blockValid = false;
           break;
         }
@@ -939,7 +926,6 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
         });
         
         if (!assigned) {
-          console.log(`[DEBUG]       ❌ No se pudo asignar empleado automáticamente`);
           blockValid = false;
           break;
         }
@@ -961,14 +947,11 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
       const blockStart = `${dateInTz.format('YYYY-MM-DD')}T${minutesToTime(currentMin)}:00`;
       const blockEnd = `${dateInTz.format('YYYY-MM-DD')}T${minutesToTime(slotMin)}:00`;
       
-      console.log(`[DEBUG]     ✅ Bloque ACEPTADO`);
       blocks.push({
         start: blockStart,
         end: blockEnd,
         intervals
       });
-    } else {
-      console.log(`[DEBUG]     ❌ Bloque RECHAZADO`);
     }
     } // Cierre del loop de bloques dentro del segmento
   } // Cierre del loop de segmentos

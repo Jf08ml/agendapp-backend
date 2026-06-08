@@ -95,6 +95,7 @@ export async function startDialogue(convo, org, intent) {
     await WaConversation.findByIdAndUpdate(convo._id, {
       status: "summary_sent",
       awaitingWindowReopen: true,
+      awaitingWindowReopenSince: new Date(),
     });
     return;
   }
@@ -190,6 +191,7 @@ export async function continueDialogue(convo, org, adminReply) {
     console.log(`[WaDialogue] (4) DIÁLOGO — admin reactivó la ventana de 24h — retomando diálogo de intención "${convo.detectedIntent?.type}" — conv: ${convo._id}`);
     await WaConversation.findByIdAndUpdate(convo._id, {
       awaitingWindowReopen: false,
+      awaitingWindowReopenSince: null,
       status: "intent_detected",
     });
     const freshConvo = await WaConversation.findById(convo._id).lean();

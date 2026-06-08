@@ -9,6 +9,14 @@ const client = new Anthropic();
 // Ventana de silencio: si no llega un mensaje nuevo en este tiempo, se analiza la conv
 const SILENCE_WINDOW_MS = 45_000;
 
+// Tiempo máximo esperando que el admin reactive la ventana de 24h respondiendo
+// la plantilla "re_activacion_ia". Esa plantilla no lleva contexto (Meta no
+// permite texto libre con la ventana cerrada), así que es fácil que el admin
+// la ignore sin saber que hay una solicitud pendiente — sin este timeout la
+// conversación queda atascada para siempre y bloquea cualquier solicitud nueva
+// del cliente (los mensajes nuevos se acumulan pero nunca se re-analizan).
+const AWAITING_REOPEN_TIMEOUT_MS = 3 * 60 * 60 * 1000; // 3 horas
+
 // Debounce en memoria: convId → timeoutHandle
 // Sobrevive reinicios del proceso (si el servidor se reinicia, la próxima vez
 // que llegue un mensaje de esa conv reinicia el timer igualmente)
@@ -39,6 +47,8 @@ export async function processIncomingMessage({ orgPhone, clientPhone, fromMe, bo
 
   const role = fromMe ? "org" : "client";
   const messageTs = timestamp ? new Date(Number(timestamp) * 1000) : new Date();
+
+  await expireStaleAwaitingReopen(orgPhone, clientPhone);
 
   const convo = await WaConversation.findOneAndUpdate(
     {
@@ -109,6 +119,34 @@ export async function processOrgResponse({ orgPhone, body }) {
   await continueDialogue(convo, org, body).catch((err) =>
     console.error(`[WaAgent] (4) RESPUESTA ADMIN — error procesando respuesta del admin — conv: ${convo._id}:`, err)
   );
+}
+
+// ─── Expiración de espera de reactivación de ventana ────────────────────────
+
+// Si una conversación lleva demasiado tiempo esperando que el admin reactive
+// la ventana de 24h (respondiendo la plantilla "re_activacion_ia") y nunca lo
+// hizo, la marcamos "expired" para liberar el slot — así un mensaje nuevo del
+// cliente puede crear/usar una conversación fresca y disparar un análisis real
+// en lugar de quedar enterrado detrás de una espera que nunca se va a resolver.
+async function expireStaleAwaitingReopen(orgPhone, clientPhone) {
+  const cutoff = new Date(Date.now() - AWAITING_REOPEN_TIMEOUT_MS);
+  const stale = await WaConversation.findOneAndUpdate(
+    {
+      orgPhone,
+      clientPhone,
+      status: "summary_sent",
+      awaitingWindowReopen: true,
+      awaitingWindowReopenSince: { $lte: cutoff },
+    },
+    { status: "expired" }
+  );
+
+  if (stale) {
+    console.log(
+      `[WaAgent] conv ${stale._id} expiró — el admin nunca reactivó la ventana de 24h ` +
+      `respondiendo "re_activacion_ia" (>${AWAITING_REOPEN_TIMEOUT_MS / 3_600_000}h sin respuesta) — se libera para nuevo análisis`
+    );
+  }
 }
 
 // ─── Ventana de silencio ─────────────────────────────────────────────────────
