@@ -69,6 +69,15 @@ export async function handleMetaIncoming(req, res) {
 
   if (!body || !fromPhone) return;
 
+  // Ignorar eco de los propios mensajes salientes de AgenditApp: cuando el bot le
+  // escribe al admin desde META_AGENDITAPP_PHONE, Meta también notifica ese mensaje
+  // como "entrante" en el número Meta de la org (coexistencia) — sin este guard se
+  // crea un bucle: el bot interpreta su propio mensaje como una solicitud de un
+  // "cliente" llamado +573506674787 y abre un diálogo consigo mismo.
+  if (process.env.META_AGENDITAPP_PHONE && fromPhone === process.env.META_AGENDITAPP_PHONE) {
+    return;
+  }
+
   // ── Routing: ¿es respuesta del admin a AgenditApp, o mensaje de cliente a org Meta? ──
   if (receivingPhoneNumberId === process.env.META_PLATFORM_PHONE_NUMBER_ID) {
     // Respuesta del admin al bot de AgenditApp
