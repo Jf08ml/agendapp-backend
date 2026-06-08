@@ -58,10 +58,16 @@ export async function processIncomingMessage({ orgPhone, clientPhone, fromMe, bo
     { upsert: true, new: true }
   );
 
-  console.log(`[WaAgent] Mensaje (${role}) — org: ${orgPhone}, cliente: ${clientPhone}`);
+  console.log(
+    `[WaAgent] (1) RECEPCIÓN — mensaje (${role}) — conv: ${convo._id}, status: ${convo.status}, ` +
+    `org: ${orgPhone}, cliente: ${clientPhone}, texto: "${body.slice(0, 100)}"`
+  );
 
   // Si ya hay un resumen enviado esperando respuesta, ignorar mensajes nuevos
-  if (convo.status === "summary_sent") return;
+  if (convo.status === "summary_sent") {
+    console.log(`[WaAgent] (1) RECEPCIÓN — conv ${convo._id} en espera de respuesta del admin, mensaje no dispara nuevo análisis`);
+    return;
+  }
 
   scheduleAnalysis(convo._id.toString(), orgPhone, clientPhone);
 }
@@ -84,7 +90,7 @@ export async function processOrgResponse({ orgPhone, body }) {
   }).lean();
 
   if (!org) {
-    console.warn(`[WaAgent] Respuesta de org sin conversación activa: ${orgPhone}`);
+    console.warn(`[WaAgent] (4) RESPUESTA ADMIN — no se encontró organización para el teléfono ${orgPhone} (variantes: ${phoneVariants.join(", ")})`);
     return;
   }
 
@@ -94,14 +100,14 @@ export async function processOrgResponse({ orgPhone, body }) {
   }).sort({ lastActivityAt: -1 });
 
   if (!convo) {
-    console.warn(`[WaAgent] Sin conversación pendiente para org: ${org._id}`);
+    console.warn(`[WaAgent] (4) RESPUESTA ADMIN — org "${org.name}" (${org._id}) respondió pero no hay ninguna conversación en estado "summary_sent" — el mensaje del admin se ignora`);
     return;
   }
 
-  console.log(`[WaAgent] Admin respondió: "${body}" — conv: ${convo._id}`);
+  console.log(`[WaAgent] (4) RESPUESTA ADMIN — "${body.slice(0, 100)}" — conv: ${convo._id}, org: ${org.name}`);
 
   await continueDialogue(convo, org, body).catch((err) =>
-    console.error("[WaAgent] Error en continueDialogue:", err)
+    console.error(`[WaAgent] (4) RESPUESTA ADMIN — error procesando respuesta del admin — conv: ${convo._id}:`, err)
   );
 }
 
@@ -111,32 +117,47 @@ function scheduleAnalysis(convId, orgPhone, clientPhone) {
   // Cancelar el timer anterior si llegó otro mensaje antes de los 45s
   if (analyzeDebounce.has(convId)) {
     clearTimeout(analyzeDebounce.get(convId));
+    console.log(`[WaAgent] (2) ANÁLISIS — temporizador reiniciado por nuevo mensaje — conv: ${convId}`);
   }
 
   const handle = setTimeout(async () => {
     analyzeDebounce.delete(convId);
     await runLLMAnalysis(convId).catch((err) =>
-      console.error("[WaAgent] Error en análisis LLM:", err)
+      console.error(`[WaAgent] (2) ANÁLISIS — error inesperado analizando conv ${convId}:`, err)
     );
   }, SILENCE_WINDOW_MS);
 
   analyzeDebounce.set(convId, handle);
-  console.log(`[WaAgent] Análisis programado en ${SILENCE_WINDOW_MS / 1000}s — conv: ${convId}`);
+  console.log(`[WaAgent] (2) ANÁLISIS — programado en ${SILENCE_WINDOW_MS / 1000}s de silencio — conv: ${convId}`);
 }
 
 // ─── Análisis LLM ────────────────────────────────────────────────────────────
 
 async function runLLMAnalysis(convId) {
   const convo = await WaConversation.findById(convId);
-  if (!convo) return;
-  if (convo.status === "summary_sent") return; // ya se notificó, no repetir
+  if (!convo) {
+    console.log(`[WaAgent] (2) ANÁLISIS — conversación ${convId} ya no existe (expiró/borrada), se omite`);
+    return;
+  }
+  if (convo.status === "summary_sent") {
+    console.log(`[WaAgent] (2) ANÁLISIS — conv ${convId} ya tiene resumen enviado, no se repite el análisis`);
+    return; // ya se notificó, no repetir
+  }
 
   // Necesitamos al menos un mensaje del cliente para analizar
   const clientMessages = convo.messages.filter((m) => m.role === "client");
-  if (clientMessages.length === 0) return;
+  if (clientMessages.length === 0) {
+    console.log(`[WaAgent] (2) ANÁLISIS — conv ${convId} sin mensajes del cliente todavía, se omite`);
+    return;
+  }
 
   const org = await Organization.findById(convo.organizationId).lean();
-  if (!org) return;
+  if (!org) {
+    console.warn(`[WaAgent] (2) ANÁLISIS — organización ${convo.organizationId} no encontrada — conv: ${convId}`);
+    return;
+  }
+
+  console.log(`[WaAgent] (2) ANÁLISIS — analizando intención del cliente con LLM — conv: ${convId}, org: ${org.name}`);
 
   const conversationText = convo.messages
     .map((m) => `${m.role === "client" ? "Cliente" : "Negocio"}: ${m.body}`)
@@ -173,11 +194,11 @@ Responde SOLO con JSON válido. No uses bloques de código, no uses markdown, no
   try {
     intent = JSON.parse(extractJSON(response.content[0].text));
   } catch {
-    console.error("[WaAgent] LLM no devolvió JSON válido:", response.content[0].text);
+    console.error(`[WaAgent] (2) ANÁLISIS — el LLM no devolvió JSON válido — conv: ${convId}:`, response.content[0].text);
     return;
   }
 
-  console.log(`[WaAgent] Intención detectada:`, intent);
+  console.log(`[WaAgent] (2) ANÁLISIS — resultado del LLM — conv: ${convId}:`, intent);
 
   const ACTIONABLE_INTENTS = {
     book_appointment: "book",
@@ -185,8 +206,16 @@ Responde SOLO con JSON válido. No uses bloques de código, no uses markdown, no
     reschedule_appointment: "reschedule",
   };
   const intentType = ACTIONABLE_INTENTS[intent.intent];
-  if (!intentType) return;
-  if (intent.confidence === "low") return;
+  if (!intentType) {
+    console.log(`[WaAgent] (2) ANÁLISIS — sin intención accionable ("${intent.intent}") — no se inicia diálogo — conv: ${convId}`);
+    return;
+  }
+  if (intent.confidence === "low") {
+    console.log(`[WaAgent] (2) ANÁLISIS — confianza baja, se descarta para evitar falsos positivos — conv: ${convId}`);
+    return;
+  }
+
+  console.log(`[WaAgent] (2) ANÁLISIS — intención accionable "${intentType}" (confianza: ${intent.confidence}) — pasando a diálogo con el admin — conv: ${convId}`);
 
   await WaConversation.findByIdAndUpdate(convId, {
     status: "intent_detected",

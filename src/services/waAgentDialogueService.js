@@ -32,16 +32,32 @@ function isAdminWindowOpen(convo, org) {
 export async function startDialogue(convo, org, intent) {
   const orgAdminPhone = normalizePhone(org.phoneNumber);
 
+  console.log(
+    `[WaDialogue] (3) DIÁLOGO — iniciando con admin ${orgAdminPhone} (org: ${org.name}) — ` +
+    `intención: ${intent?.intent || intent?.type || "?"} — conv: ${convo._id}`
+  );
+
   // Validar ventana de 24h antes de enviar texto libre
   if (!isAdminWindowOpen(convo, org)) {
-    console.log(`[WaDialogue] Ventana de 24h vencida — enviando plantilla re_activacion_ia al admin: ${orgAdminPhone}`);
-    await sendTemplateMessage(orgAdminPhone, "re_activacion_ia");
+    console.log(`[WaDialogue] (3) DIÁLOGO — ventana de 24h cerrada — enviando plantilla "re_activacion_ia" a ${orgAdminPhone} — conv: ${convo._id}`);
+    try {
+      const { messageId } = await sendTemplateMessage(orgAdminPhone, "re_activacion_ia");
+      console.log(`[WaDialogue] (3) DIÁLOGO — plantilla "re_activacion_ia" enviada — messageId: ${messageId} — conv: ${convo._id}`);
+    } catch (err) {
+      console.error(
+        `[WaDialogue] (3) DIÁLOGO — ERROR enviando plantilla "re_activacion_ia" a ${orgAdminPhone} — conv: ${convo._id}:`,
+        err.response?.data || err.message
+      );
+      throw err;
+    }
     await WaConversation.findByIdAndUpdate(convo._id, {
       status: "summary_sent",
       awaitingWindowReopen: true,
     });
     return;
   }
+
+  console.log(`[WaDialogue] (3) DIÁLOGO — ventana de 24h abierta — se puede enviar texto libre a ${orgAdminPhone} — conv: ${convo._id}`);
 
   const identifierField = org.clientFormConfig?.identifierField || "phone";
   const tz = org.timezone || "America/Bogota";
@@ -66,7 +82,12 @@ export async function startDialogue(convo, org, intent) {
     clientAppointments,
   });
 
-  if (!agentMessage) return;
+  if (!agentMessage) {
+    console.warn(`[WaDialogue] (3) DIÁLOGO — el LLM orquestador no devolvió una acción válida — no se contacta al admin — conv: ${convo._id}`);
+    return;
+  }
+
+  console.log(`[WaDialogue] (3) DIÁLOGO — LLM decidió acción "${agentMessage.action}" — conv: ${convo._id}`);
 
   if (agentMessage.action === "ask") {
     await sendAndRecord(convo, orgAdminPhone, agentMessage.message);
@@ -109,9 +130,11 @@ export async function startDialogue(convo, org, intent) {
 // ─── Continúa el diálogo cuando el admin responde ───────────────────────────
 
 export async function continueDialogue(convo, org, adminReply) {
+  console.log(`[WaDialogue] (4) DIÁLOGO — continuando con respuesta del admin: "${adminReply.slice(0, 100)}" — conv: ${convo._id}`);
+
   // Ignorar mensajes automáticos de bienvenida — el admin aún no respondió realmente
   if (isAutoReply(adminReply, org.name)) {
-    console.log("[WaDialogue] Mensaje automático ignorado, esperando respuesta real del admin");
+    console.log(`[WaDialogue] (4) DIÁLOGO — mensaje detectado como auto-respuesta de bienvenida, se ignora — conv: ${convo._id}`);
     return;
   }
 
@@ -122,14 +145,14 @@ export async function continueDialogue(convo, org, adminReply) {
 
   // Si veníamos esperando que el admin reabriera la ventana, relanzar el diálogo
   if (convo.awaitingWindowReopen) {
-    console.log(`[WaDialogue] Admin reactivó ventana — retomando diálogo de intención (conv: ${convo._id})`);
+    console.log(`[WaDialogue] (4) DIÁLOGO — admin reactivó la ventana de 24h — retomando diálogo de intención "${convo.detectedIntent?.type}" — conv: ${convo._id}`);
     await WaConversation.findByIdAndUpdate(convo._id, {
       awaitingWindowReopen: false,
       status: "intent_detected",
     });
     const freshConvo = await WaConversation.findById(convo._id).lean();
     await startDialogue(freshConvo, org, freshConvo.detectedIntent).catch((err) =>
-      console.error("[WaDialogue] Error relanzando diálogo tras reactivación:", err)
+      console.error(`[WaDialogue] (4) DIÁLOGO — error relanzando diálogo tras reactivación de ventana — conv: ${convo._id}:`, err)
     );
     return;
   }
@@ -165,7 +188,12 @@ export async function continueDialogue(convo, org, adminReply) {
     clientAppointments,
   });
 
-  if (!agentMessage) return;
+  if (!agentMessage) {
+    console.warn(`[WaDialogue] (4) DIÁLOGO — el LLM orquestador no devolvió una acción válida tras la respuesta del admin — conv: ${convo._id}`);
+    return;
+  }
+
+  console.log(`[WaDialogue] (4) DIÁLOGO — LLM decidió acción "${agentMessage.action}" — conv: ${convo._id}`);
 
   if (agentMessage.action === "reject") {
     await WaConversation.findByIdAndUpdate(convo._id, { status: "rejected" });
@@ -311,7 +339,7 @@ FORMATOS DE RESPUESTA POSIBLES:
     const jsonStr = stripped.slice(firstBrace, lastBrace + 1);
     return JSON.parse(jsonStr);
   } catch {
-    console.error("[WaDialogue] LLM no devolvió JSON válido:", raw);
+    console.error("[WaDialogue] el LLM orquestador no devolvió JSON válido:", raw);
     return null;
   }
 }
@@ -321,6 +349,8 @@ FORMATOS DE RESPUESTA POSIBLES:
 async function createAppointment(convo, org, agentData, orgAdminPhone, services) {
   const tz = org.timezone || "America/Bogota";
   const appointments = agentData.appointments || [];
+
+  console.log(`[WaDialogue] (6) EJECUCIÓN — admin confirmó: creando ${appointments.length} cita(s) — conv: ${convo._id}`);
 
   try {
     // Resolver/crear cliente
@@ -382,9 +412,9 @@ async function createAppointment(convo, org, agentData, orgAdminPhone, services)
       `✅ ${plural} exitosamente para ${client.name || convo.clientPhone}\n${resumen}`
     );
 
-    console.log(`[WaDialogue] ${appointments.length} cita(s) creada(s) — conv: ${convo._id}`);
+    console.log(`[WaDialogue] (6) EJECUCIÓN — ${appointments.length} cita(s) creada(s) exitosamente — conv: ${convo._id}`);
   } catch (err) {
-    console.error("[WaDialogue] Error creando cita(s):", err.message);
+    console.error(`[WaDialogue] (6) EJECUCIÓN — error creando cita(s) — conv: ${convo._id}:`, err.message);
     await sendTextMessage(
       orgAdminPhone,
       `❌ No pude crear la(s) cita(s): ${err.message}\nPor favor créalas manualmente en AgenditApp.`
@@ -400,6 +430,8 @@ async function cancelAppointmentViaAgent(convo, org, agentData, orgAdminPhone, c
   const target = clientAppointments.find((a) => a._id.toString() === agentData.appointmentId);
   const fecha = moment(target.startDate).tz(tz).format("ddd D/MM [a las] HH:mm");
   const resumen = `${target.service?.name || "?"} con ${target.employee?.names || "?"} el ${fecha}`;
+
+  console.log(`[WaDialogue] (6) EJECUCIÓN — admin confirmó: cancelando cita ${agentData.appointmentId} (${resumen}) — conv: ${convo._id}`);
 
   try {
     const result = await cancellationService.cancelAppointment(
@@ -419,9 +451,9 @@ async function cancelAppointmentViaAgent(convo, org, agentData, orgAdminPhone, c
     });
 
     await sendTextMessage(orgAdminPhone, `✅ Cita cancelada\n${resumen}`);
-    console.log(`[WaDialogue] Cita cancelada — conv: ${convo._id}`);
+    console.log(`[WaDialogue] (6) EJECUCIÓN — cita cancelada exitosamente — conv: ${convo._id}`);
   } catch (err) {
-    console.error("[WaDialogue] Error cancelando cita:", err.message);
+    console.error(`[WaDialogue] (6) EJECUCIÓN — error cancelando cita — conv: ${convo._id}:`, err.message);
     await sendTextMessage(
       orgAdminPhone,
       `❌ No pude cancelar la cita (${resumen}): ${err.message}\nPor favor cancélala manualmente en AgenditApp.`
@@ -436,6 +468,8 @@ async function rescheduleAppointmentViaAgent(convo, org, agentData, orgAdminPhon
   const tz = org.timezone || "America/Bogota";
   const target = clientAppointments.find((a) => a._id.toString() === agentData.appointmentId);
   const fechaActual = moment(target.startDate).tz(tz).format("ddd D/MM [a las] HH:mm");
+
+  console.log(`[WaDialogue] (6) EJECUCIÓN — admin confirmó: reprogramando cita ${agentData.appointmentId} (de ${fechaActual} a ${agentData.newStartDate}) — conv: ${convo._id}`);
 
   const newStart = moment.tz(agentData.newStartDate, "YYYY-MM-DDTHH:mm:ss", tz);
   if (!newStart.isValid()) {
@@ -480,9 +514,9 @@ async function rescheduleAppointmentViaAgent(convo, org, agentData, orgAdminPhon
       orgAdminPhone,
       `✅ Cita reprogramada\n${target.service?.name || "?"} con ${target.employee?.names || "?"}\nDe: ${fechaActual}\nA: ${fechaNueva}${advertencia}`
     );
-    console.log(`[WaDialogue] Cita reprogramada — conv: ${convo._id}`);
+    console.log(`[WaDialogue] (6) EJECUCIÓN — cita reprogramada exitosamente — conv: ${convo._id}`);
   } catch (err) {
-    console.error("[WaDialogue] Error reprogramando cita:", err.message);
+    console.error(`[WaDialogue] (6) EJECUCIÓN — error reprogramando cita — conv: ${convo._id}:`, err.message);
     await sendTextMessage(
       orgAdminPhone,
       `❌ No pude reprogramar la cita (${fechaActual} → ${fechaNueva}): ${err.message}\nPor favor hazlo manualmente en AgenditApp.`
@@ -627,11 +661,12 @@ function validateAppointmentId(agentMessage, clientAppointments) {
 }
 
 async function sendAndRecord(convo, orgAdminPhone, message) {
+  console.log(`[WaDialogue] (5) RESPUESTA — enviando a ${orgAdminPhone}: "${message.slice(0, 150)}" — conv: ${convo._id}`);
   const { messageId } = await sendTextMessage(orgAdminPhone, message);
   await WaConversation.findByIdAndUpdate(convo._id, {
     status: "summary_sent",
     metaMessageId: messageId,
     $push: { adminConversation: { role: "agent", body: message } },
   });
-  console.log(`[WaDialogue] Mensaje enviado al admin — conv: ${convo._id}`);
+  console.log(`[WaDialogue] (5) RESPUESTA — mensaje enviado al admin — messageId: ${messageId} — conv: ${convo._id}`);
 }
