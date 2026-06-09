@@ -69,6 +69,7 @@ Capacidades:
 
 Reglas:
 - Responde en español con mensajes CORTOS y directos para WhatsApp (máximo 5 líneas).
+- FORMATO: usa solo texto plano. Para resaltar algo escribe *texto* (un asterisco). NUNCA uses **doble asterisco**, # encabezados ni otros símbolos Markdown — WhatsApp los muestra como caracteres literales.
 - Usa emojis moderadamente para claridad (✅, ❌, 📅).
 - Cuando tengas los datos para ejecutar una acción, ejecuta la herramienta INMEDIATAMENTE — no anuncies que lo harás.
 - Convierte siempre horas a HH:mm (24h) y fechas a YYYY-MM-DD usando las referencias de arriba.
@@ -150,7 +151,7 @@ export async function processAdminCommand(org, messageBody) {
   }
 
   try {
-    await sendTextMessage(adminPhone, finalReply);
+    await sendTextMessage(adminPhone, toWhatsAppFormat(finalReply));
     console.log(`[WaAgentChat] Respuesta enviada — org: ${org.name}: "${finalReply.slice(0, 80)}"`);
   } catch (err) {
     console.error(`[WaAgentChat] Error enviando respuesta — org: ${org.name}:`, err.message);
@@ -163,4 +164,13 @@ function normalizeAdminPhone(phone) {
   if (digits.startsWith("57") && digits.length === 12) return `+${digits}`;
   if (digits.length === 10) return `+57${digits}`;
   return `+${digits}`;
+}
+
+// Convierte Markdown de Claude a formato WhatsApp:
+//   **negrita** → *negrita*   (WA usa un solo asterisco)
+//   ### encabezado → encabezado  (WA no tiene headers)
+function toWhatsAppFormat(text) {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, "*$1*")   // **bold** → *bold*
+    .replace(/^#{1,6}\s+/gm, "");         // ### heading → heading
 }
