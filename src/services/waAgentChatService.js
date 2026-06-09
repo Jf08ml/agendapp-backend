@@ -1,7 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 import moment from "moment-timezone";
+import { randomUUID } from "crypto";
 import { sendTextMessage } from "./metaApiService.js";
 import { claudeTools, executeTool } from "../chatbot/toolRegistry.js";
+import WaBotMessage from "../models/waBotMessageModel.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -13,7 +15,7 @@ const SESSION_TTL_MS = 30 * 60 * 1000;
 // Máximo de mensajes en el historial por sesión
 const MAX_HISTORY = 20;
 
-// Historial en memoria: orgId → { messages: [{role, content}], lastActivity }
+// Historial en memoria: orgId → { messages: [{role, content}], lastActivity, sessionId }
 const sessions = new Map();
 
 function getOrCreateSession(orgId) {
@@ -23,7 +25,7 @@ function getOrCreateSession(orgId) {
     sessions.delete(orgId);
   }
   if (!sessions.has(orgId)) {
-    sessions.set(orgId, { messages: [], lastActivity: now });
+    sessions.set(orgId, { messages: [], lastActivity: now, sessionId: randomUUID() });
   }
   const session = sessions.get(orgId);
   session.lastActivity = now;
@@ -106,6 +108,10 @@ export async function processAdminCommand(org, messageBody) {
   const session = getOrCreateSession(orgId);
   session.messages.push({ role: "user", content: messageBody });
 
+  WaBotMessage.create({ organizationId: org._id, sessionId: session.sessionId, role: "user", content: messageBody }).catch(
+    (err) => console.error("[WaAgentChat] Error guardando mensaje user:", err.message)
+  );
+
   const context = { organizationId: org._id, organization: org };
   const systemPrompt = buildSystemPrompt(org);
 
@@ -164,6 +170,10 @@ export async function processAdminCommand(org, messageBody) {
   if (session.messages.length > MAX_HISTORY) {
     session.messages = session.messages.slice(-MAX_HISTORY);
   }
+
+  WaBotMessage.create({ organizationId: org._id, sessionId: session.sessionId, role: "assistant", content: finalReply }).catch(
+    (err) => console.error("[WaAgentChat] Error guardando mensaje assistant:", err.message)
+  );
 
   try {
     await sendTextMessage(adminPhone, toWhatsAppFormat(finalReply));
