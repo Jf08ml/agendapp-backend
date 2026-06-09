@@ -15,6 +15,6 @@ export function normalizePhone(phone) {
 }
 
 // Mensajes de Baileys — no se procesan (Baileys = solo notificaciones salientes)
-export function processIncomingMessage() {
+export async function processIncomingMessage() {
   return;
 }
