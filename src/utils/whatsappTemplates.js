@@ -172,6 +172,18 @@ Has alcanzado tu meta de referidos en *{{organization}}*.
 
 Preséntate en tu próxima visita y reclama tu beneficio. ¡Gracias por recomendar nuestros servicios!`,
 
+      // ⏳ Reserva recibida, pendiente de aprobación
+      statusReservationPending: `⏳ ¡Hola, {{names}}!
+
+Hemos recibido tu solicitud de reserva en *{{organization}}*.
+
+📅 Fecha solicitada: {{date}}
+✨ Servicio(s): {{servicesList}}
+
+Tu reserva está *pendiente de confirmación*. Te notificaremos en cuanto sea aprobada.
+
+Si tienes alguna pregunta, responde a este mensaje. ¡Gracias!`,
+
       // 📚 Inscripción a clase confirmada (aprobación automática o manual)
       classEnrollmentConfirmed: `✅ ¡Hola, {{names}}!
 
@@ -384,6 +396,18 @@ Lamentamos informarte que tu reserva para el *${date}* en *${organization}* no p
 Si deseas reprogramar o tienes alguna pregunta, simplemente responde a este mensaje de WhatsApp y con gusto te ayudaremos.
 
 Gracias por tu comprensión. ¡Esperamos atenderte pronto! 😊`,
+
+  statusReservationPending: ({ names, date, organization, servicesList }) =>
+    `⏳ ¡Hola, ${names}!
+
+Hemos recibido tu solicitud de reserva en *${organization}*.
+
+📅 Fecha solicitada: ${date}
+✨ Servicio(s): ${servicesList}
+
+Tu reserva está *pendiente de confirmación*. Te notificaremos en cuanto sea aprobada.
+
+Si tienes alguna pregunta, responde a este mensaje. ¡Gracias!`,
 };
 
 export default whatsappTemplates;

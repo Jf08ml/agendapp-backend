@@ -13,13 +13,53 @@ import scheduleService from "../services/scheduleService.js";
 import employeeModel from "../models/employeeModel.js";
 import cancellationService from "../services/cancellationService.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
-import { waIntegrationService } from "../services/waIntegrationService.js";
+import whatsappService from "../services/sendWhatsappService.js";
 import { generateCancellationLink } from "../utils/cancellationUtils.js";
 import appointmentSeriesService from "../services/appointmentSeriesService.js";
 import appointmentModel from "../models/appointmentModel.js";
 import { auditLogService } from "../services/auditLogService.js";
 
 // ---------------------- helpers de notificación ----------------------
+
+// Notifica al CLIENTE que su reserva fue recibida y está pendiente de aprobación
+async function notifyClientPendingReservation(org, customerDetails, { startDate, serviceNames, timezone }) {
+  if (!customerDetails?.phone) return;
+  try {
+    const whatsappTemplate = await (await import("../models/whatsappTemplateModel.js")).default
+      .findOne({ organizationId: org._id });
+    if (whatsappTemplate?.enabledTypes?.statusReservationPending === false) return;
+
+    const date = startDate
+      ? new Intl.DateTimeFormat("es-ES", {
+          weekday: "long", day: "numeric", month: "long",
+          hour: "2-digit", minute: "2-digit", hour12: true,
+          timeZone: timezone || "America/Bogota",
+        }).format(new Date(startDate))
+      : "";
+    const servicesList = Array.isArray(serviceNames) ? serviceNames.join(", ") : (serviceNames || "");
+    const templateData = {
+      names: customerDetails.name || "Cliente",
+      date,
+      organization: org.name,
+      servicesList,
+    };
+    const renderedMsg = await whatsappTemplates.getRenderedTemplate(
+      org._id,
+      "statusReservationPending",
+      templateData
+    );
+    await whatsappService.sendNotification(
+      org._id,
+      customerDetails.phone,
+      "statusReservationPending",
+      templateData,
+      { fallbackMessage: renderedMsg }
+    );
+  } catch (e) {
+    console.warn("[notifyClientPendingReservation] Error enviando WA pendiente:", e?.message || e);
+  }
+}
+
 async function notifyNewBooking(org, customerDetails, { isAuto, multi }) {
   const title = isAuto
     ? "Nueva cita automática"
@@ -532,6 +572,14 @@ const reservationController = {
         cancellationLink = generateCancellationLink(newReservation._cancelToken, org);
       }
 
+      // Notificar al cliente que su reserva fue recibida
+      const singleServiceDoc = await serviceModel.findById(serviceId).lean();
+      await notifyClientPendingReservation(org, customerDetails, {
+        startDate: startDateAsDate,
+        serviceNames: singleServiceDoc?.name ? [singleServiceDoc.name] : [],
+        timezone,
+      });
+
       await notifyNewBooking(org, customerDetails, {
         isAuto: false,
         multi: false,
@@ -540,11 +588,11 @@ const reservationController = {
       return sendResponse(
         res,
         201,
-        { 
-          policy, 
-          outcome: "pending", 
+        {
+          policy,
+          outcome: "pending",
           reservation: newReservation,
-          cancellationLink, // Incluir link en respuesta
+          cancellationLink,
         },
         "Reserva creada exitosamente"
       );
@@ -560,7 +608,8 @@ const reservationController = {
 
   // POST /api/reservations/multi
   createMultipleReservations: async (req, res) => {
-    const { services, startDate, customerDetails, organizationId, clientPackageId, recurrencePattern } = req.body;
+    const { services, startDate, customerDetails, organizationId, clientPackageId, recurrencePattern, source } = req.body;
+    const bookingSource = ["ai_chatbot", "manual_booking", "admin"].includes(source) ? source : "manual_booking";
 
     if (!services || !Array.isArray(services) || services.length === 0) {
       return sendResponse(res, 400, null, "Debe enviar al menos un servicio.");
@@ -722,7 +771,8 @@ const reservationController = {
               status: "auto_approved",
               auto: true,
               appointmentId: appt?._id || null,
-              groupId: reservationGroupId, // 👥 Asignar el mismo groupId a todas
+              groupId: reservationGroupId,
+              source: bookingSource,
             };
 
             const newReservation = await reservationService.createReservation(
@@ -795,19 +845,19 @@ const reservationController = {
               cancellationLink,
             };
 
-            const msg = await whatsappTemplates.getRenderedTemplate(
-              organizationId,
-              'scheduleAppointmentBatch',
-              templateData
-            );
-
             if (customerDetails.phone) {
-              await waIntegrationService.sendMessage({
-                orgId: organizationId,
-                phone: customerDetails.phone,
-                message: msg,
-                image: null,
-              });
+              const renderedMsg = await whatsappTemplates.getRenderedTemplate(
+                organizationId,
+                'scheduleAppointmentBatch',
+                templateData
+              );
+              await whatsappService.sendNotification(
+                organizationId,
+                customerDetails.phone,
+                'scheduleAppointmentBatch',
+                templateData,
+                { fallbackMessage: renderedMsg }
+              );
             }
           } catch (error) {
             console.error('[createMultipleReservations] Error enviando WhatsApp:', error);
@@ -871,9 +921,10 @@ const reservationController = {
             customerDetails,
             organizationId,
             status: "pending",
-            groupId: reservationGroupId, // 👥 Asignar el mismo groupId a todas
-            errorMessage: errorToSave, // ⚠️ Guardar el error si vino del flujo auto
-            ...(clientPackageId ? { clientPackageId } : {}), // 📦 Paquete de sesiones
+            groupId: reservationGroupId,
+            errorMessage: errorToSave,
+            source: bookingSource,
+            ...(clientPackageId ? { clientPackageId } : {}),
           };
 
           const newReservation = await reservationService.createReservation(
@@ -889,6 +940,22 @@ const reservationController = {
 
         await session.commitTransaction();
         session.endSession();
+
+        // Resolver nombres de servicios para el mensaje al cliente
+        const pendingServiceNames = await Promise.all(
+          services.map(async (s) => {
+            try {
+              const svc = await serviceModel.findById(s.serviceId).lean();
+              return svc?.name || "Servicio";
+            } catch { return "Servicio"; }
+          })
+        );
+
+        await notifyClientPendingReservation(org, customerDetails, {
+          startDate: moment.tz(startDate, "YYYY-MM-DDTHH:mm:ss", timezone).toDate(),
+          serviceNames: pendingServiceNames,
+          timezone,
+        });
 
         await notifyNewBooking(org, customerDetails, {
           isAuto: false,

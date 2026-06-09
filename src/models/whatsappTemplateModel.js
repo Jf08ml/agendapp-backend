@@ -32,6 +32,10 @@ const whatsappTemplateSchema = new mongoose.Schema(
           type: Boolean,
           default: true,
         },
+        statusReservationPending: {
+          type: Boolean,
+          default: true,
+        },
         statusReservationApproved: {
           type: Boolean,
           default: false,
@@ -78,6 +82,7 @@ const whatsappTemplateSchema = new mongoose.Schema(
         recurringAppointmentSeries: true,
         reminder: true,
         secondReminder: true,
+        statusReservationPending: true,
         statusReservationApproved: false,
         statusReservationRejected: false,
         clientConfirmationAck: true,
@@ -106,6 +111,10 @@ const whatsappTemplateSchema = new mongoose.Schema(
       default: null,
     },
     secondReminder: {
+      type: String,
+      default: null,
+    },
+    statusReservationPending: {
       type: String,
       default: null,
     },

@@ -193,13 +193,21 @@ const whatsappService = {
         console.error(`[sendNotification] Meta template error for "${templateType}":`, err.message);
       }
 
-      // Fall back to free text if template not available/approved
+      // Fallback 1: Baileys en coexistencia (mismo número, siempre funciona)
+      if (org.clientIdWhatsapp) {
+        console.warn(`[sendNotification] Meta template no disponible, usando Baileys (coexistencia) para "${templateType}" org ${org._id}`);
+        const msg = opts.fallbackMessage || await whatsappTemplates.getRenderedTemplate(organizationId, templateType, data);
+        const payload = { clientId: org.clientIdWhatsapp, phone: normalizedPhone, message: msg };
+        return this.sendViaMultiSession(payload, opts);
+      }
+
+      // Fallback 2: texto libre Meta (puede fallar si no hay ventana de 24h)
       if (opts.fallbackMessage) {
-        console.warn(`[sendNotification] Falling back to free text for "${templateType}" on org ${org._id}`);
+        console.warn(`[sendNotification] Fallback a texto libre Meta para "${templateType}" org ${org._id}`);
         return metaSendText(org, normalizedPhone, opts.fallbackMessage);
       }
 
-      console.warn(`[sendNotification] No template and no fallback for "${templateType}" on org ${org._id} — skipping`);
+      console.warn(`[sendNotification] Sin template ni fallback para "${templateType}" org ${org._id} — omitiendo`);
       return null;
     }
 
@@ -260,9 +268,17 @@ const whatsappService = {
         console.error(`[sendWhatsappStatusReservation] Meta template error:`, err.message);
       }
 
-      // Fallback to free text for Meta
+      // Fallback 1: Baileys en coexistencia
+      if (org.clientIdWhatsapp) {
+        console.warn(`[sendWhatsappStatusReservation] Meta template no disponible, usando Baileys (coexistencia) para "${templateType}" org ${org._id}`);
+        const msg = await whatsappTemplates.getRenderedTemplate(org, templateType, reservationDetails);
+        const payload = { clientId: org.clientIdWhatsapp, phone: normalizedPhone, message: msg };
+        return this.sendViaMultiSession(payload, opts);
+      }
+
+      // Fallback 2: texto libre Meta
       const fallbackMsg = await whatsappTemplates.getRenderedTemplate(org, templateType, reservationDetails);
-      console.warn(`[sendWhatsappStatusReservation] Falling back to free text for "${templateType}" on org ${org._id}`);
+      console.warn(`[sendWhatsappStatusReservation] Fallback a texto libre Meta para "${templateType}" org ${org._id}`);
       return metaSendText(org, normalizedPhone, fallbackMsg);
     }
 

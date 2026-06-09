@@ -76,6 +76,12 @@ const reservationSchema = new mongoose.Schema(
       ref: "ClientPackage",
       default: null,
     },
+    // 📊 Origen de la reserva
+    source: {
+      type: String,
+      enum: ["ai_chatbot", "manual_booking", "admin"],
+      default: "manual_booking",
+    },
     // 🔁 Info de recurrencia (solo en la primera reserva del grupo recurrente)
     recurrenceInfo: {
       seriesId: { type: String },

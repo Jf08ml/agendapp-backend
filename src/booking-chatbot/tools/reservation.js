@@ -27,6 +27,16 @@ async function resolveEmployeeId(value, organizationId) {
   return found ? found._id.toString() : null;
 }
 
+// Auto-asigna el primer empleado activo que ofrece el servicio (fallback cuando el AI no especificó empleado).
+async function autoAssignEmployee(serviceId, organizationId) {
+  const found = await Employee.findOne({
+    organizationId,
+    isActive: true,
+    services: serviceId,
+  }).lean();
+  return found ? found._id.toString() : null;
+}
+
 // Esta tool no crea la reserva directamente — prepara el payload para que el
 // frontend lo confirme y llame al endpoint /api/reservations/multi existente.
 export const prepareReservation = {
@@ -37,7 +47,7 @@ export const prepareReservation = {
     services: {
       type: "array",
       description:
-        "Array de servicios. Cada item debe tener serviceId (usa SIEMPRE el campo 'id' que devolvió get_services, no el nombre) y employeeId (null si no aplica).",
+        "Array de servicios. Cada item: { serviceId, employeeId }. REGLA CRÍTICA: serviceId SIEMPRE debe ser el campo 'id' exacto que devolvió get_services. employeeId SIEMPRE debe ser el campo 'id' exacto que devolvió get_employees_for_service — NUNCA el nombre. Solo usa null si el cliente no expresó preferencia de profesional en ningún momento de la conversación.",
       items: { type: "object" },
       required: true,
     },
@@ -101,7 +111,8 @@ export const prepareReservation = {
       if (!serviceId) {
         return { success: false, error: `No se encontró el servicio: ${s.serviceId}. Usa el campo 'id' exacto que devolvió get_services.` };
       }
-      const employeeId = await resolveEmployeeId(s.employeeId, organizationId);
+      let employeeId = await resolveEmployeeId(s.employeeId, organizationId);
+      if (!employeeId) employeeId = await autoAssignEmployee(serviceId, organizationId);
       resolvedServices.push({ serviceId, employeeId });
     }
 

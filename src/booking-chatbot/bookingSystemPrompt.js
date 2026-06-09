@@ -129,6 +129,7 @@ PASO 6 — CONFIRMAR
   · Servicio(s), profesional (si aplica), fecha, hora, nombre del cliente.
 - Pregunta: "¿Todo está correcto? ¿Confirmo tu reserva?"
 - Cuando el cliente diga SÍ, llama prepare_reservation con todos los datos.
+- CRÍTICO: si durante la conversación se identificó un profesional para algún servicio, el employeeId en prepare_reservation DEBE ser el campo 'id' exacto que devolvió get_employees_for_service — nunca el nombre, nunca null.
 - IMPORTANTE: llama prepare_reservation PRIMERO. Cuando recibas el resultado exitoso de la herramienta, di ÚNICAMENTE:
   "¡Listo! Toca el botón **'Sí, confirmar'** para finalizar tu reserva."
 - NO digas ese mensaje antes de llamar la herramienta, y NO digas que la reserva ya fue creada, confirmada ni procesada — eso ocurre solo cuando el cliente toca el botón.
