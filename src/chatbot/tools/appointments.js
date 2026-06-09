@@ -4,6 +4,7 @@ import Employee from "../../models/employeeModel.js";
 import Service from "../../models/serviceModel.js";
 import appointmentService from "../../services/appointmentService.js";
 import cancellationService from "../../services/cancellationService.js";
+import clientService from "../../services/clientService.js";
 import moment from "moment-timezone";
 
 const CANCELLED_STATUSES = ["cancelled", "cancelled_by_customer", "cancelled_by_admin"];
@@ -272,16 +273,16 @@ Para dateFrom/dateTo acepta: "today", "yesterday", "this_week", "last_week", "th
     description: `Crea una o varias citas para un cliente. Si son varias, envía un único mensaje de WhatsApp con el resumen completo (servicios, profesionales y horarios).
 Úsalo cuando el usuario quiera agendar citas: una sola o varias con distintos servicios, profesionales o días.
 Antes de crear verifica solapamientos con citas existentes del profesional — avisa si los hay pero crea igual salvo que el usuario indique lo contrario.
-Requiere al menos clientName o clientPhone para identificar al cliente.`,
+Si el cliente no existe y se proporciona clientPhone, se crea automáticamente. Si no existe y solo hay clientName, pide el teléfono.`,
     parameters: {
       clientName: {
         type: "string",
-        description: "Nombre del cliente (búsqueda parcial). Requerido si no se proporciona clientPhone.",
+        description: "Nombre del cliente (búsqueda parcial). Si el cliente no existe y se proporciona clientPhone, se usa como nombre al crearlo.",
         required: false,
       },
       clientPhone: {
         type: "string",
-        description: "Teléfono del cliente con código de país (ej: +573001234567). Tiene prioridad sobre clientName.",
+        description: "Teléfono del cliente con código de país (ej: +573001234567). Tiene prioridad sobre clientName. Si el cliente no existe, se crea automáticamente con este teléfono.",
         required: false,
       },
       appointments: {
@@ -309,8 +310,9 @@ Requiere al menos clientName o clientPhone para identificar al cliente.`,
       const { organizationId, organization } = context;
       const timezone = organization.timezone || "America/Bogota";
 
-      // 1. Buscar cliente
+      // 1. Buscar cliente (o crear si no existe y hay teléfono)
       let clientDoc = null;
+      let clientCreated = false;
       if (params.clientPhone) {
         clientDoc = await Client.findOne({
           organizationId,
@@ -324,8 +326,19 @@ Requiere al menos clientName o clientPhone para identificar al cliente.`,
         });
       }
       if (!clientDoc) {
-        const term = params.clientPhone || params.clientName;
-        return { success: false, error: `No se encontró ningún cliente con "${term}". Verifica el nombre o teléfono.` };
+        if (params.clientPhone) {
+          clientDoc = await clientService.createClient({
+            name: params.clientName?.trim() || `Cliente ${params.clientPhone}`,
+            phoneNumber: params.clientPhone,
+            organizationId,
+          });
+          clientCreated = true;
+        } else {
+          return {
+            success: false,
+            error: `No se encontró ningún cliente con el nombre "${params.clientName}". Proporciona el teléfono (clientPhone) para crearlo automáticamente.`,
+          };
+        }
       }
 
       // 2. Resolver servicios, empleados y horarios
@@ -434,6 +447,7 @@ Requiere al menos clientName o clientPhone para identificar al cliente.`,
         citasCreadas: resolved.length,
         resumen,
         whatsappEnviado: true,
+        ...(clientCreated && { clienteCreado: true }),
         ...(warnings.length > 0 && { advertencias: warnings }),
       };
     },
@@ -598,6 +612,172 @@ Busca la cita por criterios (cliente, fecha, servicio, profesional). Si encuentr
         success: true,
         action: "delete",
         resumen,
+      };
+    },
+  },
+
+  {
+    name: "reschedule_appointment",
+    description: `Reprograma una cita existente a una nueva fecha y hora.
+Úsalo cuando el usuario diga "reprograma", "cambia la fecha", "mueve la cita" de un cliente.
+Busca la cita por cliente, fecha actual, servicio o profesional. Si encuentra más de una, devuelve la lista para que el usuario especifique.
+Si hay solapamiento en el nuevo horario, lo avisa pero reprograma igual.`,
+    parameters: {
+      clientName: {
+        type: "string",
+        description: "Nombre parcial del cliente cuya cita se quiere reprogramar.",
+        required: false,
+      },
+      clientPhone: {
+        type: "string",
+        description: "Teléfono del cliente (con código de país). Prioridad sobre clientName.",
+        required: false,
+      },
+      date: {
+        type: "string",
+        description: "Fecha actual de la cita (YYYY-MM-DD o preset today/tomorrow/this_week) para identificarla. Opcional pero ayuda a afinar.",
+        required: false,
+      },
+      serviceName: {
+        type: "string",
+        description: "Nombre parcial del servicio para afinar la búsqueda (opcional).",
+        required: false,
+      },
+      employeeName: {
+        type: "string",
+        description: "Nombre parcial del profesional para afinar la búsqueda (opcional).",
+        required: false,
+      },
+      newDate: {
+        type: "string",
+        description: "Nueva fecha en formato YYYY-MM-DD.",
+        required: true,
+      },
+      newTime: {
+        type: "string",
+        description: "Nueva hora en formato HH:mm (24h). Ej: 14:30 para las 2:30 PM.",
+        required: true,
+      },
+      notes: {
+        type: "string",
+        description: "Nota opcional para agregar a la cita al reprogramarla.",
+        required: false,
+      },
+    },
+    handler: async (params, context) => {
+      const { organizationId, organization } = context;
+      const timezone = organization.timezone || "America/Bogota";
+
+      const filter = {
+        organizationId,
+        status: { $nin: CANCELLED_STATUSES },
+      };
+
+      if (params.clientPhone || params.clientName) {
+        const clientQuery = params.clientPhone
+          ? { organizationId, $or: [{ phone_e164: params.clientPhone }, { phoneNumber: params.clientPhone }] }
+          : { organizationId, name: { $regex: params.clientName, $options: "i" } };
+        const clients = await Client.find(clientQuery).select("_id");
+        if (clients.length === 0) {
+          const term = params.clientPhone || params.clientName;
+          return { success: false, error: `No se encontró ningún cliente con "${term}".` };
+        }
+        filter.client = { $in: clients.map((c) => c._id) };
+      }
+
+      if (params.date) {
+        const now = moment.tz(timezone);
+        const presets = {
+          today: [now.clone().startOf("day"), now.clone().endOf("day")],
+          tomorrow: [now.clone().add(1, "day").startOf("day"), now.clone().add(1, "day").endOf("day")],
+          this_week: [now.clone().startOf("isoWeek"), now.clone().endOf("isoWeek")],
+          next_week: [now.clone().add(1, "week").startOf("isoWeek"), now.clone().add(1, "week").endOf("isoWeek")],
+        };
+        const range = presets[params.date] || (() => {
+          const d = moment.tz(params.date, "YYYY-MM-DD", timezone);
+          return d.isValid() ? [d.startOf("day"), d.clone().endOf("day")] : null;
+        })();
+        if (!range) return { success: false, error: `Fecha inválida: "${params.date}". Usa YYYY-MM-DD o presets.` };
+        filter.startDate = { $gte: range[0].toDate(), $lte: range[1].toDate() };
+      }
+
+      if (params.serviceName) {
+        const svcs = await Service.find({ organizationId, name: { $regex: params.serviceName, $options: "i" }, isActive: true }).select("_id");
+        if (svcs.length === 0) return { success: false, error: `No se encontró el servicio "${params.serviceName}".` };
+        filter.service = { $in: svcs.map((s) => s._id) };
+      }
+
+      if (params.employeeName) {
+        const emps = await Employee.find({ organizationId, names: { $regex: params.employeeName, $options: "i" }, isActive: true }).select("_id");
+        if (emps.length === 0) return { success: false, error: `No se encontró el profesional "${params.employeeName}".` };
+        filter.employee = { $in: emps.map((e) => e._id) };
+      }
+
+      const appointments = await Appointment.find(filter)
+        .populate("client", "name")
+        .populate("service", "name")
+        .populate("employee", "names")
+        .sort({ startDate: 1 })
+        .limit(10);
+
+      if (appointments.length === 0) {
+        return { success: false, error: "No se encontraron citas con esos criterios. Intenta con más detalles." };
+      }
+
+      if (appointments.length > 1) {
+        const lista = appointments.map((a) => {
+          const fecha = moment(a.startDate).tz(timezone).format("DD/MM/YYYY [a las] HH:mm");
+          return `• ${a.client?.name || "?"} — ${a.service?.name || "?"} con ${a.employee?.names || "?"} el ${fecha} (ID: ${a._id})`;
+        });
+        return {
+          success: false,
+          multipleFound: true,
+          message: `Encontré ${appointments.length} citas. ¿A cuál te refieres?`,
+          citas: lista,
+        };
+      }
+
+      const appt = appointments[0];
+      const newStart = moment.tz(`${params.newDate}T${params.newTime}:00`, "YYYY-MM-DDTHH:mm:ss", timezone);
+      if (!newStart.isValid()) {
+        return { success: false, error: `Fecha u hora inválida: "${params.newDate} ${params.newTime}". Usa YYYY-MM-DD y HH:mm.` };
+      }
+
+      const duracionMs = new Date(appt.endDate).getTime() - new Date(appt.startDate).getTime();
+      const newEnd = moment(new Date(newStart.toDate().getTime() + Math.max(duracionMs, 0))).tz(timezone);
+
+      const overlapping = await Appointment.find({
+        _id: { $ne: appt._id },
+        employee: appt.employee?._id,
+        status: { $nin: CANCELLED_STATUSES },
+        startDate: { $lt: newEnd.toDate() },
+        endDate: { $gt: newStart.toDate() },
+      })
+        .populate("client", "name")
+        .populate("service", "name");
+
+      const warnings = overlapping.map((o) =>
+        `${o.service?.name || "?"} con ${o.client?.name || "?"} a las ${moment(o.startDate).tz(timezone).format("HH:mm")}`
+      );
+
+      const fechaAnterior = moment(appt.startDate).tz(timezone).format("DD/MM/YYYY [a las] HH:mm");
+      const fechaNueva = newStart.format("DD/MM/YYYY [a las] HH:mm");
+
+      await appointmentService.updateAppointment(appt._id.toString(), {
+        startDate: newStart.format("YYYY-MM-DDTHH:mm:ss"),
+        endDate: newEnd.format("YYYY-MM-DDTHH:mm:ss"),
+        organizationId,
+        notes: params.notes || appt.notes,
+      });
+
+      return {
+        success: true,
+        resumen: `${appt.service?.name || "?"} de ${appt.client?.name || "?"} con ${appt.employee?.names || "?"}`,
+        de: fechaAnterior,
+        a: fechaNueva,
+        ...(warnings.length > 0 && {
+          advertencia: `${appt.employee?.names || "El profesional"} ya tiene cita(s) en ese horario: ${warnings.join(", ")}`,
+        }),
       };
     },
   },

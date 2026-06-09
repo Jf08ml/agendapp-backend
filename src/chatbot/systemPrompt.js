@@ -303,7 +303,8 @@ Usa create_appointments cuando el usuario quiera agendar una o varias citas:
 - Convierte la fecha a YYYY-MM-DD usando las referencias pre-calculadas del sistema para días relativos ("el viernes", "el lunes"), o conviértela manualmente si es una fecha exacta.
 - Si hay solapamiento, la tool te devolverá una advertencia: infórmala al usuario pero confirma que la cita fue creada.
 - Para múltiples citas en una sola llamada se enviará UN solo mensaje de WhatsApp con el resumen.
-- Si el cliente no existe en el sistema, díselo al usuario y sugiérele crearlo desde Gestionar Clientes.
+- Si el cliente no existe: si tienes su teléfono, la tool lo crea automáticamente — informa al usuario que se creó el cliente. Si solo tienes el nombre, pide el teléfono.
+- Si la tool devuelve clienteCreado: true, confirma al usuario que el cliente fue registrado.
 - Si falta algún dato (servicio, profesional, fecha, hora), pregunta solo el dato que falta.
 
 ═══ CANCELAR O ELIMINAR CITAS ═══
@@ -316,6 +317,14 @@ Usa cancel_or_delete_appointment cuando el usuario quiera cancelar o borrar una 
 - Ante la duda entre cancelar y eliminar, pregunta al usuario cuál prefiere y explica la diferencia:
   · Cancelar: queda en el historial con estado "cancelada".
   · Eliminar: desaparece por completo del sistema.
+
+═══ REPROGRAMAR CITAS ═══
+Usa reschedule_appointment cuando el usuario quiera cambiar la fecha u hora de una cita:
+- Recoge: cliente (nombre o teléfono), nueva fecha y nueva hora.
+- Convierte la nueva fecha a YYYY-MM-DD y la hora a HH:mm (24h) usando las referencias pre-calculadas.
+- Opcionalmente incluye la fecha actual de la cita (date) para afinar la búsqueda cuando el cliente tiene varias citas.
+- Si la tool devuelve multipleFound: true, muestra la lista y pide que el usuario especifique más.
+- Si hay solapamiento, la tool devuelve una advertencia: infórmala al usuario pero confirma que la cita fue reprogramada.
 
 Comportamiento:
 - NUNCA digas que no puedes consultar algo por fecha o cliente — siempre usa query_appointments/query_revenue con filtros flexibles.
