@@ -1,4 +1,5 @@
-import { processIncomingMessage, processOrgResponse, sanitizePhone } from "../services/waAgentService.js";
+import { processIncomingMessage, sanitizePhone } from "../services/waAgentService.js";
+import { processAdminCommand } from "../services/waAgentChatService.js";
 import { validateMetaSignature } from "../services/metaApiService.js";
 import Organization from "../models/organizationModel.js";
 import { disconnectOrg } from "../services/metaConnectService.js";
@@ -25,7 +26,9 @@ export function handleMetaVerify(req, res) {
 
 /**
  * POST /api/wa-agent/meta-incoming
- * Recibe mensajes de respuesta de la org desde Meta Business API.
+ * Recibe mensajes desde Meta Business API.
+ * - Si llegan al número de plataforma de AgenditApp → comando del admin al bot
+ * - Si llegan al número Meta de una org → ignorado (ya no monitoreamos clientes)
  */
 export async function handleMetaIncoming(req, res) {
   // Meta exige 200 rápido o reintenta — respondemos antes de procesar
@@ -69,51 +72,33 @@ export async function handleMetaIncoming(req, res) {
 
   if (!body || !fromPhone) return;
 
-  // Ignorar eco de los propios mensajes salientes de AgenditApp: cuando el bot le
-  // escribe al admin desde META_AGENDITAPP_PHONE, Meta también notifica ese mensaje
-  // como "entrante" en el número Meta de la org (coexistencia) — sin este guard se
-  // crea un bucle: el bot interpreta su propio mensaje como una solicitud de un
-  // "cliente" llamado +573506674787 y abre un diálogo consigo mismo.
+  // Ignorar eco de los propios mensajes salientes de AgenditApp
   if (process.env.META_AGENDITAPP_PHONE && fromPhone === process.env.META_AGENDITAPP_PHONE) {
     return;
   }
 
-  // ── Routing: ¿es respuesta del admin a AgenditApp, o mensaje de cliente a org Meta? ──
+  // ── Routing ──────────────────────────────────────────────────────────────────
   if (receivingPhoneNumberId === process.env.META_PLATFORM_PHONE_NUMBER_ID) {
-    // Respuesta del admin al bot de AgenditApp
-    // Primero intentar continuar un diálogo activo; si no hay ninguno, es confirmación
-    // de agente_ia_activo → actualizar ventana a nivel de org
-    processOrgResponse({ orgPhone: fromPhone, body }).catch((err) =>
-      console.error("[WaAgent] Error procesando respuesta de org:", err)
-    );
-
-    // Registrar contacto a nivel de org para la ventana de 24h
-    // phoneNumber puede no tener código de país, waPhone suele estar en E.164
+    // El admin escribió al número de AgenditApp → comando directo al bot
     const phoneVariants = [fromPhone, fromPhone.replace(/^\+/, "")];
-    Organization.findOneAndUpdate(
-      { $or: [
+    const org = await Organization.findOne({
+      $or: [
         { phoneNumber: { $in: phoneVariants } },
         { waPhone: { $in: phoneVariants } },
-      ]},
-      { agentAdminLastContactAt: new Date() }
-    ).catch((err) => console.error("[WaAgent] Error actualizando agentAdminLastContactAt:", err));
-  } else {
-    // Mensaje de cliente al número Meta de una org → detectar intención
-    const org = await Organization.findOne({ metaPhoneNumberId: receivingPhoneNumberId }).lean();
+      ],
+      waAgentEnabled: true,
+    }).lean();
+
     if (!org) {
-      console.warn(`[WaAgent] metaPhoneNumberId no registrado: ${receivingPhoneNumberId}`);
+      console.warn(`[WaAgent] Mensaje al número de AgenditApp desde teléfono no registrado como admin: ${fromPhone}`);
       return;
     }
-    if (!org.waAgentEnabled) return;
 
-    processIncomingMessage({
-      orgPhone: org.metaPhone || receivingPhoneNumberId,
-      clientPhone: fromPhone,
-      fromMe: false,
-      body,
-      timestamp: message.timestamp,
-    }).catch((err) => console.error("[WaAgent] Error procesando mensaje Meta entrante:", err));
+    processAdminCommand(org, body).catch((err) =>
+      console.error("[WaAgent] Error procesando comando del admin vía Meta:", err)
+    );
   }
+  // Mensajes de clientes a números Meta de orgs → no se procesan
 }
 
 // ─── Baileys Webhook ──────────────────────────────────────────────────────────
@@ -121,6 +106,7 @@ export async function handleMetaIncoming(req, res) {
 /**
  * POST /api/wa-agent/message
  * Recibe mensajes desde el microservicio de Baileys.
+ * Solo procesa mensajes del admin (fromMe: true).
  * Autenticado con shared secret en header X-WA-Agent-Secret.
  */
 export async function handleBaileysMessage(req, res) {
@@ -132,24 +118,21 @@ export async function handleBaileysMessage(req, res) {
   // Responder inmediatamente — Baileys no debe esperar el procesamiento
   res.status(200).json({ ok: true });
 
-  const { orgPhone, clientPhone, fromMe, body, timestamp } = req.body;
+  const { orgPhone, clientPhone, fromMe, body } = req.body;
 
   const cleanClientPhone = sanitizePhone(clientPhone); // strip @lid, @s.whatsapp.net, etc.
 
-  console.log("[WaAgent] Payload recibido de Baileys:", { orgPhone, clientPhone: cleanClientPhone, fromMe, body: body?.slice(0, 50) });
-
-  if (!orgPhone || !cleanClientPhone || !body) {
+  if (!orgPhone || !body) {
     console.warn("[WaAgent] Payload incompleto — ignorado");
     return;
   }
 
   // Ignorar mensajes donde el "cliente" es el propio número de AgenditApp
-  // (Baileys lee los mensajes que AgenditApp le envía a la org como mensajes entrantes)
   if (process.env.META_AGENDITAPP_PHONE && cleanClientPhone === process.env.META_AGENDITAPP_PHONE) {
     return;
   }
 
-  processIncomingMessage({ orgPhone, clientPhone: cleanClientPhone, fromMe, body, timestamp }).catch((err) =>
+  processIncomingMessage({ orgPhone, fromMe, body }).catch((err) =>
     console.error("[WaAgent] Error procesando mensaje de Baileys:", err)
   );
 }
