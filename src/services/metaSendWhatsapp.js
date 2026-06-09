@@ -83,7 +83,7 @@ function buildMetaVarMap(data) {
     direccion:            data.address            ?? "",
     servicio:             data.service            ?? "",
     lista_servicios:      data.servicesList ?? data.services_list ?? "",
-    profesional:          data.employee           ?? "",
+    profesional:          data.employee           || "Nuestro equipo",
     enlace_cancelacion:   data.cancellationLink   ?? "",
     enlace_gestion:       data.manage_block       ?? "",
     lista_citas:          data.appointments_list ?? data.appointmentsList ?? "",
@@ -124,7 +124,8 @@ function buildComponents(metaTemplateName, data) {
   const varMap = buildMetaVarMap(data);
   const parameters = order.map((varName) => ({
     type: "text",
-    text: String(varMap[varName] ?? ""),
+    // Meta rejects empty strings with #131008 — use a space as minimum fallback
+    text: String(varMap[varName] ?? "") || " ",
   }));
 
   return [{ type: "body", parameters }];

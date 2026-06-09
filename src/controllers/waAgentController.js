@@ -1,4 +1,7 @@
-import { processIncomingMessage, sanitizePhone } from "../services/waAgentService.js";
+import {
+  processIncomingMessage,
+  sanitizePhone,
+} from "../services/waAgentService.js";
 import { processAdminCommand } from "../services/waAgentChatService.js";
 import { validateMetaSignature } from "../services/metaApiService.js";
 import Organization from "../models/organizationModel.js";
@@ -48,32 +51,53 @@ export async function handleMetaIncoming(req, res) {
   const message = change?.messages?.[0];
 
   // account_update: cliente se desconectó de la API desde su WA Business App
-  if (changeObj?.field === "account_update" && change?.event === "PARTNER_REMOVED") {
-    const phone = change.phone_number ? `+${String(change.phone_number).replace(/\D/g, "")}` : null;
+  if (
+    changeObj?.field === "account_update" &&
+    change?.event === "PARTNER_REMOVED"
+  ) {
+    const phone = change.phone_number
+      ? `+${String(change.phone_number).replace(/\D/g, "")}`
+      : null;
     if (phone) {
       Organization.findOne({ metaPhone: phone })
-        .then((org) => { if (org) return disconnectOrg(String(org._id)); })
-        .then(() => console.log(`[WaAgent] PARTNER_REMOVED: org desconectada — ${phone}`))
-        .catch((err) => console.error("[WaAgent] Error al desconectar org por PARTNER_REMOVED:", err));
+        .then((org) => {
+          if (org) return disconnectOrg(String(org._id));
+        })
+        .then(() =>
+          console.log(`[WaAgent] PARTNER_REMOVED: org desconectada — ${phone}`),
+        )
+        .catch((err) =>
+          console.error(
+            "[WaAgent] Error al desconectar org por PARTNER_REMOVED:",
+            err,
+          ),
+        );
     }
     return;
   }
 
   // Solo procesar texto e interactivos (botones de template); ignorar estados, imágenes, etc.
-  if (!message || (message.type !== "text" && message.type !== "interactive")) return;
+  if (!message || (message.type !== "text" && message.type !== "interactive"))
+    return;
 
   const receivingPhoneNumberId = change?.metadata?.phone_number_id;
   const fromPhone = "+" + message.from.replace(/\D/g, "");
 
   // Para botones de template (quick_reply / button_reply) el texto está en interactive
-  const body = message.type === "interactive"
-    ? (message.interactive?.button_reply?.title ?? message.interactive?.list_reply?.title ?? "")
-    : (message.text?.body ?? "");
+  const body =
+    message.type === "interactive"
+      ? (message.interactive?.button_reply?.title ??
+        message.interactive?.list_reply?.title ??
+        "")
+      : (message.text?.body ?? "");
 
   if (!body || !fromPhone) return;
 
   // Ignorar eco de los propios mensajes salientes de AgenditApp
-  if (process.env.META_AGENDITAPP_PHONE && fromPhone === process.env.META_AGENDITAPP_PHONE) {
+  if (
+    process.env.META_AGENDITAPP_PHONE &&
+    fromPhone === process.env.META_AGENDITAPP_PHONE
+  ) {
     return;
   }
 
@@ -90,12 +114,17 @@ export async function handleMetaIncoming(req, res) {
     }).lean();
 
     if (!org) {
-      console.warn(`[WaAgent] Mensaje al número de AgenditApp desde teléfono no registrado como admin: ${fromPhone}`);
+      console.warn(
+        `[WaAgent] Mensaje al número de AgenditApp desde teléfono no registrado como admin: ${fromPhone}`,
+      );
       return;
     }
 
     processAdminCommand(org, body).catch((err) =>
-      console.error("[WaAgent] Error procesando comando del admin vía Meta:", err)
+      console.error(
+        "[WaAgent] Error procesando comando del admin vía Meta:",
+        err,
+      ),
     );
   }
   // Mensajes de clientes a números Meta de orgs → no se procesan
@@ -128,11 +157,12 @@ export async function handleBaileysMessage(req, res) {
   }
 
   // Ignorar mensajes donde el "cliente" es el propio número de AgenditApp
-  if (process.env.META_AGENDITAPP_PHONE && cleanClientPhone === process.env.META_AGENDITAPP_PHONE) {
+  if (
+    process.env.META_AGENDITAPP_PHONE &&
+    cleanClientPhone === process.env.META_AGENDITAPP_PHONE
+  ) {
     return;
   }
 
-  processIncomingMessage({ orgPhone, fromMe, body }).catch((err) =>
-    console.error("[WaAgent] Error procesando mensaje de Baileys:", err)
-  );
+  // Baileys es solo canal de notificaciones salientes — mensajes entrantes se ignoran
 }

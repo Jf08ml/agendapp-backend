@@ -199,16 +199,19 @@ const appointmentService = {
       const isConfirmationEnabled = whatsappTemplate?.enabledTypes?.scheduleAppointment !== false;
 
       if (isConfirmationEnabled && (client?.phone_e164 || client?.phoneNumber)) {
+        const templateData = { ...appointmentDetails, cancellationLink };
+        const fallbackMessage = await whatsappTemplates.getRenderedTemplate(organizationId, 'scheduleAppointment', templateData).catch(() => null);
         const notifyResult = await whatsappService.sendNotification(
           organizationId,
           client?.phone_e164 || client?.phoneNumber,
           'scheduleAppointment',
-          { ...appointmentDetails, cancellationLink }
+          templateData,
+          ...(fallbackMessage ? [{ fallbackMessage }] : [])
         );
         if (notifyResult?.blocked) {
           console.warn(`⏭️  Confirmación NO enviada (bloqueada por plan: ${notifyResult.reason}) para cita ${newAppointment._id}`);
         } else if (!notifyResult) {
-          console.warn(`⚠️  Confirmación NO enviada para cita ${newAppointment._id} — sendNotification devolvió null (revisa si la plantilla "confirmacion_cita"/"scheduleAppointment" existe y está aprobada para esta org)`);
+          console.warn(`⚠️  Confirmación NO enviada para cita ${newAppointment._id} — sin template aprobado ni canal disponible`);
         } else {
           console.log(`✅ Confirmación enviada para cita ${newAppointment._id} — messageId: ${notifyResult?.messageId || notifyResult?.id || "?"}`);
         }

@@ -82,6 +82,7 @@ const cancellationService = {
         console.log(`📋 Buscando en ${appointments.length} appointments con bcrypt...`);
 
         for (const apt of appointments) {
+          if (!apt.cancelTokenHash) continue;
           const isValid = await this.verifyToken(token, apt.cancelTokenHash);
           
           if (isValid) {
@@ -1130,6 +1131,7 @@ const cancellationService = {
       }
 
       // 📩 Enviar WhatsApp al cliente si se solicitó
+      let waEnviado = false;
       if (notifyClient && appointment.client && appointment.organizationId) {
         try {
           const org = appointment.organizationId;
@@ -1138,37 +1140,41 @@ const cancellationService = {
           const organizationId = org._id || org;
           const singleCancelTimeFmt = (org.timeFormat || '12h') === '24h' ? 'HH:mm' : 'hh:mm A';
 
-          // Formatear la cita cancelada
           const appointmentDate = moment.tz(appointment.startDate, timezone);
           const appointmentsList = `• ${appointment.service?.name || 'Servicio'} - ${appointmentDate.format(`DD/MM/YYYY ${singleCancelTimeFmt}`)}`;
-          
+
           const phoneNumber = client.phone_e164 || client.phoneNumber;
           if (phoneNumber) {
+            const templateData = { names: client.name || 'Cliente', appointments_list: appointmentsList, organization: org.name };
+            // Renderizar el template de la BD como fallback para Meta texto libre
+            const fallbackMessage = await whatsappTemplates.getRenderedTemplate(organizationId.toString(), 'clientCancellationAck', templateData).catch(() => null);
             const notifyResult = await whatsappService.sendNotification(
               organizationId.toString(),
               phoneNumber,
               'clientCancellationAck',
-              { names: client.name || 'Cliente', appointments_list: appointmentsList, organization: org.name }
+              templateData,
+              ...(fallbackMessage ? [{ fallbackMessage }] : [])
             );
             if (notifyResult?.blocked) {
               console.warn(`⏭️  Aviso de cancelación NO enviado a ${client.name} (${phoneNumber}) — bloqueado por plan: ${notifyResult.reason}`);
             } else if (!notifyResult) {
-              console.warn(`⚠️  Aviso de cancelación NO enviado a ${client.name} (${phoneNumber}) — sendNotification devolvió null (revisa si la plantilla "aviso_cancelacion"/"clientCancellationAck" existe y está aprobada para esta org)`);
+              console.warn(`⚠️  Aviso de cancelación NO enviado a ${client.name} (${phoneNumber}) — sin template aprobado ni canal disponible`);
             } else {
               console.log(`✅ Aviso de cancelación enviado a ${client.name} (${phoneNumber}) — messageId: ${notifyResult?.messageId || notifyResult?.id || "?"}`);
+              waEnviado = true;
             }
           } else {
             console.warn(`⚠️  Aviso de cancelación NO enviado — el cliente ${client.name || appointment.client} no tiene teléfono registrado`);
           }
         } catch (whatsappError) {
           console.error('[cancelAppointment] Error al enviar WhatsApp:', whatsappError);
-          // No fallar la cancelación si falla el WhatsApp
         }
       }
 
       return {
         success: true,
         message: 'Cita cancelada exitosamente',
+        waEnviado,
         data: {
           appointmentId: appointment._id,
           reservationId: reservation?._id,

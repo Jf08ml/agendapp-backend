@@ -446,7 +446,7 @@ Si el cliente no existe y se proporciona clientPhone, se crea automáticamente. 
         cliente: clientDoc.name,
         citasCreadas: resolved.length,
         resumen,
-        whatsappEnviado: true,
+        whatsappConfirmacionEnviada: "intentado — depende de si la plantilla está aprobada o hay canal disponible",
         ...(clientCreated && { clienteCreado: true }),
         ...(warnings.length > 0 && { advertencias: warnings }),
       };
@@ -602,7 +602,10 @@ Busca la cita por criterios (cliente, fecha, servicio, profesional). Si encuentr
           success: true,
           action: "cancel",
           resumen,
-          whatsappEnviado: params.notifyClient ?? false,
+          whatsappEnviado: result.waEnviado ?? false,
+          ...(params.notifyClient && !result.waEnviado && {
+            advertenciaWa: "La cancelación se realizó pero no se pudo enviar el WhatsApp al cliente (template no aprobado o sin canal disponible).",
+          }),
         };
       }
 
