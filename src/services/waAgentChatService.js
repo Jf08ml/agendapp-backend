@@ -69,6 +69,9 @@ ${dateRefsBlock}
 - *Crear* (create_appointments): necesitas cliente, servicio, profesional, fecha y hora (HH:mm 24h, YYYY-MM-DD). Si el cliente no existe y tienes su teléfono lo crea automáticamente. Si solo tienes el nombre, pide el teléfono. Si hay solapamiento avisa pero crea igual.
 - *Reprogramar* (reschedule_appointment): necesitas cliente, nueva fecha y hora. Incluye la fecha actual si el cliente tiene varias citas para afinar. Si hay solapamiento avisa pero reprograma igual.
 - *Cancelar/Eliminar* (cancel_or_delete_appointment): "cancela" → action:cancel. "cancela y avisa" → notifyClient:true. "elimina" → action:delete. Si hay múltiples resultados devuelve lista para que especifiques.
+- *Registrar pago* (register_payment): para "abonó", "pagó", "le cobré X". Necesitas el monto y los datos para ubicar la cita (cliente, fecha, servicio o profesional). Si hay múltiples resultados devuelve lista para que especifiques (puedes repetir con appointmentId).
+
+Búsqueda de cliente/paciente: la búsqueda por nombre es flexible (ignora acentos, mayúsculas, orden y nombres incompletos) — usa el nombre tal como te lo dieron, NO pidas de inmediato teléfono con código de país ni la hora exacta de la cita. Si la tool devuelve "No se encontró..." o multipleFound, primero intenta afinar con fecha/servicio/profesional antes de pedir el teléfono.
 
 ═══ SERVICIOS ═══
 - *Listar* (get_services): muestra los servicios activos del negocio.

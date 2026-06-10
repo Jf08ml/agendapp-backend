@@ -46,6 +46,57 @@ const findServiceByName = async (organizationId, searchTerm) => {
   return matches[0];
 };
 
+// Busca clientes por nombre: coincidencia directa primero, luego difusa por solapamiento de palabras
+// (tolera nombres incompletos, acentos distintos u orden de palabras diferente). Devuelve los mejores candidatos.
+const findClientsByName = async (organizationId, searchTerm) => {
+  const direct = await Client.find({
+    organizationId,
+    name: { $regex: escapeRegex(searchTerm), $options: "i" },
+  });
+  if (direct.length > 0) return direct;
+
+  const queryWords = normalizeForSearch(searchTerm).split(" ").filter(Boolean);
+  if (queryWords.length === 0) return [];
+
+  const clients = await Client.find({ organizationId });
+  const scored = clients
+    .map((c) => {
+      const nameWords = normalizeForSearch(c.name).split(" ").filter(Boolean);
+      const overlap = queryWords.filter((w) => nameWords.includes(w)).length;
+      return { client: c, overlap };
+    })
+    .filter((s) => s.overlap >= Math.min(2, queryWords.length));
+
+  if (scored.length === 0) return [];
+  const maxOverlap = Math.max(...scored.map((s) => s.overlap));
+  return scored.filter((s) => s.overlap === maxOverlap).map((s) => s.client);
+};
+
+// Busca clientes por teléfono comparando los últimos 10 dígitos (ignora código de país y formato)
+const findClientsByPhone = async (organizationId, phone) => {
+  const digits = (phone || "").replace(/\D/g, "");
+  if (!digits) return [];
+  const last10 = digits.slice(-10);
+  return Client.find({
+    organizationId,
+    $or: [
+      { phone_e164: { $regex: `${last10}$` } },
+      { phoneNumber: { $regex: `${last10}$` } },
+    ],
+  });
+};
+
+const PAYMENT_METHOD_MAP = {
+  efectivo: "cash", cash: "cash", contado: "cash", cashea: "cash",
+  tarjeta: "card", card: "card", credito: "card", debito: "card",
+  transferencia: "transfer", transfer: "transfer", nequi: "transfer", daviplata: "transfer", bancolombia: "transfer", consignacion: "transfer",
+};
+// Convierte el método de pago dicho en lenguaje natural al enum del modelo (cash/card/transfer/other)
+const normalizePaymentMethod = (method) => {
+  if (!method) return "cash";
+  return PAYMENT_METHOD_MAP[normalizeForSearch(method)] || "other";
+};
+
 const formatCurrency = (amount) =>
   new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 }).format(amount || 0);
 
@@ -127,12 +178,9 @@ Si el usuario menciona una fecha concreta (ej: "el martes 7 de abril"), conviér
         filter.status = { $nin: CANCELLED_STATUSES };
       }
 
-      // Filtro por cliente (busca por nombre parcial)
+      // Filtro por cliente (busca por nombre, con fallback difuso)
       if (params.clientName) {
-        const clients = await Client.find({
-          organizationId: context.organizationId,
-          name: { $regex: params.clientName, $options: "i" },
-        }).select("_id");
+        const clients = await findClientsByName(context.organizationId, params.clientName);
 
         if (clients.length === 0) {
           return { success: false, error: `No se encontró ningún cliente con el nombre "${params.clientName}".` };
@@ -351,16 +399,12 @@ Si el cliente no existe y se proporciona clientPhone, se crea automáticamente. 
       let clientDoc = null;
       let clientCreated = false;
       if (params.clientPhone) {
-        clientDoc = await Client.findOne({
-          organizationId,
-          $or: [{ phone_e164: params.clientPhone }, { phoneNumber: params.clientPhone }],
-        });
+        const found = await findClientsByPhone(organizationId, params.clientPhone);
+        clientDoc = found[0] || null;
       }
       if (!clientDoc && params.clientName) {
-        clientDoc = await Client.findOne({
-          organizationId,
-          name: { $regex: params.clientName, $options: "i" },
-        });
+        const found = await findClientsByName(organizationId, params.clientName);
+        clientDoc = found[0] || null;
       }
       if (!clientDoc) {
         if (params.clientPhone) {
@@ -568,10 +612,9 @@ Busca la cita por criterios (cliente, fecha, servicio, profesional). Si encuentr
 
       // 2. Filtrar por cliente
       if (params.clientPhone || params.clientName) {
-        const clientQuery = params.clientPhone
-          ? { organizationId, $or: [{ phone_e164: params.clientPhone }, { phoneNumber: params.clientPhone }] }
-          : { organizationId, name: { $regex: params.clientName, $options: "i" } };
-        const clients = await Client.find(clientQuery).select("_id");
+        const clients = params.clientPhone
+          ? await findClientsByPhone(organizationId, params.clientPhone)
+          : await findClientsByName(organizationId, params.clientName);
         if (clients.length === 0) {
           const term = params.clientPhone || params.clientName;
           return { success: false, error: `No se encontró ningún cliente con "${term}".` };
@@ -732,10 +775,9 @@ Si hay solapamiento en el nuevo horario, lo avisa pero reprograma igual.`,
       };
 
       if (params.clientPhone || params.clientName) {
-        const clientQuery = params.clientPhone
-          ? { organizationId, $or: [{ phone_e164: params.clientPhone }, { phoneNumber: params.clientPhone }] }
-          : { organizationId, name: { $regex: params.clientName, $options: "i" } };
-        const clients = await Client.find(clientQuery).select("_id");
+        const clients = params.clientPhone
+          ? await findClientsByPhone(organizationId, params.clientPhone)
+          : await findClientsByName(organizationId, params.clientName);
         if (clients.length === 0) {
           const term = params.clientPhone || params.clientName;
           return { success: false, error: `No se encontró ningún cliente con "${term}".` };
@@ -836,6 +878,173 @@ Si hay solapamiento en el nuevo horario, lo avisa pero reprograma igual.`,
         ...(warnings.length > 0 && {
           advertencia: `${appt.employee?.names || "El profesional"} ya tiene cita(s) en ese horario: ${warnings.join(", ")}`,
         }),
+      };
+    },
+  },
+
+  {
+    name: "register_payment",
+    description: `Registra un pago (completo o un abono/parcial) sobre una cita existente.
+Busca la cita por cliente, fecha, servicio o profesional — igual que cancel_or_delete_appointment. Si encuentra más de una, devuelve la lista para que el usuario especifique (puedes repetir la llamada con appointmentId).
+Úsalo cuando el usuario diga "registra un pago", "abonó", "pagó", "le cobré", "ya canceló la cita" (en sentido de pago), etc.`,
+    parameters: {
+      clientName: {
+        type: "string",
+        description: "Nombre parcial del cliente/paciente de la cita.",
+        required: false,
+      },
+      clientPhone: {
+        type: "string",
+        description: "Teléfono del cliente (con código de país). Prioridad sobre clientName.",
+        required: false,
+      },
+      date: {
+        type: "string",
+        description: 'Fecha de la cita en formato YYYY-MM-DD o preset (today, tomorrow, this_week, next_week). Opcional, ayuda a afinar la búsqueda.',
+        required: false,
+      },
+      serviceName: {
+        type: "string",
+        description: "Nombre parcial del servicio para afinar la búsqueda (opcional).",
+        required: false,
+      },
+      employeeName: {
+        type: "string",
+        description: "Nombre parcial del profesional para afinar la búsqueda (opcional).",
+        required: false,
+      },
+      appointmentId: {
+        type: "string",
+        description: "ID de la cita si ya se conoce (de una consulta previa o de un resultado con multipleFound). Si se da, se omite la búsqueda por los demás criterios.",
+        required: false,
+      },
+      amount: {
+        type: "number",
+        description: "Monto del pago a registrar.",
+        required: true,
+      },
+      method: {
+        type: "string",
+        description: 'Método de pago: "efectivo", "tarjeta" o "transferencia". Por defecto efectivo.',
+        required: false,
+      },
+      note: {
+        type: "string",
+        description: "Nota opcional sobre el pago.",
+        required: false,
+      },
+    },
+    handler: async (params, context) => {
+      const { organizationId, organization } = context;
+      const timezone = organization.timezone || "America/Bogota";
+
+      if (!params.amount || params.amount <= 0) {
+        return { success: false, error: "El monto del pago debe ser mayor a 0." };
+      }
+
+      let appt;
+
+      if (params.appointmentId) {
+        appt = await Appointment.findOne({ _id: params.appointmentId, organizationId })
+          .populate("client", "name")
+          .populate("service", "name")
+          .populate("employee", "names");
+        if (!appt) return { success: false, error: "No se encontró ninguna cita con ese ID." };
+      } else {
+        const filter = {
+          organizationId,
+          status: { $nin: CANCELLED_STATUSES },
+        };
+
+        if (params.clientPhone || params.clientName) {
+          const clients = params.clientPhone
+            ? await findClientsByPhone(organizationId, params.clientPhone)
+            : await findClientsByName(organizationId, params.clientName);
+          if (clients.length === 0) {
+            const term = params.clientPhone || params.clientName;
+            return { success: false, error: `No se encontró ningún cliente con "${term}".` };
+          }
+          filter.client = { $in: clients.map((c) => c._id) };
+        }
+
+        if (params.date) {
+          const now = moment.tz(timezone);
+          const presets = {
+            today: [now.clone().startOf("day"), now.clone().endOf("day")],
+            tomorrow: [now.clone().add(1, "day").startOf("day"), now.clone().add(1, "day").endOf("day")],
+            this_week: [now.clone().startOf("isoWeek"), now.clone().endOf("isoWeek")],
+            next_week: [now.clone().add(1, "week").startOf("isoWeek"), now.clone().add(1, "week").endOf("isoWeek")],
+          };
+          const range = presets[params.date] || (() => {
+            const d = moment.tz(params.date, "YYYY-MM-DD", timezone);
+            return d.isValid() ? [d.startOf("day"), d.clone().endOf("day")] : null;
+          })();
+          if (!range) {
+            return { success: false, error: `Fecha inválida: "${params.date}". Usa YYYY-MM-DD o presets (today, tomorrow, this_week).` };
+          }
+          filter.startDate = { $gte: range[0].toDate(), $lte: range[1].toDate() };
+        }
+
+        if (params.serviceName) {
+          const svc = await findServiceByName(organizationId, params.serviceName);
+          if (!svc) return { success: false, error: `No se encontró el servicio "${params.serviceName}".` };
+          filter.service = svc._id;
+        }
+
+        if (params.employeeName) {
+          const emps = await Employee.find({ organizationId, names: { $regex: escapeRegex(params.employeeName), $options: "i" }, isActive: true }).select("_id");
+          if (emps.length === 0) return { success: false, error: `No se encontró el profesional "${params.employeeName}".` };
+          filter.employee = { $in: emps.map((e) => e._id) };
+        }
+
+        const appointments = await Appointment.find(filter)
+          .populate("client", "name")
+          .populate("service", "name")
+          .populate("employee", "names")
+          .sort({ startDate: -1 })
+          .limit(10);
+
+        if (appointments.length === 0) {
+          return { success: false, error: "No se encontraron citas con esos criterios. Intenta con más detalles (cliente, fecha, servicio o profesional)." };
+        }
+
+        if (appointments.length > 1) {
+          const lista = appointments.map((a) => {
+            const fecha = moment(a.startDate).tz(timezone).format("DD/MM/YYYY [a las] HH:mm");
+            return `• ${a.client?.name || "?"} — ${a.service?.name || "?"} con ${a.employee?.names || "?"} el ${fecha} (ID: ${a._id})`;
+          });
+          return {
+            success: false,
+            multipleFound: true,
+            message: `Encontré ${appointments.length} citas. ¿A cuál le registro el pago? (vuelve a llamar con appointmentId)`,
+            citas: lista,
+          };
+        }
+
+        appt = appointments[0];
+      }
+
+      const pendienteAntes = computePending(appt);
+      const metodo = normalizePaymentMethod(params.method);
+      const updated = await appointmentService.addPaymentToAppointment(appt._id.toString(), {
+        amount: params.amount,
+        method: metodo,
+        note: params.note || "",
+      });
+
+      const fecha = moment(appt.startDate).tz(timezone).format("DD/MM/YYYY [a las] HH:mm");
+      const pendienteDespues = computePending(updated);
+
+      return {
+        success: true,
+        resumen: `${appt.service?.name || "?"} de ${appt.client?.name || "?"} con ${appt.employee?.names || "?"} el ${fecha}`,
+        montoRegistrado: formatCurrency(params.amount),
+        metodo,
+        totalCita: formatCurrency(updated.totalPrice),
+        pendienteAntes: formatCurrency(pendienteAntes),
+        pendienteAhora: formatCurrency(pendienteDespues),
+        estadoPago: updated.paymentStatus,
+        ...(pendienteDespues === 0 && { mensaje: "¡Cita pagada en su totalidad!" }),
       };
     },
   },
