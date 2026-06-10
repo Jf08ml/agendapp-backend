@@ -662,6 +662,7 @@ const appointmentService = {
       advancePayment = 0,
       employeeRequestedByClient = false,
       blocks,
+      skipConcurrencyCheck = false,
     } = payload;
 
     if (!blocks || blocks.length === 0) {
@@ -690,9 +691,11 @@ const appointmentService = {
         startDate: block.startDate,
         ...(block.endDate && { endDate: block.endDate }),
         customDurations: block.customDurations || {},
+        customPrices: block.customPrices || {},
         skipNotification: true,
         sharedGroupId,
         sharedTokenHash: cancelTokenHash,
+        skipConcurrencyCheck,
       });
       allCreated.push(...(created || []));
     }

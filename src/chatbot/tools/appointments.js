@@ -9,6 +9,43 @@ import moment from "moment-timezone";
 
 const CANCELLED_STATUSES = ["cancelled", "cancelled_by_customer", "cancelled_by_admin"];
 
+const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Quita acentos, pasa a minúsculas y deja solo letras/números/espacios — para comparar nombres de forma flexible
+const normalizeForSearch = (str) =>
+  str
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+// Busca un servicio por nombre: primero coincidencia directa (regex), si no encuentra
+// intenta coincidencia difusa por palabras (ignora acentos, paréntesis, orden de palabras, etc.)
+const findServiceByName = async (organizationId, searchTerm) => {
+  const direct = await Service.findOne({
+    organizationId,
+    name: { $regex: escapeRegex(searchTerm), $options: "i" },
+    isActive: true,
+  });
+  if (direct) return direct;
+
+  const services = await Service.find({ organizationId, isActive: true }).select("name duration price");
+  const queryWords = normalizeForSearch(searchTerm).split(" ").filter(Boolean);
+  if (queryWords.length === 0) return null;
+
+  const matches = services.filter((s) => {
+    const normName = normalizeForSearch(s.name);
+    return queryWords.every((w) => normName.includes(w));
+  });
+
+  if (matches.length === 0) return null;
+  // Si hay varias coincidencias, preferir la de nombre más corto (más específica)
+  matches.sort((a, b) => a.name.length - b.name.length);
+  return matches[0];
+};
+
 const formatCurrency = (amount) =>
   new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 }).format(amount || 0);
 
@@ -346,18 +383,14 @@ Si el cliente no existe y se proporciona clientPhone, se crea automáticamente. 
       const warnings = [];
 
       for (const appt of params.appointments) {
-        const svc = await Service.findOne({
-          organizationId,
-          name: { $regex: appt.serviceName, $options: "i" },
-          isActive: true,
-        });
+        const svc = await findServiceByName(organizationId, appt.serviceName);
         if (!svc) {
           return { success: false, error: `No se encontró el servicio "${appt.serviceName}". Verifica el nombre.` };
         }
 
         const emp = await Employee.findOne({
           organizationId,
-          names: { $regex: appt.employeeName, $options: "i" },
+          names: { $regex: escapeRegex(appt.employeeName), $options: "i" },
           isActive: true,
         });
         if (!emp) {
@@ -400,41 +433,60 @@ Si el cliente no existe y se proporciona clientPhone, se crea automáticamente. 
         });
       }
 
-      // 4. Crear citas
-      if (resolved.length === 1) {
-        const r = resolved[0];
-        await appointmentService.createAppointment({
+      // 4. Filtrar citas que ya existen (mismo cliente, servicio, profesional y horario exacto)
+      // Evita duplicados cuando la IA repite la creación (p.ej. tras reintentos por errores parciales)
+      const duplicates = [];
+      const toCreate = [];
+      for (const r of resolved) {
+        const existing = await Appointment.findOne({
+          organizationId,
+          client: clientDoc._id,
           service: r.serviceId,
           employee: r.employeeId,
-          employeeRequestedByClient: false,
-          client: clientDoc,
-          startDate: r.startDateStr,
-          endDate: r.endDateStr,
-          organizationId,
-          advancePayment: params.advancePayment || 0,
-          customPrice: r.customPrice,
-          additionalItems: [],
+          startDate: r.startDate,
+          status: { $nin: CANCELLED_STATUSES },
         });
-      } else {
-        // Múltiples citas → un solo WA al final via createMultiEmployeeBatch
-        const blocks = resolved.map((r) => ({
-          services: [r.serviceId],
-          employee: r.employeeId,
-          startDate: r.startDateStr,
-          customDurations: { [r.serviceId]: r.duration },
-        }));
-
-        await appointmentService.createMultiEmployeeBatch({
-          client: clientDoc._id.toString(),
-          organizationId,
-          advancePayment: params.advancePayment || 0,
-          employeeRequestedByClient: false,
-          blocks,
-        });
+        if (existing) {
+          duplicates.push(r);
+        } else {
+          toCreate.push(r);
+        }
       }
 
-      // 5. Respuesta
-      const resumen = resolved
+      if (toCreate.length === 0) {
+        const lista = duplicates
+          .map((r) => `• ${r.serviceName} con ${r.employeeName} el ${moment(r.startDate).tz(timezone).format("DD/MM/YYYY [a las] HH:mm")}`)
+          .join("\n");
+        return {
+          success: true,
+          cliente: clientDoc.name,
+          citasCreadas: 0,
+          yaExistian: true,
+          mensaje: `Esa(s) cita(s) ya existían para ${clientDoc.name}, no se creó ninguna nueva:\n${lista}`,
+        };
+      }
+
+      // 5. Crear citas — siempre vía createMultiEmployeeBatch (incluso si es una sola)
+      // para que todas queden con groupId, status "confirmed" y un único mensaje de WhatsApp
+      const blocks = toCreate.map((r) => ({
+        services: [r.serviceId],
+        employee: r.employeeId,
+        startDate: r.startDateStr,
+        customDurations: { [r.serviceId]: r.duration },
+        ...(r.customPrice != null && { customPrices: { [r.serviceId]: r.customPrice } }),
+      }));
+
+      await appointmentService.createMultiEmployeeBatch({
+        client: clientDoc._id.toString(),
+        organizationId,
+        advancePayment: params.advancePayment || 0,
+        employeeRequestedByClient: false,
+        blocks,
+        skipConcurrencyCheck: true,
+      });
+
+      // 6. Respuesta
+      const resumen = toCreate
         .map((r) => {
           const hora = moment(r.startDate).tz(timezone).format("DD/MM/YYYY [a las] HH:mm");
           return `• ${r.serviceName} con ${r.employeeName} el ${hora}`;
@@ -444,11 +496,14 @@ Si el cliente no existe y se proporciona clientPhone, se crea automáticamente. 
       return {
         success: true,
         cliente: clientDoc.name,
-        citasCreadas: resolved.length,
+        citasCreadas: toCreate.length,
         resumen,
         whatsappConfirmacionEnviada: "intentado — depende de si la plantilla está aprobada o hay canal disponible",
         ...(clientCreated && { clienteCreado: true }),
         ...(warnings.length > 0 && { advertencias: warnings }),
+        ...(duplicates.length > 0 && {
+          omitidasPorDuplicado: duplicates.map((r) => `${r.serviceName} con ${r.employeeName} (ya existía a esa hora)`),
+        }),
       };
     },
   },
