@@ -166,12 +166,11 @@ const appointmentModelSchema = new mongoose.Schema(
 
 // 💰 Calcula paymentStatus a partir de los campos de pago
 function computePaymentStatus(appt) {
-  if (appt.clientPackageId && appt.totalPrice === 0) return 'free';
+  const total = appt.totalPrice || 0;
+  if (total === 0) return 'free';
   const totalPaid =
     (appt.advancePayment || 0) +
     (appt.payments || []).reduce((sum, p) => sum + (p.amount || 0), 0);
-  const total = appt.totalPrice || 0;
-  if (total === 0) return totalPaid > 0 ? 'paid' : 'unpaid';
   if (totalPaid >= total) return 'paid';
   if (totalPaid > 0) return 'partial';
   return 'unpaid';
