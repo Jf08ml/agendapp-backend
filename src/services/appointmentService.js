@@ -1090,7 +1090,8 @@ const appointmentService = {
       if (updatedData[k] != null) appt[k] = updatedData[k];
     }
 
-    return await appt.save();
+    await appt.save();
+    return await appt.populate(["client", "service", "employee"]);
   },
 
   // Eliminar una cita
