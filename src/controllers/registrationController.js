@@ -120,7 +120,7 @@ const registrationController = {
         email: savedOrg.email,
       });
 
-      // 8. Crear trial automático con plan-demo (días configurados por el agente, default 7)
+      // 8. Crear trial automático con plan-demo (días configurados por el agente, default 30)
       const trialPlan = await Plan.findOne({ slug: "plan-demo", isActive: true });
       if (!trialPlan) {
         console.error("[register] No se encontró plan-demo para trial. Org:", savedOrg.slug);
@@ -128,7 +128,7 @@ const registrationController = {
         await membershipService.createMembership({
           organizationId: savedOrg._id,
           planId: trialPlan._id,
-          trialDays: referringAgent?.trialDays ?? 7,
+          trialDays: referringAgent?.trialDays ?? 30,
         });
       }
 
