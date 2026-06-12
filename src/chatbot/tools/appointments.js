@@ -309,6 +309,11 @@ Para dateFrom/dateTo acepta: "today", "yesterday", "this_week", "last_week", "th
           e.total += appt.totalPrice || 0;
         }
         const profesionales = Array.from(map.values()).map((e) => {
+          // Si el profesional no tiene comisión configurada, decirlo explícitamente
+          // en lugar de mostrar $0 (que parece un cálculo real)
+          if (!e.commissionType || !e.commissionValue) {
+            return { profesional: e.nombre, citas: e.citas, totalGenerado: formatCurrency(e.total), comisionEstimada: "sin comisión configurada" };
+          }
           const comision = e.commissionType === "percentage" ? e.total * (e.commissionValue / 100) : e.citas * e.commissionValue;
           return { profesional: e.nombre, citas: e.citas, totalGenerado: formatCurrency(e.total), comisionEstimada: formatCurrency(comision) };
         });

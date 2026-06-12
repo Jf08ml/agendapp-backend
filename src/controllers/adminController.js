@@ -23,6 +23,8 @@ import Subscription from "../models/subscriptionModel.js";
 import ServicePackage from "../models/servicePackageModel.js";
 import ClientPackage from "../models/clientPackageModel.js";
 import AuditLog from "../models/auditLogModel.js";
+import ChatLog from "../models/chatLogModel.js";
+import ChatbotFeedback from "../models/chatbotFeedbackModel.js";
 import Expense from "../models/expenseModel.js";
 import Class from "../models/classModel.js";
 import ClassSession from "../models/classSessionModel.js";
@@ -351,6 +353,173 @@ const adminController = {
     } catch (error) {
       console.error("[admin/getOrganizationRanking] Error:", error);
       sendResponse(res, 500, null, "Error al obtener ranking de organizaciones");
+    }
+  },
+
+  // ─── Analítica de chatbots (ChatLog) ────────────────────────────────────────
+
+  /**
+   * GET /api/admin/chatbot/stats
+   * Métricas agregadas de los chatbots (admin + booking) en el rango:
+   * sesiones, rondas, tokens, errores, round-limit, funnel de conversión
+   * (sesión → payload preparado → reserva creada) y desglose por organización.
+   */
+  getChatbotStats: async (req, res) => {
+    try {
+      const { startDate, endDate } = adminController._resolveDateRange(req.query);
+      const range = {
+        createdAt: {
+          $gte: new Date(`${startDate}T00:00:00.000Z`),
+          $lte: new Date(`${endDate}T23:59:59.999Z`),
+        },
+      };
+
+      const [byType, funnel, byOrg, feedback] = await Promise.all([
+        // Totales por tipo de chatbot
+        ChatLog.aggregate([
+          { $match: range },
+          {
+            $group: {
+              _id: "$type",
+              sesiones: { $sum: 1 },
+              rondasPromedio: { $avg: "$rounds" },
+              inputTokens: { $sum: "$inputTokens" },
+              outputTokens: { $sum: "$outputTokens" },
+              duracionPromedioMs: { $avg: "$durationMs" },
+              conRoundLimit: { $sum: { $cond: ["$hitRoundLimit", 1, 0] } },
+              conError: { $sum: { $cond: [{ $ifNull: ["$error", false] }, 1, 0] } },
+            },
+          },
+        ]),
+        // Funnel de conversión del booking bot
+        ChatLog.aggregate([
+          { $match: { ...range, type: "booking" } },
+          {
+            $group: {
+              _id: null,
+              sesiones: { $sum: 1 },
+              conPayload: { $sum: { $cond: [{ $ifNull: ["$bookingPayload", false] }, 1, 0] } },
+              convertidas: { $sum: { $cond: ["$reservationCreated", 1, 0] } },
+            },
+          },
+        ]),
+        // Desglose por organización (top 20 por sesiones)
+        ChatLog.aggregate([
+          { $match: range },
+          {
+            $group: {
+              _id: "$organizationId",
+              sesiones: { $sum: 1 },
+              booking: { $sum: { $cond: [{ $eq: ["$type", "booking"] }, 1, 0] } },
+              admin: { $sum: { $cond: [{ $eq: ["$type", "admin"] }, 1, 0] } },
+              conPayload: { $sum: { $cond: [{ $ifNull: ["$bookingPayload", false] }, 1, 0] } },
+              convertidas: { $sum: { $cond: ["$reservationCreated", 1, 0] } },
+              inputTokens: { $sum: "$inputTokens" },
+              outputTokens: { $sum: "$outputTokens" },
+            },
+          },
+          { $sort: { sesiones: -1 } },
+          { $limit: 20 },
+          {
+            $lookup: {
+              from: "organizations",
+              localField: "_id",
+              foreignField: "_id",
+              as: "org",
+            },
+          },
+          {
+            $project: {
+              organizationId: "$_id",
+              nombre: { $ifNull: [{ $arrayElemAt: ["$org.name", 0] }, "(eliminada)"] },
+              sesiones: 1,
+              booking: 1,
+              admin: 1,
+              conPayload: 1,
+              convertidas: 1,
+              inputTokens: 1,
+              outputTokens: 1,
+              _id: 0,
+            },
+          },
+        ]),
+        // Satisfacción promedio (feedback del booking bot)
+        ChatbotFeedback.aggregate([
+          { $match: range },
+          {
+            $group: {
+              _id: "$source",
+              total: { $sum: 1 },
+              ratingPromedio: { $avg: "$rating" },
+            },
+          },
+        ]),
+      ]);
+
+      const f = funnel[0] || { sesiones: 0, conPayload: 0, convertidas: 0 };
+      const pct = (num, den) => (den > 0 ? Math.round((num / den) * 1000) / 10 : 0);
+
+      sendResponse(res, 200, {
+        startDate,
+        endDate,
+        porTipo: byType,
+        funnelBooking: {
+          sesiones: f.sesiones,
+          conPayloadPreparado: f.conPayload,
+          reservasCreadas: f.convertidas,
+          tasaPreparacion: pct(f.conPayload, f.sesiones),
+          tasaConversionPayload: pct(f.convertidas, f.conPayload),
+          tasaConversionTotal: pct(f.convertidas, f.sesiones),
+        },
+        porOrganizacion: byOrg,
+        feedback,
+      });
+    } catch (error) {
+      console.error("[admin/getChatbotStats] Error:", error);
+      sendResponse(res, 500, null, "Error al obtener métricas de chatbots");
+    }
+  },
+
+  /**
+   * GET /api/admin/chatbot/sessions
+   * Lista paginada de sesiones de chat con filtros:
+   * type (admin|booking), organizationId, converted (true), hasError (true),
+   * hitRoundLimit (true), page, limit.
+   */
+  getChatbotSessions: async (req, res) => {
+    try {
+      const { startDate, endDate } = adminController._resolveDateRange(req.query);
+      const filter = {
+        createdAt: {
+          $gte: new Date(`${startDate}T00:00:00.000Z`),
+          $lte: new Date(`${endDate}T23:59:59.999Z`),
+        },
+      };
+      if (["admin", "booking"].includes(req.query.type)) filter.type = req.query.type;
+      if (req.query.organizationId && mongoose.Types.ObjectId.isValid(req.query.organizationId)) {
+        filter.organizationId = req.query.organizationId;
+      }
+      if (req.query.converted === "true") filter.reservationCreated = true;
+      if (req.query.hasError === "true") filter.error = { $exists: true, $ne: null };
+      if (req.query.hitRoundLimit === "true") filter.hitRoundLimit = true;
+
+      const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+      const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
+
+      const [sessions, total] = await Promise.all([
+        ChatLog.find(filter)
+          .sort({ createdAt: -1 })
+          .skip((page - 1) * limit)
+          .limit(limit)
+          .populate("organizationId", "name slug")
+          .lean(),
+        ChatLog.countDocuments(filter),
+      ]);
+
+      sendResponse(res, 200, { sessions, total, page, pages: Math.ceil(total / limit) });
+    } catch (error) {
+      console.error("[admin/getChatbotSessions] Error:", error);
+      sendResponse(res, 500, null, "Error al obtener sesiones de chat");
     }
   },
 };

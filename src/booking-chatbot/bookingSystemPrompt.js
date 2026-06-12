@@ -1,4 +1,5 @@
 import moment from "moment-timezone";
+import { getCountryCallingCode } from "libphonenumber-js";
 
 export const buildBookingSystemPrompt = (organization) => {
   const policy = organization.reservationPolicy || "manual";
@@ -6,12 +7,29 @@ export const buildBookingSystemPrompt = (organization) => {
   const identifierField =
     organization.clientFormConfig?.identifierField || "phone";
 
+  const defaultCountry = organization.default_country || "CO";
+  let callingCode = "57";
+  try {
+    callingCode = getCountryCallingCode(defaultCountry);
+  } catch {
+    /* país no reconocido — usar CO */
+  }
+
   const identifierLabel =
     identifierField === "email"
       ? "correo electrónico"
       : identifierField === "documentId"
       ? "número de documento o cédula"
-      : "número de teléfono (con código de país, ej: +573001234567)";
+      : "número de teléfono";
+
+  const phoneRule =
+    identifierField === "phone"
+      ? `
+REGLA DE TELÉFONO: el país del negocio es ${defaultCountry} (código +${callingCode}).
+- Si el cliente da un número local sin código de país, asume +${callingCode} automáticamente. NO gastes un mensaje extra preguntando "¿tu número es +${callingCode}...?" — muestra el número completo (+${callingCode}XXXXXXXXX) directamente en el resumen final de la reserva; el cliente lo corregirá ahí si no es de ${defaultCountry}.
+- Si el número ya trae código de país (con o sin +), úsalo tal cual.
+- Solo pregunta por el código de país si el número es ambiguo (longitud que no corresponde a un número local de ${defaultCountry}).`
+      : "";
 
   const policyNote = requiresEmployee
     ? "IMPORTANTE: La política de esta organización es AUTO-APROBACIÓN. Esto significa que la reserva se confirma automáticamente si hay disponibilidad, pero DEBES obtener el profesional antes de buscar horarios."
@@ -122,7 +140,7 @@ PASO 4 — HORARIO
 
 PASO 5 — DATOS DEL CLIENTE
 - Pide: nombre completo + ${identifierLabel}.
-- Solo pide lo necesario. No pidas email si el campo es teléfono, y viceversa.
+- Solo pide lo necesario. No pidas email si el campo es teléfono, y viceversa.${phoneRule}
 
 PASO 6 — CONFIRMAR
 - Resume la reserva completa:
@@ -133,6 +151,7 @@ PASO 6 — CONFIRMAR
 - IMPORTANTE: llama prepare_reservation PRIMERO. Cuando recibas el resultado exitoso de la herramienta, di ÚNICAMENTE:
   "¡Listo! Toca el botón **'Sí, confirmar'** para finalizar tu reserva."
 - NO digas ese mensaje antes de llamar la herramienta, y NO digas que la reserva ya fue creada, confirmada ni procesada — eso ocurre solo cuando el cliente toca el botón.
+- SI EL CLIENTE CANCELA EL BOTÓN DE CONFIRMACIÓN (o pregunta algo después de prepare_reservation, ej: "¿cuál es el resumen?"): responde desde el contexto de la conversación — ya tienes todos los datos. NO vuelvas a llamar prepare_reservation salvo que el cliente cambie algún dato de la reserva (servicio, profesional, fecha, hora o sus datos personales) y vuelva a confirmar.
 
 ═══ REGLAS ═══
 - Responde SIEMPRE en español.

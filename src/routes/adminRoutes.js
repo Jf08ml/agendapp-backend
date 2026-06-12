@@ -83,4 +83,20 @@ router.get(
   adminController.getOrganizationRanking
 );
 
+// ─── Analítica de chatbots IA (solo superadmins) ────────────────────────────
+
+router.get(
+  "/admin/chatbot/stats",
+  verifyToken,
+  requireSuperAdmin,
+  adminController.getChatbotStats
+);
+
+router.get(
+  "/admin/chatbot/sessions",
+  verifyToken,
+  requireSuperAdmin,
+  adminController.getChatbotSessions
+);
+
 export default router;

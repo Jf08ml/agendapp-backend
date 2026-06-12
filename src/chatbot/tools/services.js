@@ -1,10 +1,21 @@
 import Service from "../../models/serviceModel.js";
 
+// Quita acentos, pasa a minúsculas y deja solo letras/números/espacios — para
+// detectar duplicados con variaciones de tildes o mayúsculas ("Manicure básica" vs "Manicure Basico")
+const normalizeForCompare = (str) =>
+  String(str || "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
 export default [
   {
     name: "create_service",
     description:
-      "Crea un nuevo servicio para la organización. Úsalo cuando el usuario quiera añadir un servicio (corte, masaje, consulta, etc.).",
+      "Crea un nuevo servicio para la organización. Úsalo cuando el usuario quiera añadir un servicio (corte, masaje, consulta, etc.). Si ya existe un servicio con nombre muy similar, devuelve una advertencia — pregunta al usuario si realmente quiere crearlo y reintenta con force: true solo si confirma.",
     parameters: {
       name: { type: "string", description: "Nombre del servicio", required: true },
       type: { type: "string", description: "Categoría o tipo del servicio (ej: Corte, Masaje, Consulta, Tratamiento). Si el usuario no lo menciona, infiere uno apropiado según el nombre.", required: true },
@@ -25,8 +36,39 @@ export default [
           },
         },
       },
+      force: {
+        type: "boolean",
+        description: "Crear aunque exista un servicio con nombre similar. Úsalo SOLO después de que el usuario confirme explícitamente que quiere el duplicado.",
+        required: false,
+      },
     },
     handler: async (params, context) => {
+      // Chequeo de duplicados: comparar nombre normalizado contra servicios activos existentes
+      if (!params.force) {
+        const existing = await Service.find({
+          organizationId: context.organizationId,
+          isActive: true,
+        }).select("name duration price");
+        const newNorm = normalizeForCompare(params.name);
+        const similar = existing.filter((s) => {
+          const norm = normalizeForCompare(s.name);
+          return norm === newNorm || norm.includes(newNorm) || newNorm.includes(norm);
+        });
+        if (similar.length > 0) {
+          return {
+            success: false,
+            duplicateWarning: true,
+            message: `Ya existe(n) servicio(s) con nombre similar a "${params.name}". Pregunta al usuario si quiere crearlo de todas formas (reintenta con force: true), actualizar el existente, o cancelar.`,
+            existingServices: similar.map((s) => ({
+              id: s._id,
+              name: s.name,
+              duration: s.duration,
+              price: s.price,
+            })),
+          };
+        }
+      }
+
       const service = await Service.create({
         name: params.name,
         type: params.type,

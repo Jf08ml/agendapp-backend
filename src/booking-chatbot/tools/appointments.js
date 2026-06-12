@@ -33,8 +33,8 @@ export const getMyAppointments = {
     identifier: {
       type: "string",
       description:
-        "Valor del identificador del cliente: teléfono en formato E.164 (ej: +573001234567), " +
-        "email, o número de documento — según lo que configure el negocio.",
+        "Valor del identificador del cliente: teléfono (en cualquier formato — con o sin código de país, " +
+        "espacios o guiones), email, o número de documento — según lo que configure el negocio.",
       required: true,
     },
   },
@@ -43,12 +43,33 @@ export const getMyAppointments = {
       organization.clientFormConfig?.identifierField || "phone";
     const dbField = IDENTIFIER_FIELD_MAP[identifierField] || "phone_e164";
 
-    const client = await Client.findOne({
-      organizationId,
-      [dbField]: identifier,
-    })
-      .select("_id name")
-      .lean();
+    let client;
+    if (identifierField === "phone") {
+      // Matching tolerante: compara los últimos 10 dígitos para ignorar
+      // código de país, espacios, guiones o el "+" (el cliente escribe
+      // su número en cualquier formato).
+      const digits = String(identifier || "").replace(/\D/g, "");
+      if (!digits) {
+        return { found: false, message: "El teléfono proporcionado no es válido." };
+      }
+      const last10 = digits.slice(-10);
+      client = await Client.findOne({
+        organizationId,
+        $or: [
+          { phone_e164: { $regex: `${last10}$` } },
+          { phoneNumber: { $regex: `${last10}$` } },
+        ],
+      })
+        .select("_id name")
+        .lean();
+    } else {
+      client = await Client.findOne({
+        organizationId,
+        [dbField]: identifier,
+      })
+        .select("_id name")
+        .lean();
+    }
 
     if (!client) {
       return {

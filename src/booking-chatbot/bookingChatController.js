@@ -74,6 +74,28 @@ export const bookingChat = async (req, res) => {
   return sendResponse(res, 200, { reply, bookingPayload });
 };
 
+// POST /booking-chat/converted — público (solo organizationResolver)
+// El frontend lo llama tras crear la reserva con éxito (clic en "Sí, confirmar").
+// Marca la sesión como convertida para medir la tasa prepare_reservation → reserva real.
+export const markBookingConverted = async (req, res) => {
+  const { sessionId } = req.body;
+
+  if (!sessionId || typeof sessionId !== "string") {
+    return sendResponse(res, 400, null, "sessionId es requerido.");
+  }
+
+  const updated = await ChatLog.findOneAndUpdate(
+    { sessionId, organizationId: req.organization._id, type: "booking" },
+    { $set: { reservationCreated: true, reservationCreatedAt: new Date() } },
+    { new: true }
+  ).catch(() => null);
+
+  if (!updated) {
+    return sendResponse(res, 404, null, "Sesión no encontrada.");
+  }
+  return sendResponse(res, 200, null, "Conversión registrada.");
+};
+
 // POST /booking-chat/feedback — público (solo organizationResolver)
 export const submitBookingFeedback = async (req, res) => {
   const { rating, message, sessionId } = req.body;

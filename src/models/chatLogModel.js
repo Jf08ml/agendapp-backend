@@ -35,6 +35,11 @@ const chatLogSchema = new mongoose.Schema(
     // Solo para tipo "booking": payload construido por prepare_reservation
     bookingPayload: { type: mongoose.Schema.Types.Mixed },
 
+    // Solo para tipo "booking": true cuando el cliente tocó "Sí, confirmar"
+    // y la reserva se creó realmente (métrica de conversión prepare → reserva)
+    reservationCreated: { type: Boolean, default: false },
+    reservationCreatedAt: { type: Date },
+
     // Si el agente agotó las rondas sin resolver
     hitRoundLimit: { type: Boolean, default: false },
 
