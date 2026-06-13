@@ -67,6 +67,30 @@ const organizationController = {
       sendResponse(res, 404, null, error.message);
     }
   },
+
+  // Sembrar datos de ejemplo (flujo "Explorar primero" del onboarding):
+  // servicios + profesionales demo, horario por defecto y setupCompleted
+  seedDemoData: async (req, res) => {
+    const { id } = req.params;
+    try {
+      // Solo sobre la propia organización: la resuelta por dominio (organizationResolver)
+      // o la del token (para admins de org, userId === organizationId)
+      const resolvedOrgId = req.organization?._id?.toString();
+      const tokenUserId = req.user?.userId?.toString?.() || req.user?.userId;
+      const isOwnOrg = resolvedOrgId === id || tokenUserId === id;
+      if (!isOwnOrg) {
+        return sendResponse(res, 403, null, "No autorizado para esta organización");
+      }
+
+      const result = await organizationService.seedDemoData(id);
+      sendResponse(res, 200, result, result.seeded
+        ? "Datos de ejemplo creados"
+        : "La organización ya tiene datos — no se crearon ejemplos");
+    } catch (error) {
+      console.error("[seedDemoData] Error:", error);
+      sendResponse(res, 500, null, error.message);
+    }
+  },
 };
 
 export default organizationController;

@@ -55,6 +55,20 @@ const waController = {
     }
   },
 
+  /** POST /organizations/:id/wa/welcome-test — envía el recordatorio de ejemplo
+   *  al propio número del negocio (el "aha" al conectar WhatsApp). */
+  welcomeTest: async (req, res) => {
+    try {
+      const orgId = req.params.id;
+      const { phone, force } = req.body || {};
+      const data = await waIntegrationService.sendWelcomeTest({ orgId, phone, force: !!force });
+      sendResponse(res, 200, data, data.sent ? "Mensaje de ejemplo enviado" : "No se envió mensaje");
+    } catch (err) {
+      console.error("[welcomeTest]", err);
+      sendResponse(res, 400, null, err.message);
+    }
+  },
+
   /** POST /organizations/:id/wa/restart { clientId? } */
   restart: async (req, res) => {
     try {

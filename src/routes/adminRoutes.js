@@ -83,6 +83,15 @@ router.get(
   adminController.getOrganizationRanking
 );
 
+// ─── Funnel de onboarding / activación (solo superadmins) ───────────────────
+
+router.get(
+  "/admin/onboarding/funnel",
+  verifyToken,
+  requireSuperAdmin,
+  adminController.getOnboardingFunnel
+);
+
 // ─── Analítica de chatbots IA (solo superadmins) ────────────────────────────
 
 router.get(

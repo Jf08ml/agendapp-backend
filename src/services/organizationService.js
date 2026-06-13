@@ -2,8 +2,17 @@ import Organization from "../models/organizationModel.js";
 import bcrypt from "bcryptjs";
 import membershipService from "./membershipService.js";
 import Plan from "../models/planModel.js";
+import Service from "../models/serviceModel.js";
+import Employee from "../models/employeeModel.js";
 import { sendTemplateMessage } from "./metaApiService.js";
 import { normalizePhone } from "./waAgentService.js";
+import { getVerticalCatalog } from "../utils/verticalCatalogs.js";
+
+// Monedas de denominación grande (sin centavos en la práctica): los precios
+// de ejemplo se multiplican ×1000 para que se vean realistas (ej: $40.000 COP vs $40 USD)
+const LARGE_DENOMINATION_CURRENCIES = new Set([
+  "COP", "CLP", "CRC", "PYG", "ARS", "HUF", "KRW", "IDR", "VND", "UYU", "NIO",
+]);
 
 const organizationService = {
   // Crear una nueva organización
@@ -270,6 +279,12 @@ const organizationService = {
 
     if (setupCompleted !== undefined) {
       organization.setupCompleted = setupCompleted;
+      // 📊 Instrumentación: marcar cuándo completó el setup (una sola vez)
+      if (setupCompleted) {
+        if (!organization.onboardingMilestones) organization.onboardingMilestones = {};
+        organization.onboardingMilestones.setupCompletedAt =
+          organization.onboardingMilestones.setupCompletedAt || new Date();
+      }
     }
 
     if (welcomeTitle !== undefined) {
@@ -418,6 +433,92 @@ const organizationService = {
 
     await Organization.deleteOne({ _id: id });
     return { message: "Organización eliminada correctamente" };
+  },
+
+  // Datos de ejemplo para "Explorar primero": crea servicios y profesionales demo,
+  // activa el horario semanal por defecto y marca el setup como completado, para que
+  // el usuario aterrice en una agenda funcional en lugar de un checklist vacío.
+  // Solo opera sobre organizaciones sin servicios ni profesionales (no duplica).
+  seedDemoData: async (organizationId) => {
+    const organization = await Organization.findById(organizationId);
+    if (!organization) {
+      throw new Error("Organización no encontrada");
+    }
+
+    const [serviceCount, employeeCount] = await Promise.all([
+      Service.countDocuments({ organizationId }),
+      Employee.countDocuments({ organizationId }),
+    ]);
+
+    if (serviceCount > 0 || employeeCount > 0) {
+      // Ya tiene datos reales: no sembrar nada, solo dejar entrar
+      if (!organization.setupCompleted) {
+        organization.setupCompleted = true;
+        if (!organization.onboardingMilestones) organization.onboardingMilestones = {};
+        organization.onboardingMilestones.setupCompletedAt =
+          organization.onboardingMilestones.setupCompletedAt || new Date();
+        await organization.save();
+      }
+      return { seeded: false, services: [], employees: [] };
+    }
+
+    const multiplier = LARGE_DENOMINATION_CURRENCIES.has(organization.currency) ? 1000 : 1;
+    // Catálogo según el rubro elegido en el registro (fallback a "otro")
+    const catalog = getVerticalCatalog(organization.businessVertical);
+    const demoServices = catalog.services.map((s) => ({
+      name: s.name,
+      type: s.type,
+      duration: s.duration,
+      price: s.price * multiplier,
+      ...(s.maxConcurrentAppointments && { maxConcurrentAppointments: s.maxConcurrentAppointments }),
+      description: "Servicio de ejemplo — edítalo o elimínalo cuando quieras.",
+    }));
+    const createdServices = await Service.insertMany(
+      demoServices.map((s) => ({ ...s, organizationId }))
+    );
+    const serviceIds = createdServices.map((s) => s._id);
+
+    // Contraseña aleatoria + correo placeholder no-login: los demo no acceden a la plataforma
+    const randomPassword = await bcrypt.hash(
+      Math.random().toString(36).slice(-10) + "A1!",
+      10
+    );
+    const ts = Date.now().toString(36);
+    const position = catalog.position;
+    const demoEmployees = [
+      { names: "Ana Ejemplo", position, color: "#7B68EE", email: `demo-ana-${ts}@sin-acceso.agenditapp.com` },
+      { names: "Carlos Ejemplo", position, color: "#98FB98", email: `demo-carlos-${ts}@sin-acceso.agenditapp.com` },
+    ];
+    const createdEmployees = await Employee.insertMany(
+      demoEmployees.map((e) => ({
+        ...e,
+        phoneNumber: "+10000000000",
+        password: randomPassword,
+        services: serviceIds,
+        organizationId,
+      }))
+    );
+
+    // Activar el horario semanal por defecto del modelo (L-V 8-20, Sáb 8-14)
+    organization.weeklySchedule = {
+      ...(organization.weeklySchedule?.toObject?.() || organization.weeklySchedule || {}),
+      enabled: true,
+    };
+    organization.setupCompleted = true;
+    // 📊 Instrumentación del funnel
+    if (!organization.onboardingMilestones) organization.onboardingMilestones = {};
+    const now = new Date();
+    organization.onboardingMilestones.setupCompletedAt =
+      organization.onboardingMilestones.setupCompletedAt || now;
+    organization.onboardingMilestones.seededDemoAt =
+      organization.onboardingMilestones.seededDemoAt || now;
+    await organization.save();
+
+    return {
+      seeded: true,
+      services: createdServices.map((s) => ({ id: s._id, name: s.name })),
+      employees: createdEmployees.map((e) => ({ id: e._id, names: e.names })),
+    };
   },
 };
 

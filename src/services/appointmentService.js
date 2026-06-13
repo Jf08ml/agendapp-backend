@@ -13,6 +13,7 @@ import cancellationService from "./cancellationService.js";
 import packageService from "./packageService.js";
 import { generateCancellationLink } from "../utils/cancellationUtils.js";
 import notificationService from "./notificationService.js";
+import { markOnboardingMilestone } from "../utils/onboardingMilestones.js";
 import mongoose from "mongoose";
 import moment from "moment-timezone";
 
@@ -230,7 +231,12 @@ const appointmentService = {
 
     // Guardar la cita en la base de datos
     const savedAppointment = await newAppointment.save();
-    
+
+    // 📊 Instrumentación: marcar primera cita (fire-and-forget, idempotente)
+    if (savedAppointment.organizationId) {
+      markOnboardingMilestone(savedAppointment.organizationId, "firstAppointmentAt");
+    }
+
     console.log('💾 Appointment guardado:', {
       id: savedAppointment._id,
       hasTokenHash: !!savedAppointment.cancelTokenHash,
@@ -650,6 +656,11 @@ const appointmentService = {
       );
     }
     })(); // fin fire-and-forget
+
+    // 📊 Instrumentación: marcar primera cita (fire-and-forget, idempotente)
+    if (created.length > 0 && organizationId) {
+      markOnboardingMilestone(organizationId, "firstAppointmentAt");
+    }
 
     return created.map((c) => c.saved);
   },

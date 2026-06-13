@@ -356,6 +356,90 @@ const adminController = {
     }
   },
 
+  // ─── Funnel de onboarding / activación ──────────────────────────────────────
+
+  /**
+   * GET /api/admin/onboarding/funnel
+   * Cohorte de organizaciones registradas en el rango y cuántas alcanzaron cada
+   * hito (setup → demo → 1ª cita → WhatsApp → 1er mensaje → pago). Incluye
+   * conversión a pago segmentada por hito (qué hito predice mejor la compra).
+   */
+  getOnboardingFunnel: async (req, res) => {
+    try {
+      const { startDate, endDate } = adminController._resolveDateRange(req.query);
+      const rangeStart = new Date(`${startDate}T00:00:00.000Z`);
+      const rangeEnd = new Date(`${endDate}T23:59:59.999Z`);
+
+      // El modelo Organization no tiene timestamps en docs antiguos, así que la
+      // fecha de registro se deriva del _id (ObjectId), con fallback a createdAt
+      // si existe. Esto hace que la cohorte funcione con todas las orgs.
+      const regDateExpr = { $ifNull: ["$createdAt", { $toDate: "$_id" }] };
+
+      const has = (path) => ({ $cond: [{ $ifNull: [path, false] }, 1, 0] });
+      const hasAnd = (path) => ({
+        $cond: [
+          { $and: [{ $ifNull: [path, false] }, { $ifNull: ["$convertedToPayingAt", false] }] },
+          1,
+          0,
+        ],
+      });
+
+      const [agg] = await Organization.aggregate([
+        { $addFields: { _regDate: regDateExpr } },
+        { $match: { _regDate: { $gte: rangeStart, $lte: rangeEnd } } },
+        {
+          $group: {
+            _id: null,
+            registrados: { $sum: 1 },
+            setupCompleto: { $sum: has("$onboardingMilestones.setupCompletedAt") },
+            conDemo: { $sum: has("$onboardingMilestones.seededDemoAt") },
+            primeraCita: { $sum: has("$onboardingMilestones.firstAppointmentAt") },
+            whatsappConectado: { $sum: has("$onboardingMilestones.whatsappConnectedAt") },
+            primerMensaje: { $sum: has("$onboardingMilestones.firstAutoMessageAt") },
+            convertidasPago: { $sum: has("$convertedToPayingAt") },
+            // Conversión a pago segmentada por hito alcanzado
+            pagoConSetup: { $sum: hasAnd("$onboardingMilestones.setupCompletedAt") },
+            pagoConPrimeraCita: { $sum: hasAnd("$onboardingMilestones.firstAppointmentAt") },
+            pagoConWhatsapp: { $sum: hasAnd("$onboardingMilestones.whatsappConnectedAt") },
+            pagoConPrimerMensaje: { $sum: hasAnd("$onboardingMilestones.firstAutoMessageAt") },
+          },
+        },
+      ]);
+
+      const d = agg || {
+        registrados: 0, setupCompleto: 0, conDemo: 0, primeraCita: 0,
+        whatsappConectado: 0, primerMensaje: 0, convertidasPago: 0,
+        pagoConSetup: 0, pagoConPrimeraCita: 0, pagoConWhatsapp: 0, pagoConPrimerMensaje: 0,
+      };
+      const pct = (num, den) => (den > 0 ? Math.round((num / den) * 1000) / 10 : 0);
+
+      sendResponse(res, 200, {
+        startDate,
+        endDate,
+        // Funnel: cada hito como conteo + % sobre registrados
+        funnel: [
+          { hito: "Registrados", clave: "registrados", total: d.registrados, pct: d.registrados > 0 ? 100 : 0 },
+          { hito: "Completó/saltó setup", clave: "setupCompleto", total: d.setupCompleto, pct: pct(d.setupCompleto, d.registrados) },
+          { hito: "Usó datos de ejemplo", clave: "conDemo", total: d.conDemo, pct: pct(d.conDemo, d.registrados) },
+          { hito: "Creó 1ª cita", clave: "primeraCita", total: d.primeraCita, pct: pct(d.primeraCita, d.registrados) },
+          { hito: "Conectó WhatsApp", clave: "whatsappConectado", total: d.whatsappConectado, pct: pct(d.whatsappConectado, d.registrados) },
+          { hito: "1er mensaje automático", clave: "primerMensaje", total: d.primerMensaje, pct: pct(d.primerMensaje, d.registrados) },
+          { hito: "Convirtió a pago", clave: "convertidasPago", total: d.convertidasPago, pct: pct(d.convertidasPago, d.registrados) },
+        ],
+        // % de conversión a pago entre quienes alcanzaron cada hito (qué predice la compra)
+        conversionPorHito: [
+          { hito: "Completó setup", base: d.setupCompleto, pagaron: d.pagoConSetup, tasaPago: pct(d.pagoConSetup, d.setupCompleto) },
+          { hito: "Creó 1ª cita", base: d.primeraCita, pagaron: d.pagoConPrimeraCita, tasaPago: pct(d.pagoConPrimeraCita, d.primeraCita) },
+          { hito: "Conectó WhatsApp", base: d.whatsappConectado, pagaron: d.pagoConWhatsapp, tasaPago: pct(d.pagoConWhatsapp, d.whatsappConectado) },
+          { hito: "1er mensaje automático", base: d.primerMensaje, pagaron: d.pagoConPrimerMensaje, tasaPago: pct(d.pagoConPrimerMensaje, d.primerMensaje) },
+        ],
+      });
+    } catch (error) {
+      console.error("[admin/getOnboardingFunnel] Error:", error);
+      sendResponse(res, 500, null, "Error al obtener el funnel de onboarding");
+    }
+  },
+
   // ─── Analítica de chatbots (ChatLog) ────────────────────────────────────────
 
   /**

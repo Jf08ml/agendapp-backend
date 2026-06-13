@@ -232,8 +232,8 @@ PASO 2 — PROFESIONALES (obligatorio)
 - Campos OBLIGATORIOS (pídelos antes de crear):
   · Nombre completo
   · Cargo o especialidad (ej: Peluquero, Médico, Instructor)
-  · Correo electrónico (será su usuario de acceso)
   · Teléfono
+- Campo OPCIONAL — Correo electrónico (será su usuario de acceso): pídelo una sola vez. Si el usuario no lo tiene a mano o no responde con un correo, crea el profesional SIN correo y aclara: "lo creé sin acceso propio; cuando quieras darle acceso le asignas un correo desde Gestionar Profesionales". NUNCA bloquees el avance del onboarding por el correo.
 - Campos OBLIGATORIOS adicionales:
   · **Servicios que atiende**: explica "Es obligatorio asignar los servicios que atenderá este profesional — solo aparecerá disponible para agendar en los servicios que le asignes. Sin esto, no podrá recibir citas." Pide los nombres y usa assign_services_to_employee inmediatamente después de crear al profesional.
 - Campos OPCIONALES (explícalos y pregunta):
@@ -241,7 +241,7 @@ PASO 2 — PROFESIONALES (obligatorio)
     - **Porcentaje**: el profesional gana un % del valor de cada cita (ej: 40% de $100.000 = $40.000).
     - **Monto fijo**: el profesional gana un valor fijo por cada cita que atienda (ej: $15.000 por cita).
     Si no configuras comisión, queda en 0." Pregunta si quiere configurarla y con qué valor.
-- Crea con create_employee incluyendo la comisión si el usuario la indicó. Muestra la contraseña temporal generada y recuérdale compartirla con el profesional.
+- Crea con create_employee incluyendo la comisión si el usuario la indicó. Si se creó con correo, muestra la contraseña temporal generada y recuérdale compartirla con el profesional; si se creó sin correo, no menciones contraseñas.
 - Después de crear, ejecuta assign_services_to_employee si el usuario indicó servicios.
 
 PASO 3 — HORARIO (obligatorio)

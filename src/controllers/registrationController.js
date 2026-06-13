@@ -43,7 +43,7 @@ const registrationController = {
   register: async (req, res) => {
     try {
       const { slug, businessName, ownerName, email, password, phone, turnstileToken,
-              default_country, timezone, currency, referralCode } = req.body;
+              default_country, timezone, currency, referralCode, businessVertical } = req.body;
 
       // 1. Validar campos requeridos
       if (!slug || !businessName || !email || !password || !phone) {
@@ -101,6 +101,8 @@ const registrationController = {
         ...(default_country && { default_country: default_country.trim().toUpperCase().slice(0, 2) }),
         ...(timezone && { timezone: timezone.trim() }),
         ...(currency && { currency: currency.trim().toUpperCase().slice(0, 3) }),
+        // Rubro del negocio (opcional) — pre-carga el catálogo de ejemplo
+        ...(businessVertical && { businessVertical }),
         // Agente referidor (si el código era válido)
         ...(referringAgent && {
           referredByAgent: referringAgent._id,

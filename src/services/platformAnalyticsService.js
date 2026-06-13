@@ -28,6 +28,10 @@ function toDateRange(startDate, endDate) {
   };
 }
 
+// El modelo Organization no tenía timestamps en docs antiguos: la fecha de
+// registro se deriva del _id (ObjectId) con fallback a createdAt si existe.
+const ORG_REG_DATE = { $ifNull: ["$createdAt", { $toDate: "$_id" }] };
+
 /**
  * Snapshot de KPIs globales para el rango de fechas dado.
  */
@@ -42,7 +46,11 @@ export async function getPlatformOverview({ startDate, endDate }) {
     trialToActiveConversions,
     mrrRaw,
   ] = await Promise.all([
-    Organization.countDocuments({ createdAt: { $gte: start, $lte: end } }),
+    Organization.aggregate([
+      { $addFields: { _regDate: ORG_REG_DATE } },
+      { $match: { _regDate: { $gte: start, $lte: end } } },
+      { $count: "n" },
+    ]).then((r) => r[0]?.n || 0),
 
     Appointment.aggregate([
       { $match: { startDate: { $gte: start, $lte: end } } },
@@ -137,12 +145,13 @@ export async function getPlatformTimeSeries({ startDate, endDate, granularity = 
 
   const [orgBuckets, appointmentBuckets] = await Promise.all([
     Organization.aggregate([
-      { $match: { createdAt: { $gte: start, $lte: end } } },
+      { $addFields: { _regDate: ORG_REG_DATE } },
+      { $match: { _regDate: { $gte: start, $lte: end } } },
       {
         $group: {
-          _id: { $dateToString: { format, date: "$createdAt" } },
+          _id: { $dateToString: { format, date: "$_regDate" } },
           newOrgs: { $sum: 1 },
-          firstDate: { $min: "$createdAt" },
+          firstDate: { $min: "$_regDate" },
         },
       },
     ]),

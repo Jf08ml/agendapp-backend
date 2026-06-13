@@ -8,11 +8,11 @@ export default [
   {
     name: "create_employee",
     description:
-      "Crea un nuevo profesional/empleado en la organización. Úsalo cuando el usuario quiera registrar a un trabajador (peluquero, médico, instructor, etc.).",
+      "Crea un nuevo profesional/empleado en la organización. Úsalo cuando el usuario quiera registrar a un trabajador (peluquero, médico, instructor, etc.). El email es OPCIONAL: si el usuario no lo tiene a mano, créalo sin email (el profesional simplemente no tendrá acceso propio a la plataforma hasta que se le asigne uno). NO insistas pidiendo el email si el usuario no lo da.",
     parameters: {
       names: { type: "string", description: "Nombre completo del profesional", required: true },
       position: { type: "string", description: "Cargo o especialidad (ej: Peluquero, Médico, Instructor)", required: true },
-      email: { type: "string", description: "Correo electrónico del profesional (será su usuario de acceso)", required: true },
+      email: { type: "string", description: "Correo electrónico del profesional (será su usuario de acceso). OPCIONAL — omítelo si el usuario no lo tiene; el profesional podrá trabajar igual y se le asigna correo después.", required: false },
       phoneNumber: { type: "string", description: "Número de teléfono (con código de país, ej: +573001234567)", required: true },
       commissionType: { type: "string", description: "Tipo de comisión: 'percentage' (porcentaje del valor de la cita) o 'fixed' (monto fijo por cita). Por defecto 'percentage'.", required: false },
       commissionValue: { type: "number", description: "Valor de la comisión. Si es porcentaje, ingresa el número (ej: 40 para 40%). Si es fijo, el monto exacto por cita. Por defecto 0.", required: false },
@@ -21,10 +21,18 @@ export default [
       const tempPassword = generateTempPassword();
       const hashed = await bcrypt.hash(tempPassword, 10);
 
+      // Sin email: placeholder único no-login (el modelo lo exige). El profesional
+      // aparece en la agenda y recibe citas, pero no puede iniciar sesión hasta
+      // que el admin le asigne un correo real desde Gestionar Profesionales.
+      const hasRealEmail = !!params.email?.trim();
+      const email = hasRealEmail
+        ? params.email.toLowerCase().trim()
+        : `profesional-${Date.now().toString(36)}@sin-acceso.agenditapp.com`;
+
       const employee = await Employee.create({
         names: params.names,
         position: params.position,
-        email: params.email.toLowerCase().trim(),
+        email,
         phoneNumber: params.phoneNumber,
         password: hashed,
         commissionType: params.commissionType || "percentage",
@@ -34,9 +42,15 @@ export default [
 
       return {
         success: true,
-        employee: { id: employee._id, names: employee.names, position: employee.position, email: employee.email },
-        tempPassword,
-        note: `Contraseña temporal generada: ${tempPassword} — compártela con el profesional para que pueda iniciar sesión y cambiarla.`,
+        employee: { id: employee._id, names: employee.names, position: employee.position, email: hasRealEmail ? employee.email : null },
+        ...(hasRealEmail
+          ? {
+              tempPassword,
+              note: `Contraseña temporal generada: ${tempPassword} — compártela con el profesional para que pueda iniciar sesión y cambiarla.`,
+            }
+          : {
+              note: "Profesional creado sin correo: ya puede recibir citas en la agenda, pero no tendrá acceso propio a la plataforma. Cuando quieras darle acceso, asígnale un correo desde Gestionar Profesionales.",
+            }),
       };
     },
   },

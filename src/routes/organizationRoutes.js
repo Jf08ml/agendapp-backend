@@ -19,10 +19,14 @@ router.put("/:id", organizationController.updateOrganization);
 // Ruta para eliminar una organización específica por ID
 router.delete("/:id", organizationController.deleteOrganization);
 
+// Sembrar datos de ejemplo (onboarding "Explorar primero")
+router.post("/:id/seed-demo", organizationController.seedDemoData);
+
 // WhatsApp routes for organization
 router.post("/:id/wa/connect", waController.connectSession);
 router.get("/:id/wa/status", waController.getStatus);
 router.post("/:id/wa/send", waController.send);
+router.post("/:id/wa/welcome-test", waController.welcomeTest);
 router.post("/:id/wa/restart", waController.restart);
 router.post("/:id/wa/logout", waController.logout);
 

@@ -346,6 +346,25 @@ const organizationSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+
+  // Rubro del negocio (capturado en el registro). Define el catálogo de servicios
+  // de ejemplo que se pre-carga en el onboarding.
+  businessVertical: {
+    type: String,
+    enum: ["barberia", "unas", "salon", "spa", "estetica", "consultorio", "clases", "mascotas", "otro"],
+    default: null,
+  },
+
+  // ── Instrumentación del funnel de onboarding/activación ──────────────────
+  // Timestamps del primer hito de cada tipo. Se setean una sola vez (la primera
+  // vez que ocurre el evento) para medir TTV y conversión por hito.
+  onboardingMilestones: {
+    setupCompletedAt:    { type: Date, default: null }, // completó o saltó el wizard
+    seededDemoAt:        { type: Date, default: null }, // usó "Explorar primero" con datos demo
+    firstAppointmentAt:  { type: Date, default: null }, // creó su primera cita
+    whatsappConnectedAt: { type: Date, default: null }, // conectó WhatsApp por primera vez
+    firstAutoMessageAt:  { type: Date, default: null }, // se envió el primer mensaje automático
+  },
   blockHolidaysForReservations: {
     type: Boolean,
     default: false,
@@ -446,6 +465,6 @@ const organizationSchema = new mongoose.Schema({
     enabled: { type: Boolean, default: false },
     text: { type: String, default: "" },
   },
-});
+}, { timestamps: true });
 
 export default mongoose.model("Organization", organizationSchema);
