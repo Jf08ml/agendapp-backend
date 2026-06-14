@@ -3,7 +3,7 @@ import express from "express";
 import { roomController, classController, sessionController } from "../controllers/classController.js";
 import { verifyToken, optionalAuth } from "../middleware/authMiddleware.js";
 import { organizationResolver } from "../middleware/organizationResolver.js";
-import { requireActiveMembership } from "../middleware/membershipMiddleware.js";
+import { requireActiveMembership, requireClassesModule } from "../middleware/membershipMiddleware.js";
 
 const router = express.Router();
 
@@ -66,6 +66,7 @@ router.post(
   organizationResolver,
   verifyToken,
   requireActiveMembership,
+  requireClassesModule,
   sessionController.bulkCreate
 );
 
@@ -75,6 +76,7 @@ router.post(
   organizationResolver,
   verifyToken,
   requireActiveMembership,
+  requireClassesModule,
   sessionController.create
 );
 router.get(
@@ -141,6 +143,7 @@ router.post(
   organizationResolver,
   verifyToken,
   requireActiveMembership,
+  requireClassesModule,
   classController.create
 );
 router.get(

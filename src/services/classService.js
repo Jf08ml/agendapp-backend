@@ -122,6 +122,19 @@ async function assertEmployeeAvailable(employeeId, startDate, endDate, excludeSe
 }
 
 /**
+ * Verifica que el cupo de la sesión no exceda la capacidad física del salón.
+ */
+async function assertCapacityFitsRoom(roomId, capacity) {
+  const room = await Room.findById(roomId);
+  if (!room) throw new Error("Salón no encontrado");
+  if (capacity > room.capacity) {
+    throw new Error(
+      `El cupo (${capacity}) supera la capacidad del salón "${room.name}" (${room.capacity})`
+    );
+  }
+}
+
+/**
  * Verifica que el salón no tenga otra sesión en el mismo horario.
  */
 async function assertRoomAvailable(roomId, startDate, endDate, excludeSessionId = null) {
@@ -160,6 +173,9 @@ const sessionService = {
       if (!classDoc) throw new Error("Clase no encontrada");
       sessionCapacity = classDoc.defaultCapacity;
     }
+
+    // El cupo no puede superar la capacidad física del salón
+    await assertCapacityFitsRoom(roomId, sessionCapacity);
 
     const session = new ClassSession({
       classId,
@@ -239,6 +255,12 @@ const sessionService = {
       await assertRoomAvailable(roomId, startDate, endDate, id);
     }
 
+    // Si cambia el cupo o el salón, validar que el cupo quepa en el salón
+    if (data.capacity !== undefined || data.roomId) {
+      const nextCapacity = data.capacity !== undefined ? data.capacity : session.capacity;
+      await assertCapacityFitsRoom(roomId, nextCapacity);
+    }
+
     Object.assign(session, { ...data, startDate, endDate });
     return session.save();
   },
@@ -315,6 +337,9 @@ const sessionService = {
 
     const sessionCapacity = capacity || classDoc.defaultCapacity;
     const durationMin = classDoc.duration;
+
+    // El cupo no puede superar la capacidad física del salón (una sola vez)
+    await assertCapacityFitsRoom(roomId, sessionCapacity);
 
     // Parsear hora "HH:MM"
     const [startHour, startMinute] = time.split(":").map(Number);

@@ -6,7 +6,7 @@ const enrollmentController = {
   // 🌐 Público: cliente reserva desde la web
   createPublic: async (req, res) => {
     try {
-      const { organizationId, sessionId, attendee, companion, notes } = req.body;
+      const { organizationId, sessionId, attendee, companion, notes, clientPackageId } = req.body;
       if (!organizationId || !sessionId || !attendee) {
         return sendResponse(res, 400, null, "organizationId, sessionId y attendee son requeridos");
       }
@@ -16,6 +16,7 @@ const enrollmentController = {
         attendee,
         companion,
         notes,
+        clientPackageId,
       });
       // Incluir el cancelToken en la respuesta (solo en creación, no se almacena en claro)
       const response = enrollments.map((e) => ({
@@ -28,11 +29,35 @@ const enrollmentController = {
     }
   },
 
+  // 🌐 Público: consultar inscripción(es) por token de cancelación
+  getByToken: async (req, res) => {
+    try {
+      const token = req.query.token || req.params.token;
+      if (!token) return sendResponse(res, 400, null, "Token requerido");
+      const info = await enrollmentService.getEnrollmentInfoByToken(token);
+      sendResponse(res, 200, info, "Inscripción encontrada");
+    } catch (error) {
+      sendResponse(res, 404, null, error.message);
+    }
+  },
+
+  // 🌐 Público: cancelar inscripción(es) por token
+  cancelByToken: async (req, res) => {
+    try {
+      const { token, enrollmentIds } = req.body;
+      if (!token) return sendResponse(res, 400, null, "Token requerido");
+      const result = await enrollmentService.cancelEnrollmentsByToken(token, enrollmentIds);
+      sendResponse(res, 200, result, "Inscripción cancelada exitosamente");
+    } catch (error) {
+      sendResponse(res, 400, null, error.message);
+    }
+  },
+
   // 🔒 Admin: crea inscripción(es) directamente (siempre confirmadas)
   adminCreate: async (req, res) => {
     try {
       const organizationId = req.organization._id;
-      const { sessionId, attendees, applyDiscount, notes } = req.body;
+      const { sessionId, attendees, applyDiscount, notes, clientPackageId } = req.body;
       if (!sessionId || !attendees?.length) {
         return sendResponse(res, 400, null, "sessionId y attendees son requeridos");
       }
@@ -42,6 +67,7 @@ const enrollmentController = {
         attendees,
         applyDiscount,
         notes,
+        clientPackageId,
       });
       sendResponse(res, 201, enrollments, "Inscripción(es) creada(s) exitosamente");
     } catch (error) {
@@ -53,13 +79,11 @@ const enrollmentController = {
   getByOrganization: async (req, res) => {
     try {
       const organizationId = req.organization._id;
-      const { status, sessionId, classId, from, to, page, limit } = req.query;
+      const { status, sessionId, classId, page, limit } = req.query;
       const result = await enrollmentService.getOrganizationEnrollments(organizationId, {
         status,
         sessionId,
         classId,
-        from,
-        to,
         page: parseInt(page) || 1,
         limit: parseInt(limit) || 50,
       });

@@ -31,16 +31,53 @@ const clientPackageServiceSchema = new mongoose.Schema({
   },
 });
 
+// 📚 Créditos de clase del paquete del cliente
+const clientPackageClassSchema = new mongoose.Schema({
+  classId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Class",
+    required: true,
+  },
+  sessionsIncluded: {
+    type: Number,
+    required: true,
+    min: 1,
+  },
+  sessionsUsed: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  sessionsRemaining: {
+    type: Number,
+    required: true,
+    min: 0,
+  },
+});
+
 const consumptionHistorySchema = new mongoose.Schema({
+  // Para servicios (citas)
   appointmentId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Appointment",
-    required: true,
   },
   serviceId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Service",
-    required: true,
+  },
+  // 📚 Para clases (inscripciones)
+  enrollmentId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Enrollment",
+  },
+  classId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Class",
+  },
+  itemType: {
+    type: String,
+    enum: ["service", "class"],
+    default: "service",
   },
   action: {
     type: String,
@@ -71,6 +108,8 @@ const clientPackageSchema = new mongoose.Schema(
       required: true,
     },
     services: [clientPackageServiceSchema],
+    // 📚 Créditos de clase
+    classes: [clientPackageClassSchema],
     purchaseDate: {
       type: Date,
       default: Date.now,

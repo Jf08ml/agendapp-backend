@@ -1,7 +1,23 @@
 import ServicePackage from "../models/servicePackageModel.js";
 import ClientPackage from "../models/clientPackageModel.js";
+import Class from "../models/classModel.js";
 import serviceService from "./serviceService.js";
 import mongoose from "mongoose";
+
+/**
+ * Valida que todas las clases del paquete existan y pertenezcan a la organización.
+ */
+async function validatePackageClasses(classes = [], organizationId) {
+  for (const cls of classes) {
+    const classDoc = await Class.findById(cls.classId);
+    if (!classDoc) {
+      throw new Error(`Clase no encontrada: ${cls.classId}`);
+    }
+    if (classDoc.organizationId.toString() !== organizationId.toString()) {
+      throw new Error(`La clase ${classDoc.name} no pertenece a esta organización`);
+    }
+  }
+}
 
 const packageService = {
   // =============================================
@@ -10,7 +26,7 @@ const packageService = {
 
   createServicePackage: async (data, organizationId) => {
     // Validar que todos los servicios existan en la organización
-    for (const svc of data.services) {
+    for (const svc of (data.services || [])) {
       const service = await serviceService.getServiceById(svc.serviceId);
       if (!service) {
         throw new Error(`Servicio no encontrado: ${svc.serviceId}`);
@@ -19,6 +35,8 @@ const packageService = {
         throw new Error(`El servicio ${service.name} no pertenece a esta organización`);
       }
     }
+    // Validar clases
+    await validatePackageClasses(data.classes, organizationId);
 
     const servicePackage = new ServicePackage({
       ...data,
@@ -35,12 +53,14 @@ const packageService = {
     }
     return await ServicePackage.find(filter)
       .populate("services.serviceId", "name price duration")
+      .populate("classes.classId", "name color pricePerPerson duration")
       .sort({ createdAt: -1 });
   },
 
   getServicePackageById: async (id) => {
     return await ServicePackage.findById(id)
-      .populate("services.serviceId", "name price duration");
+      .populate("services.serviceId", "name price duration")
+      .populate("classes.classId", "name color pricePerPerson duration");
   },
 
   updateServicePackage: async (id, data, organizationId) => {
@@ -56,12 +76,18 @@ const packageService = {
         }
       }
     }
+    // Validar clases si se actualizan
+    if (data.classes) {
+      await validatePackageClasses(data.classes, organizationId);
+    }
 
     return await ServicePackage.findOneAndUpdate(
       { _id: id, organizationId },
       { $set: data },
       { new: true }
-    ).populate("services.serviceId", "name price duration");
+    )
+      .populate("services.serviceId", "name price duration")
+      .populate("classes.classId", "name color pricePerPerson duration");
   },
 
   deleteServicePackage: async (id, organizationId) => {
@@ -104,6 +130,12 @@ const packageService = {
         sessionsUsed: 0,
         sessionsRemaining: svc.sessionsIncluded,
       })),
+      classes: (servicePackage.classes || []).map((cls) => ({
+        classId: cls.classId,
+        sessionsIncluded: cls.sessionsIncluded,
+        sessionsUsed: 0,
+        sessionsRemaining: cls.sessionsIncluded,
+      })),
       purchaseDate,
       expirationDate,
       status: "active",
@@ -119,6 +151,7 @@ const packageService = {
     return await ClientPackage.find({ clientId, organizationId })
       .populate("servicePackageId", "name description")
       .populate("services.serviceId", "name price duration")
+      .populate("classes.classId", "name color pricePerPerson duration")
       .sort({ createdAt: -1 });
   },
 
@@ -132,6 +165,7 @@ const packageService = {
     })
       .populate("servicePackageId", "name description")
       .populate("services.serviceId", "name price duration")
+      .populate("classes.classId", "name color pricePerPerson duration")
       .sort({ expirationDate: 1 });
   },
 
@@ -147,7 +181,97 @@ const packageService = {
     })
       .populate("servicePackageId", "name description")
       .populate("services.serviceId", "name price duration")
+      .populate("classes.classId", "name color pricePerPerson duration")
       .sort({ expirationDate: 1 });
+  },
+
+  // 📚 Paquetes activos del cliente con créditos para una clase específica
+  getActivePackagesForClass: async (clientId, classId, organizationId) => {
+    const now = new Date();
+    return await ClientPackage.find({
+      clientId,
+      organizationId,
+      status: "active",
+      expirationDate: { $gt: now },
+      "classes.classId": new mongoose.Types.ObjectId(classId),
+      "classes.sessionsRemaining": { $gt: 0 },
+    })
+      .populate("servicePackageId", "name description")
+      .populate("classes.classId", "name color pricePerPerson duration")
+      .sort({ expirationDate: 1 });
+  },
+
+  // 📚 Buscar paquetes con créditos de clase por el identificador configurado (reserva pública)
+  checkClientClassPackagesByIdentifier: async (field, value, classIds, organizationId) => {
+    const Client = mongoose.model("Client");
+    const v = (value || "").trim();
+    if (!v) return { client: null, packages: [] };
+
+    let query = { organizationId };
+    if (field === "email") {
+      query.email = v.toLowerCase();
+    } else if (field === "documentId") {
+      query.documentId = v;
+    } else {
+      // phone: el frontend envía E.164; aceptamos también el nacional como respaldo
+      query.$or = [{ phone_e164: v }, { phoneNumber: v }];
+    }
+
+    const client = await Client.findOne(query);
+    if (!client) return { client: null, packages: [] };
+
+    const now = new Date();
+    const classObjectIds = classIds.map((id) => new mongoose.Types.ObjectId(id));
+
+    const packages = await ClientPackage.find({
+      clientId: client._id,
+      organizationId,
+      status: "active",
+      expirationDate: { $gt: now },
+      "classes.classId": { $in: classObjectIds },
+    })
+      .populate("servicePackageId", "name description")
+      .populate("classes.classId", "name color pricePerPerson duration");
+
+    const packagesWithAvailability = packages.filter((pkg) =>
+      (pkg.classes || []).some(
+        (cls) =>
+          classObjectIds.some((id) => id.equals(cls.classId._id || cls.classId)) &&
+          cls.sessionsRemaining > 0
+      )
+    );
+
+    return { client, packages: packagesWithAvailability };
+  },
+
+  // 📚 Buscar paquetes con créditos de clase por teléfono (reserva pública)
+  checkClientClassPackagesByPhone: async (phone_e164, classIds, organizationId) => {
+    const Client = mongoose.model("Client");
+    const client = await Client.findOne({ phone_e164, organizationId });
+    if (!client) return { client: null, packages: [] };
+
+    const now = new Date();
+    const classObjectIds = classIds.map((id) => new mongoose.Types.ObjectId(id));
+
+    const packages = await ClientPackage.find({
+      clientId: client._id,
+      organizationId,
+      status: "active",
+      expirationDate: { $gt: now },
+      "classes.classId": { $in: classObjectIds },
+    })
+      .populate("servicePackageId", "name description")
+      .populate("classes.classId", "name color pricePerPerson duration");
+
+    const packagesWithAvailability = packages.filter((pkg) =>
+      (pkg.classes || []).some(
+        (cls) =>
+          classObjectIds.some((id) => id.equals(cls.classId._id || cls.classId)) &&
+          cls.sessionsRemaining > 0
+      )
+    );
+
+    return { client, packages: packagesWithAvailability };
   },
 
   // Buscar paquetes por teléfono (para reserva online pública)
@@ -172,7 +296,8 @@ const packageService = {
       "services.serviceId": { $in: serviceObjectIds },
     })
       .populate("servicePackageId", "name description")
-      .populate("services.serviceId", "name price duration");
+      .populate("services.serviceId", "name price duration")
+      .populate("classes.classId", "name color pricePerPerson duration");
 
     // Filtrar solo servicios con sesiones restantes
     const packagesWithAvailability = packages.filter((pkg) =>
@@ -222,11 +347,101 @@ const packageService = {
       throw new Error("No hay sesiones disponibles en este paquete para el servicio seleccionado");
     }
 
-    // Verificar si todas las sesiones se agotaron
-    const allExhausted = updated.services.every((svc) => svc.sessionsRemaining <= 0);
+    // Verificar si todas las sesiones (servicios + clases) se agotaron
+    const allExhausted =
+      updated.services.every((svc) => svc.sessionsRemaining <= 0) &&
+      (updated.classes || []).every((cls) => cls.sessionsRemaining <= 0);
     if (allExhausted) {
       updated.status = "exhausted";
       await updated.save({ session: dbSession });
+    }
+
+    return updated;
+  },
+
+  // 📚 Consumir 1 crédito de clase (al inscribirse a una sesión)
+  consumeClassSession: async (clientPackageId, classId, enrollmentId, { session: dbSession } = {}) => {
+    const classObjId = new mongoose.Types.ObjectId(classId);
+
+    const updated = await ClientPackage.findOneAndUpdate(
+      {
+        _id: clientPackageId,
+        status: { $in: ["active", "exhausted"] },
+        "classes.classId": classObjId,
+        "classes.sessionsRemaining": { $gt: 0 },
+      },
+      {
+        $inc: {
+          "classes.$.sessionsUsed": 1,
+          "classes.$.sessionsRemaining": -1,
+        },
+        $push: {
+          consumptionHistory: {
+            enrollmentId,
+            classId: classObjId,
+            itemType: "class",
+            action: "consume",
+            date: new Date(),
+          },
+        },
+      },
+      { new: true, session: dbSession }
+    );
+
+    if (!updated) {
+      throw new Error("No hay créditos disponibles en este paquete para la clase seleccionada");
+    }
+
+    const allExhausted =
+      updated.services.every((svc) => svc.sessionsRemaining <= 0) &&
+      (updated.classes || []).every((cls) => cls.sessionsRemaining <= 0);
+    if (allExhausted) {
+      updated.status = "exhausted";
+      await updated.save({ session: dbSession });
+    }
+
+    return updated;
+  },
+
+  // 📚 Reembolsar 1 crédito de clase (al cancelar la inscripción)
+  refundClassSession: async (clientPackageId, classId, enrollmentId) => {
+    const classObjId = new mongoose.Types.ObjectId(classId);
+
+    const updated = await ClientPackage.findOneAndUpdate(
+      {
+        _id: clientPackageId,
+        "classes.classId": classObjId,
+      },
+      {
+        $inc: {
+          "classes.$.sessionsUsed": -1,
+          "classes.$.sessionsRemaining": 1,
+        },
+        $push: {
+          consumptionHistory: {
+            enrollmentId,
+            classId: classObjId,
+            itemType: "class",
+            action: "refund",
+            date: new Date(),
+          },
+        },
+      },
+      { new: true }
+    );
+
+    if (!updated) {
+      throw new Error("No se pudo reembolsar el crédito de clase del paquete");
+    }
+
+    if (updated.status === "exhausted") {
+      const hasRemaining =
+        updated.services.some((svc) => svc.sessionsRemaining > 0) ||
+        (updated.classes || []).some((cls) => cls.sessionsRemaining > 0);
+      if (hasRemaining && updated.expirationDate > new Date()) {
+        updated.status = "active";
+        await updated.save();
+      }
     }
 
     return updated;
@@ -263,7 +478,9 @@ const packageService = {
 
     // Si estaba exhausted y ahora tiene sesiones, reactivar
     if (updated.status === "exhausted") {
-      const hasRemaining = updated.services.some((svc) => svc.sessionsRemaining > 0);
+      const hasRemaining =
+        updated.services.some((svc) => svc.sessionsRemaining > 0) ||
+        (updated.classes || []).some((cls) => cls.sessionsRemaining > 0);
       if (hasRemaining && updated.expirationDate > new Date()) {
         updated.status = "active";
         await updated.save();
@@ -323,6 +540,7 @@ const packageService = {
       .populate("clientId", "name phoneNumber")
       .populate("servicePackageId", "name description")
       .populate("services.serviceId", "name price duration")
+      .populate("classes.classId", "name color pricePerPerson duration")
       .sort({ createdAt: -1 });
   },
 
@@ -353,7 +571,8 @@ const packageService = {
     return ClientPackage.findById(pkg._id)
       .populate('clientId', 'name phoneNumber')
       .populate('servicePackageId', 'name description')
-      .populate('services.serviceId', 'name price duration');
+      .populate('services.serviceId', 'name price duration')
+      .populate('classes.classId', 'name color pricePerPerson duration');
   },
 
   // 💰 Eliminar un pago de un paquete de cliente
@@ -367,7 +586,8 @@ const packageService = {
     return ClientPackage.findById(pkg._id)
       .populate('clientId', 'name phoneNumber')
       .populate('servicePackageId', 'name description')
-      .populate('services.serviceId', 'name price duration');
+      .populate('services.serviceId', 'name price duration')
+      .populate('classes.classId', 'name color pricePerPerson duration');
   },
 };
 

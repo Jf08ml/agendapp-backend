@@ -195,8 +195,7 @@ Tu inscripción a la clase ha sido *confirmada*.
 📍 Lugar: {{organization}}
 📍 Dirección: {{address}}
 💰 Valor: {{price}}
-{{discount}}Si necesitas cancelar tu inscripción, responde a este mensaje y te ayudamos.
-
+{{discount}}{{cancelBlock}}
 ¡Te esperamos!`,
 
       // ⏳ Inscripción pendiente de aprobación
@@ -212,6 +211,19 @@ Hemos recibido tu solicitud de inscripción.
 {{discount}}Tu inscripción está *pendiente de aprobación*. Te notificaremos en cuanto sea confirmada.
 
 Si tienes alguna pregunta, responde a este mensaje.`,
+
+      // 🔔 Recordatorio de clase
+      classReminder: `🔔 ¡Hola, {{names}}!
+
+Te recordamos tu próxima clase:
+
+📚 Clase: *{{className}}*
+🗓️ Fecha: {{date}}
+⏰ Horario: {{startTime}} - {{endTime}}
+📍 Lugar: {{organization}}
+📍 Dirección: {{address}}
+{{cancelBlock}}
+¡Te esperamos!`,
 
       // ❌ Inscripción cancelada
       classEnrollmentCancelled: `❌ ¡Hola, {{names}}!

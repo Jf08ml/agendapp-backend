@@ -1,7 +1,6 @@
 // src/controllers/classController.js
 import { roomService, classTypeService, sessionService } from "../services/classService.js";
 import sendResponse from "../utils/sendResponse.js";
-import membershipService from "../services/membershipService.js";
 
 // ══════════════════════════════════════════════════════
 // SALONES
@@ -63,14 +62,8 @@ const roomController = {
 const classController = {
   create: async (req, res) => {
     try {
+      // El gating del módulo de clases lo aplica requireClassesModule (middleware).
       const organizationId = req.organization._id;
-      const limits = await membershipService.getPlanLimits(organizationId);
-      if (!limits?.classesModule) {
-        return sendResponse(res, 403, null,
-          "El módulo de clases requiere el Plan Marca/Pro.",
-          { reason: "plan_limit_classes" }
-        );
-      }
       const classDoc = await classTypeService.create(organizationId, req.body);
       sendResponse(res, 201, classDoc, "Clase creada exitosamente");
     } catch (error) {

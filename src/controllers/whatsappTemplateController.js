@@ -38,6 +38,11 @@ const whatsappTemplateController = {
         clientNoShowAck: whatsappTemplates.getDefaultTemplate('clientNoShowAck'),
         loyaltyServiceReward: whatsappTemplates.getDefaultTemplate('loyaltyServiceReward'),
         loyaltyReferralReward: whatsappTemplates.getDefaultTemplate('loyaltyReferralReward'),
+        // 📚 Módulo de Clases
+        classEnrollmentConfirmed: whatsappTemplates.getDefaultTemplate('classEnrollmentConfirmed'),
+        classEnrollmentPending: whatsappTemplates.getDefaultTemplate('classEnrollmentPending'),
+        classEnrollmentCancelled: whatsappTemplates.getDefaultTemplate('classEnrollmentCancelled'),
+        classReminder: whatsappTemplates.getDefaultTemplate('classReminder'),
       };
 
       // Plantillas personalizadas (si existen)
@@ -110,6 +115,27 @@ const whatsappTemplateController = {
           isCustom: !!customTemplates.loyaltyReferralReward,
           variables: ['{{names}}', '{{reward}}', '{{organization}}'],
         },
+        // 📚 Módulo de Clases
+        classEnrollmentConfirmed: {
+          content: customTemplates.classEnrollmentConfirmed || defaultTemplates.classEnrollmentConfirmed,
+          isCustom: !!customTemplates.classEnrollmentConfirmed,
+          variables: ['{{names}}', '{{organization}}', '{{address}}', '{{className}}', '{{date}}', '{{startTime}}', '{{endTime}}', '{{price}}', '{{discount}}', '{{cancelBlock}}'],
+        },
+        classEnrollmentPending: {
+          content: customTemplates.classEnrollmentPending || defaultTemplates.classEnrollmentPending,
+          isCustom: !!customTemplates.classEnrollmentPending,
+          variables: ['{{names}}', '{{organization}}', '{{className}}', '{{date}}', '{{startTime}}', '{{endTime}}', '{{price}}', '{{discount}}'],
+        },
+        classEnrollmentCancelled: {
+          content: customTemplates.classEnrollmentCancelled || defaultTemplates.classEnrollmentCancelled,
+          isCustom: !!customTemplates.classEnrollmentCancelled,
+          variables: ['{{names}}', '{{organization}}', '{{className}}', '{{date}}', '{{startTime}}', '{{endTime}}'],
+        },
+        classReminder: {
+          content: customTemplates.classReminder || defaultTemplates.classReminder,
+          isCustom: !!customTemplates.classReminder,
+          variables: ['{{names}}', '{{organization}}', '{{address}}', '{{className}}', '{{date}}', '{{startTime}}', '{{endTime}}', '{{cancelBlock}}'],
+        },
       };
 
       // También enviar los templates por defecto para el botón "Restaurar"
@@ -146,6 +172,10 @@ const whatsappTemplateController = {
         'clientNoShowAck',
         'loyaltyServiceReward',
         'loyaltyReferralReward',
+        'classEnrollmentConfirmed',
+        'classEnrollmentPending',
+        'classEnrollmentCancelled',
+        'classReminder',
       ];
 
       if (!validTypes.includes(templateType)) {
@@ -214,6 +244,10 @@ const whatsappTemplateController = {
         'clientNoShowAck',
         'loyaltyServiceReward',
         'loyaltyReferralReward',
+        'classEnrollmentConfirmed',
+        'classEnrollmentPending',
+        'classEnrollmentCancelled',
+        'classReminder',
       ];
 
       if (!validTypes.includes(templateType)) {
@@ -279,6 +313,10 @@ const whatsappTemplateController = {
         'clientNoShowAck',
         'loyaltyServiceReward',
         'loyaltyReferralReward',
+        'classEnrollmentConfirmed',
+        'classEnrollmentPending',
+        'classEnrollmentCancelled',
+        'classReminder',
       ];
 
       for (const key in templates) {
@@ -350,6 +388,14 @@ const whatsappTemplateController = {
         manage_block: "https://agenda.example.com/manage/abc123",
         recommendations: `\n\n📝 *Recomendaciones:*\n• Llegar 10 minutos antes\n• Traer el cabello limpio y seco`,
         reward: "1 servicio gratis en tu próxima visita",
+        // 📚 Módulo de Clases
+        className: "Yoga para principiantes",
+        startTime: "07:00 AM",
+        endTime: "08:00 AM",
+        price: "$25.000",
+        discount: "🎉 Descuento grupal del 10% aplicado\n",
+        cancelLink: "https://agenda.example.com/cancelar-clase?token=abc123",
+        cancelBlock: "\n❌ Si necesitas cancelar tu inscripción, hazlo aquí:\nhttps://agenda.example.com/cancelar-clase?token=abc123\n",
       };
 
       // Renderizar la plantilla con los datos de ejemplo
@@ -395,6 +441,10 @@ const whatsappTemplateController = {
           clientNoShowAck: true,
           loyaltyServiceReward: true,
           loyaltyReferralReward: true,
+          classEnrollmentConfirmed: true,
+          classEnrollmentPending: true,
+          classEnrollmentCancelled: true,
+          classReminder: true,
         };
         return sendResponse(res, 200, defaults, "Configuración por defecto");
       }
@@ -412,6 +462,10 @@ const whatsappTemplateController = {
         clientNoShowAck: true,
         loyaltyServiceReward: true,
         loyaltyReferralReward: true,
+        classEnrollmentConfirmed: true,
+        classEnrollmentPending: true,
+        classEnrollmentCancelled: true,
+        classReminder: true,
       };
 
       sendResponse(res, 200, settings, "Configuración obtenida correctamente");
@@ -448,6 +502,10 @@ const whatsappTemplateController = {
         'clientNoShowAck',
         'loyaltyServiceReward',
         'loyaltyReferralReward',
+        'classEnrollmentConfirmed',
+        'classEnrollmentPending',
+        'classEnrollmentCancelled',
+        'classReminder',
       ];
 
       for (const key of Object.keys(enabledTypes)) {

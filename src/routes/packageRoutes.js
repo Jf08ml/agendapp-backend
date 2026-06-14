@@ -11,6 +11,16 @@ router.get(
   organizationResolver,
   packageController.checkClientPackagesPublic
 );
+router.get(
+  "/public/client-class-check",
+  organizationResolver,
+  packageController.checkClientClassPackagesPublic
+);
+router.get(
+  "/public/client-class-check-by-identifier",
+  organizationResolver,
+  packageController.checkClientClassPackagesByIdentifierPublic
+);
 
 // Rutas protegidas (admin)
 router.post("/", verifyToken, packageController.createServicePackage);
@@ -43,6 +53,11 @@ router.get(
   "/client/:clientId/service/:serviceId",
   verifyToken,
   packageController.getActivePackagesForService
+);
+router.get(
+  "/client/:clientId/class/:classId",
+  verifyToken,
+  packageController.getActivePackagesForClass
 );
 
 export default router;

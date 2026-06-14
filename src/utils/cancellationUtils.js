@@ -26,6 +26,34 @@ export const generateCancellationLink = (token, organization, source = 'confirma
   return `${baseUrl}/cancel?token=${token}&source=${source}`;
 };
 
+/**
+ * Resuelve la URL base pública de una organización (dominio custom > slug > fallback).
+ */
+const resolveBaseUrl = (organization) => {
+  let baseUrl = process.env.FRONTEND_BASE_URL || 'http://localhost:5173';
+  if (organization) {
+    if (organization.domains && organization.domains.length > 0) {
+      const domain = organization.domains[0];
+      const protocol = domain.includes('localhost') ? 'http' : 'https';
+      baseUrl = `${protocol}://${domain}`;
+    } else if (organization.slug) {
+      baseUrl = `https://${organization.slug}.${MAIN_DOMAIN}`;
+    }
+  }
+  return baseUrl;
+};
+
+/**
+ * Genera el link de cancelación pública para una inscripción a clase.
+ * @param {string} token - Token de cancelación
+ * @param {Object} organization - Objeto de organización con domains y slug
+ * @returns {string} URL completa de cancelación de clase
+ */
+export const generateClassCancellationLink = (token, organization) => {
+  return `${resolveBaseUrl(organization)}/cancelar-clase?token=${token}`;
+};
+
 export default {
   generateCancellationLink,
+  generateClassCancellationLink,
 };

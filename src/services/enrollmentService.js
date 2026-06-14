@@ -6,12 +6,26 @@ import ClassSession from "../models/classSessionModel.js";
 import Class from "../models/classModel.js";
 import Client from "../models/clientModel.js";
 import Organization from "../models/organizationModel.js";
+import WhatsappTemplate from "../models/whatsappTemplateModel.js";
 import { normalizePhoneNumber } from "../utils/phoneUtils.js";
-import { waIntegrationService } from "./waIntegrationService.js";
+import { generateClassCancellationLink } from "../utils/cancellationUtils.js";
+import whatsappService from "./sendWhatsappService.js";
+import packageService from "./packageService.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
 import moment from "moment-timezone";
 import notificationService from "./notificationService.js";
 import subscriptionService from "./subscriptionService.js";
+import membershipService from "./membershipService.js";
+
+/**
+ * Lanza un error si el plan de la organización no incluye el módulo de clases.
+ */
+async function assertClassesModule(organizationId) {
+  const limits = await membershipService.getPlanLimits(organizationId);
+  if (!limits?.classesModule) {
+    throw new Error("Las reservas de clases no están disponibles en este momento.");
+  }
+}
 
 // ══════════════════════════════════════════════════════
 // HELPERS INTERNOS
@@ -110,21 +124,35 @@ async function sendEnrollmentWhatsApp(templateType, organizationId, enrollment, 
         enrollment.discountPercent > 0
           ? `🎉 Descuento grupal del ${enrollment.discountPercent}% aplicado\n`
           : "",
+      cancelLink: enrollment.cancellationLink || "",
+      cancelBlock: enrollment.cancellationLink
+        ? `\n❌ Si necesitas cancelar tu inscripción, hazlo aquí:\n${enrollment.cancellationLink}\n`
+        : "",
     };
 
-    const msg = await whatsappTemplates.getRenderedTemplate(
+    // Respetar el toggle de envío configurado por la organización
+    const templateDoc = await WhatsappTemplate.findOne({ organizationId });
+    if (templateDoc?.enabledTypes?.[templateType] === false) {
+      return;
+    }
+
+    // Pre-renderizar el texto (sirve como fallback para Meta y como mensaje Baileys)
+    const fallbackMessage = await whatsappTemplates.getRenderedTemplate(
       organizationId,
       templateType,
       templateData
     );
-    if (!msg) return;
+    if (!fallbackMessage) return;
 
-    await waIntegrationService.sendMessage({
-      orgId: organizationId,
+    // Ruta unificada: Meta (plantilla aprobada → Baileys coexistencia → texto libre)
+    // o Baileys directo, según la configuración de la organización.
+    await whatsappService.sendNotification(
+      organizationId,
       phone,
-      message: msg,
-      image: null,
-    });
+      templateType,
+      templateData,
+      { fallbackMessage }
+    );
   } catch (err) {
     console.error(`[enrollmentService] Error enviando WA (${templateType}):`, err.message);
   }
@@ -145,8 +173,11 @@ async function sendEnrollmentWhatsApp(templateType, organizationId, enrollment, 
  * @param {Object} [params.companion]    - datos del acompañante (opcional)
  * @param {string} [params.notes]
  */
-async function createPublicEnrollments({ organizationId, sessionId, attendee, companion, notes }) {
+async function createPublicEnrollments({ organizationId, sessionId, attendee, companion, notes, clientPackageId }) {
   const numPeople = companion ? 2 : 1;
+
+  // 0. Verificar que el plan incluya el módulo de clases
+  await assertClassesModule(organizationId);
 
   // 1. Cargar sesión y clase
   const session = await ClassSession.findById(sessionId).populate("classId");
@@ -202,7 +233,8 @@ async function createPublicEnrollments({ organizationId, sessionId, attendee, co
   }
 
   const created = [];
-  for (const { attendeeData, client } of enrollmentsData) {
+  for (let i = 0; i < enrollmentsData.length; i++) {
+    const { attendeeData, client } = enrollmentsData[i];
     const { token, hash } = generateToken();
     const normalized = normalizePhoneNumber(
       attendeeData.phone,
@@ -218,7 +250,7 @@ async function createPublicEnrollments({ organizationId, sessionId, attendee, co
       attendee: {
         name: attendeeData.name,
         phone: attendeeData.phone,
-        phone_e164: normalized?.e164 || attendeeData.phone,
+        phone_e164: normalized?.phone_e164 || attendeeData.phone,
         phone_country: attendeeData.phone_country || null,
         email: attendeeData.email || null,
       },
@@ -228,21 +260,47 @@ async function createPublicEnrollments({ organizationId, sessionId, attendee, co
       status: initialStatus,
       approvalMode,
       cancelTokenHash: hash,
+      cancellationLink: generateClassCancellationLink(token, org),
       notes: notes || "",
     });
 
     await enrollment.save();
+
+    // 📦 Cada persona usa SU PROPIO paquete:
+    //    - Titular (i===0): el paquete indicado en la reserva.
+    //    - Acompañante: su propio paquete activo para la clase, si tiene.
+    let pkgToUse = null;
+    if (i === 0) {
+      pkgToUse = clientPackageId || null;
+    } else if (client?._id) {
+      const ownPkgs = await packageService.getActivePackagesForClass(client._id, classDoc._id, organizationId);
+      pkgToUse = ownPkgs?.[0]?._id || null;
+    }
+
+    if (pkgToUse) {
+      try {
+        await packageService.consumeClassSession(pkgToUse, classDoc._id, enrollment._id);
+        enrollment.clientPackageId = pkgToUse;
+        enrollment.totalPrice = 0; // cubierta por el paquete
+        await enrollment.save(); // pre-save recalcula paymentStatus = 'free'
+      } catch {
+        // sin créditos disponibles → se mantiene el precio normal
+      }
+    }
+
     // Guardar el token en el objeto para enviarlo en la respuesta (solo en creación)
     enrollment._cancelToken = token;
     created.push(enrollment);
   }
 
-  // 8. Enviar WhatsApp solo si la inscripción fue auto-aprobada.
-  //    Si es aprobación manual, el WA se envía cuando el admin aprueba.
-  if (initialStatus === "confirmed") {
-    for (const enrollment of created) {
-      await sendEnrollmentWhatsApp("classEnrollmentConfirmed", organizationId, enrollment, updatedSession, classDoc, org);
-    }
+  // 8. Enviar WhatsApp de acuse de recibo.
+  //    - Auto-aprobada → confirmación.
+  //    - Aprobación manual → acuse "pendiente"; la confirmación se envía al aprobar.
+  const ackTemplate = initialStatus === "confirmed"
+    ? "classEnrollmentConfirmed"
+    : "classEnrollmentPending";
+  for (const enrollment of created) {
+    await sendEnrollmentWhatsApp(ackTemplate, organizationId, enrollment, updatedSession, classDoc, org);
   }
 
   // 9. Notificar al admin (BD + push). Silencioso para no afectar el flujo.
@@ -294,7 +352,7 @@ async function createPublicEnrollments({ organizationId, sessionId, attendee, co
  * @param {boolean} params.applyDiscount  - si true, aplica descuento grupal según config
  * @param {string}  [params.notes]
  */
-async function adminCreateEnrollments({ organizationId, sessionId, attendees, applyDiscount = true, notes }) {
+async function adminCreateEnrollments({ organizationId, sessionId, attendees, applyDiscount = true, notes, clientPackageId }) {
   if (!attendees?.length) throw new Error("Se requiere al menos un asistente");
   const numPeople = attendees.length;
 
@@ -356,7 +414,7 @@ async function adminCreateEnrollments({ organizationId, sessionId, attendees, ap
       attendee: {
         name: attendeeData.name,
         phone: attendeeData.phone,
-        phone_e164: normalized?.e164 || attendeeData.phone,
+        phone_e164: normalized?.phone_e164 || attendeeData.phone,
         phone_country: attendeeData.phone_country || null,
         email: attendeeData.email || null,
       },
@@ -366,10 +424,24 @@ async function adminCreateEnrollments({ organizationId, sessionId, attendees, ap
       status: "confirmed",
       approvalMode: "auto",
       cancelTokenHash: hash,
+      cancellationLink: generateClassCancellationLink(token, org),
       notes: notes || "",
     });
 
     await enrollment.save();
+
+    // 📦 Cubrir con un crédito de paquete si se indicó (y el asistente no tiene precio manual)
+    if (clientPackageId && (attendeeData.customPrice === undefined || attendeeData.customPrice === null)) {
+      try {
+        await packageService.consumeClassSession(clientPackageId, classDoc._id, enrollment._id);
+        enrollment.clientPackageId = clientPackageId;
+        enrollment.totalPrice = 0;
+        await enrollment.save();
+      } catch {
+        // sin créditos → se mantiene el precio normal
+      }
+    }
+
     enrollment._cancelToken = token;
     created.push(enrollment);
   }
@@ -459,6 +531,19 @@ async function cancelEnrollment(enrollmentId, cancelledBy = "admin") {
     await session.save();
   }
 
+  // 📦 Reembolsar el crédito de paquete si la inscripción estaba cubierta por uno
+  if (enrollment.clientPackageId) {
+    try {
+      await packageService.refundClassSession(
+        enrollment.clientPackageId,
+        enrollment.classId._id || enrollment.classId,
+        enrollment._id
+      );
+    } catch (e) {
+      console.warn("[enrollmentService] No se pudo reembolsar crédito de paquete:", e?.message || e);
+    }
+  }
+
   const org = await Organization.findById(enrollment.organizationId);
   await sendEnrollmentWhatsApp(
     "classEnrollmentCancelled",
@@ -473,6 +558,92 @@ async function cancelEnrollment(enrollmentId, cancelledBy = "admin") {
 }
 
 // ══════════════════════════════════════════════════════
+// CANCELACIÓN PÚBLICA POR TOKEN
+// ══════════════════════════════════════════════════════
+
+/**
+ * Resuelve la(s) inscripción(es) asociadas a un token de cancelación.
+ * Devuelve también las del mismo grupo (titular + acompañante).
+ */
+async function findEnrollmentsByToken(token) {
+  if (!token) throw new Error("Token requerido");
+  const hash = crypto.createHash("sha256").update(token).digest("hex");
+
+  const enrollment = await Enrollment.findOne({ cancelTokenHash: hash })
+    .select("+cancelTokenHash")
+    .populate("sessionId")
+    .populate("classId");
+
+  if (!enrollment) throw new Error("Enlace de cancelación inválido o expirado");
+
+  // Si pertenece a un grupo, traer todas las del grupo
+  const enrollments = enrollment.groupId
+    ? await Enrollment.find({ groupId: enrollment.groupId })
+        .populate("sessionId")
+        .populate("classId")
+    : [enrollment];
+
+  return enrollments;
+}
+
+/**
+ * Vista pública (sin datos sensibles) de la(s) inscripción(es) del token.
+ */
+async function getEnrollmentInfoByToken(token) {
+  const enrollments = await findEnrollmentsByToken(token);
+  const org = await Organization.findById(enrollments[0].organizationId);
+
+  return {
+    organizationName: org?.name || "",
+    timezone: org?.timezone || "America/Bogota",
+    isGroup: enrollments.length > 1,
+    enrollments: enrollments.map((e) => {
+      const session = e.sessionId;
+      const classDoc = e.classId;
+      return {
+        id: e._id,
+        attendeeName: e.attendee?.name,
+        className: classDoc?.name || "",
+        startDate: session?.startDate,
+        endDate: session?.endDate,
+        status: e.status,
+        isCancelled: e.status === "cancelled",
+        isPast: session?.startDate ? new Date(session.startDate) < new Date() : false,
+        totalPrice: e.totalPrice,
+      };
+    }),
+  };
+}
+
+/**
+ * Cancela por token. Si no se pasan enrollmentIds, cancela todas las del grupo
+ * que aún sean cancelables.
+ */
+async function cancelEnrollmentsByToken(token, enrollmentIds) {
+  const enrollments = await findEnrollmentsByToken(token);
+
+  const targets = enrollmentIds?.length
+    ? enrollments.filter((e) => enrollmentIds.map(String).includes(String(e._id)))
+    : enrollments;
+
+  const cancelled = [];
+  for (const e of targets) {
+    if (e.status === "cancelled") continue;
+    const session = e.sessionId;
+    // No permitir cancelar clases ya iniciadas
+    if (session?.startDate && new Date(session.startDate) < new Date()) continue;
+    await cancelEnrollment(e._id, "customer");
+    cancelled.push(e._id);
+  }
+
+  if (!cancelled.length) {
+    throw new Error("No hay inscripciones que se puedan cancelar");
+  }
+
+  return { cancelled };
+}
+
+// ══════════════════════════════════════════════════════
 // CONSULTAS
 // ══════════════════════════════════════════════════════
 
@@ -484,16 +655,11 @@ async function getSessionEnrollments(sessionId, { status } = {}) {
     .sort({ createdAt: 1 });
 }
 
-async function getOrganizationEnrollments(organizationId, { status, sessionId, classId, from, to, page = 1, limit = 50 } = {}) {
+async function getOrganizationEnrollments(organizationId, { status, sessionId, classId, page = 1, limit = 50 } = {}) {
   const filter = { organizationId };
   if (status) filter.status = status;
   if (sessionId) filter.sessionId = sessionId;
   if (classId) filter.classId = classId;
-
-  if (from || to) {
-    // Filtrar por fecha de la sesión requiere lookup; usamos createdAt como proxy
-    // o dejamos que el controller filtre por sesión
-  }
 
   const skip = (page - 1) * limit;
   const [enrollments, total] = await Promise.all([
@@ -531,15 +697,96 @@ async function addPayment(enrollmentId, paymentData) {
   return enrollment.save();
 }
 
+// ══════════════════════════════════════════════════════
+// RECORDATORIOS DE CLASES
+// ══════════════════════════════════════════════════════
+
+/**
+ * Envía recordatorios de WhatsApp para las clases que comienzan dentro de la
+ * ventana `hoursBefore` configurada por cada organización. Pensado para
+ * ejecutarse periódicamente (cada 30 min) desde el cron.
+ *
+ * Mismo criterio que las citas: ventana de 1 hora centrada en (ahora + hoursBefore),
+ * marcando `reminderSent` para no reenviar.
+ */
+async function sendClassReminders() {
+  const organizations = await Organization.find({
+    "reminderSettings.enabled": { $ne: false },
+  });
+
+  let totalSent = 0;
+
+  for (const org of organizations) {
+    try {
+      // Plan debe incluir el módulo de clases
+      const limits = await membershipService.getPlanLimits(org._id);
+      if (!limits?.classesModule) continue;
+      if (limits.autoReminders === false) continue;
+
+      const timezone = org.timezone || "America/Bogota";
+      const hoursBefore = org.reminderSettings?.hoursBefore ?? 24;
+
+      // Ventana objetivo: (ahora + hoursBefore) redondeada a la hora
+      const targetStart = moment.tz(timezone).add(hoursBefore, "hours").startOf("hour").toDate();
+      const targetEnd = moment.tz(timezone).add(hoursBefore, "hours").endOf("hour").toDate();
+
+      // 1. Sesiones activas en la ventana
+      const sessions = await ClassSession.find({
+        organizationId: org._id,
+        status: { $in: ["open", "full"] },
+        startDate: { $gte: targetStart, $lt: targetEnd },
+      }).populate("classId");
+
+      if (!sessions.length) continue;
+
+      const sessionMap = new Map(sessions.map((s) => [s._id.toString(), s]));
+
+      // 2. Inscripciones confirmadas de esas sesiones, sin recordatorio enviado
+      const enrollments = await Enrollment.find({
+        sessionId: { $in: sessions.map((s) => s._id) },
+        status: "confirmed",
+        reminderSent: { $ne: true },
+      });
+
+      for (const enrollment of enrollments) {
+        const session = sessionMap.get(enrollment.sessionId.toString());
+        if (!session) continue;
+
+        await sendEnrollmentWhatsApp(
+          "classReminder",
+          org._id,
+          enrollment,
+          session,
+          session.classId,
+          org
+        );
+        enrollment.reminderSent = true;
+        await enrollment.save();
+        totalSent++;
+      }
+    } catch (err) {
+      console.error(`[sendClassReminders] Error en org ${org?._id}:`, err.message);
+    }
+  }
+
+  if (totalSent) {
+    console.log(`[sendClassReminders] ${totalSent} recordatorio(s) de clase enviado(s)`);
+  }
+  return { sent: totalSent };
+}
+
 export default {
   createPublicEnrollments,
   adminCreateEnrollments,
   approveEnrollment,
   cancelEnrollment,
+  getEnrollmentInfoByToken,
+  cancelEnrollmentsByToken,
   getSessionEnrollments,
   getOrganizationEnrollments,
   updateAttendanceStatus,
   addPayment,
+  sendClassReminders,
   computeDiscountPercent,
   computeTotalPrice,
 };

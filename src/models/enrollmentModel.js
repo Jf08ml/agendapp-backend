@@ -24,10 +24,13 @@ const enrollmentSchema = new Schema(
     groupId: { type: Types.ObjectId, index: true, default: null },
     // Referencia al cliente registrado (si existe)
     clientId: { type: Types.ObjectId, ref: "Client", default: null },
+    // 📦 Paquete del cliente que cubre esta inscripción (null = pago normal)
+    clientPackageId: { type: Types.ObjectId, ref: "ClientPackage", default: null },
     // Datos del asistente
     attendee: {
       name: { type: String, required: true },
-      phone: { type: String, required: true },
+      // El teléfono no es obligatorio: depende del identificador configurado por la org
+      phone: { type: String, default: "" },
       phone_e164: { type: String, default: null },
       phone_country: { type: String, maxlength: 2, default: null },
       email: { type: String, default: null },
@@ -54,8 +57,12 @@ const enrollmentSchema = new Schema(
     approvalMode: { type: String, enum: ["manual", "auto"], default: "manual" },
     // Token de cancelación (hash SHA-256, excluido de queries por defecto)
     cancelTokenHash: { type: String, select: false },
+    // Link público de cancelación (incluye el token en claro; se envía por WhatsApp)
+    cancellationLink: { type: String, default: null },
     cancelledAt: { type: Date, default: null },
     cancelledBy: { type: String, enum: ["customer", "admin"], default: null },
+    // Evita reenviar el recordatorio de la clase
+    reminderSent: { type: Boolean, default: false },
     notes: { type: String, default: "" },
   },
   { timestamps: true }

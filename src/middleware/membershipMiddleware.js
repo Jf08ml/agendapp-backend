@@ -128,8 +128,39 @@ export const checkPlanLimit = (limitKey) => {
   };
 };
 
+/**
+ * Middleware que exige que el plan incluya el módulo de clases.
+ * Debe ir después de organizationResolver + verifyToken.
+ */
+export const requireClassesModule = async (req, res, next) => {
+  try {
+    const organizationId =
+      req.organization?._id || req.user?.organizationId || req.params.organizationId;
+
+    if (!organizationId) return next();
+
+    const limits = await membershipService.getPlanLimits(organizationId);
+    if (!limits?.classesModule) {
+      return res.status(403).json({
+        success: false,
+        message: "El módulo de clases requiere el Plan Marca/Pro.",
+        reason: "plan_limit_classes",
+      });
+    }
+    next();
+  } catch (error) {
+    console.error("Error verificando módulo de clases:", error);
+    return res.status(403).json({
+      success: false,
+      message: "No se pudo verificar tu plan. Intenta de nuevo.",
+      reason: "plan_check_failed",
+    });
+  }
+};
+
 export default {
   requireActiveMembership,
   attachMembershipInfo,
   checkPlanLimit,
+  requireClassesModule,
 };

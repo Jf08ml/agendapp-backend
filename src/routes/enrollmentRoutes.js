@@ -3,7 +3,7 @@ import express from "express";
 import enrollmentController from "../controllers/enrollmentController.js";
 import { verifyToken } from "../middleware/authMiddleware.js";
 import { organizationResolver } from "../middleware/organizationResolver.js";
-import { requireActiveMembership } from "../middleware/membershipMiddleware.js";
+import { requireActiveMembership, requireClassesModule } from "../middleware/membershipMiddleware.js";
 
 const router = express.Router();
 
@@ -13,6 +13,10 @@ const router = express.Router();
 
 // Cliente reserva desde la web (sin auth)
 router.post("/public", enrollmentController.createPublic);
+
+// Consultar y cancelar inscripción por token (sin auth)
+router.get("/public/cancel", enrollmentController.getByToken);
+router.post("/public/cancel", enrollmentController.cancelByToken);
 
 // ════════════════════════════════════════════════
 // PROTEGIDO (admin)
@@ -24,6 +28,7 @@ router.post(
   organizationResolver,
   verifyToken,
   requireActiveMembership,
+  requireClassesModule,
   enrollmentController.adminCreate
 );
 

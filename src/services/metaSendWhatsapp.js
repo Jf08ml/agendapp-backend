@@ -39,6 +39,11 @@ const META_TEMPLATE_NAMES = {
   loyaltyReferralReward:     "premio_referidos",
   statusReservationApproved: "reserva_aprobada",
   statusReservationRejected: "reserva_no_disponible",
+  // 📚 Módulo de Clases
+  classEnrollmentConfirmed:  "clase_confirmada",
+  classEnrollmentPending:    "clase_pendiente",
+  classEnrollmentCancelled:  "clase_cancelada",
+  classReminder:             "recordatorio_clase",
 };
 
 // ── Variable order per template type ─────────────────────────────────────────
@@ -71,6 +76,11 @@ const VARIABLE_ORDER = {
   premio_referidos:        ["nombre_cliente", "nombre_negocio", "premio"],
   reserva_aprobada:        ["nombre_cliente", "fecha_cita", "nombre_negocio", "direccion", "servicio", "enlace_cancelacion"],
   reserva_no_disponible:   ["nombre_cliente", "fecha_cita", "nombre_negocio"],
+  // 📚 Módulo de Clases
+  clase_confirmada:        ["nombre_cliente", "nombre_clase", "fecha_clase", "hora_inicio", "hora_fin", "nombre_negocio", "direccion", "precio", "enlace_cancelacion"],
+  clase_pendiente:         ["nombre_cliente", "nombre_clase", "fecha_clase", "hora_inicio", "hora_fin", "nombre_negocio", "precio"],
+  clase_cancelada:         ["nombre_cliente", "nombre_clase", "fecha_clase", "hora_inicio", "hora_fin", "nombre_negocio"],
+  recordatorio_clase:      ["nombre_cliente", "nombre_clase", "fecha_clase", "hora_inicio", "hora_fin", "nombre_negocio", "direccion"],
 };
 
 // ── Data key → Meta variable name ────────────────────────────────────────────
@@ -92,6 +102,14 @@ function buildMetaVarMap(data) {
     cita_o_citas:         data.cita_pal           ?? "",
     agendada_o_agendadas: data.agendada_pal       ?? "",
     recomendaciones:      data.recommendations    ?? "",
+    // 📚 Módulo de Clases
+    nombre_clase:         data.className          ?? "",
+    fecha_clase:          data.date               ?? "",
+    hora_inicio:          data.startTime          ?? "",
+    hora_fin:             data.endTime            ?? "",
+    precio:               data.price              ?? "",
+    // enlace_cancelacion ya existe arriba; añadimos fallback al cancelLink de clases
+    ...(data.cancelLink ? { enlace_cancelacion: data.cancellationLink ?? data.cancelLink } : {}),
   };
 }
 

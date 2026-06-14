@@ -1,5 +1,6 @@
 import cron from "node-cron";
 import appointmentService from "../services/appointmentService.js";
+import enrollmentService from "../services/enrollmentService.js";
 
 /**
  * Sistema de Recordatorios Inteligente
@@ -29,6 +30,10 @@ const reminderJob = () => {
         `[${now.toISOString()}] 🔔 Ejecutando verificación de recordatorios (Hora Colombia)`
       );
       appointmentService.sendDailyReminders();
+      // Recordatorios de clases grupales (mismo intervalo)
+      enrollmentService.sendClassReminders().catch((e) =>
+        console.error("[reminderJob] Error en recordatorios de clases:", e?.message || e)
+      );
     },
     {
       timezone: "America/Bogota",

@@ -122,6 +122,22 @@ const packageController = {
     }
   },
 
+  // 📚 Paquetes activos del cliente con créditos para una clase
+  getActivePackagesForClass: async (req, res) => {
+    try {
+      const { clientId, classId } = req.params;
+      const { organizationId } = req.query;
+      const result = await packageService.getActivePackagesForClass(
+        clientId,
+        classId,
+        organizationId
+      );
+      sendResponse(res, 200, result, "Paquetes activos obtenidos exitosamente");
+    } catch (error) {
+      sendResponse(res, 500, null, error.message);
+    }
+  },
+
   cancelClientPackage: async (req, res) => {
     try {
       const { id } = req.params;
@@ -172,6 +188,45 @@ const packageController = {
         organizationId
       );
       sendResponse(res, 200, result, "Verificación de paquetes completada");
+    } catch (error) {
+      sendResponse(res, 500, null, error.message);
+    }
+  },
+
+  // 📚 Público: verificar paquetes con créditos de clase por teléfono
+  checkClientClassPackagesPublic: async (req, res) => {
+    try {
+      const { phone, classIds, organizationId } = req.query;
+      if (!phone || !classIds || !organizationId) {
+        return sendResponse(res, 400, null, "Faltan parámetros: phone, classIds, organizationId");
+      }
+      const classIdArray = Array.isArray(classIds) ? classIds : classIds.split(",");
+      const result = await packageService.checkClientClassPackagesByPhone(
+        phone,
+        classIdArray,
+        organizationId
+      );
+      sendResponse(res, 200, result, "Verificación de paquetes de clase completada");
+    } catch (error) {
+      sendResponse(res, 500, null, error.message);
+    }
+  },
+
+  // 📚 Público: verificar paquetes de clase por el identificador configurado
+  checkClientClassPackagesByIdentifierPublic: async (req, res) => {
+    try {
+      const { field, value, classIds, organizationId } = req.query;
+      if (!field || !value || !classIds || !organizationId) {
+        return sendResponse(res, 400, null, "Faltan parámetros: field, value, classIds, organizationId");
+      }
+      const classIdArray = Array.isArray(classIds) ? classIds : classIds.split(",");
+      const result = await packageService.checkClientClassPackagesByIdentifier(
+        field,
+        value,
+        classIdArray,
+        organizationId
+      );
+      sendResponse(res, 200, result, "Verificación de paquetes de clase completada");
     } catch (error) {
       sendResponse(res, 500, null, error.message);
     }
