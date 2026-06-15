@@ -17,7 +17,24 @@ import whatsappService from "../services/sendWhatsappService.js";
 import { generateCancellationLink } from "../utils/cancellationUtils.js";
 import appointmentSeriesService from "../services/appointmentSeriesService.js";
 import appointmentModel from "../models/appointmentModel.js";
+import ChatLog from "../models/chatLogModel.js";
 import { auditLogService } from "../services/auditLogService.js";
+
+// Marca como convertido el ChatLog del chatbot de reserva, del lado del servidor
+// y en la misma request que crea la reserva. Reemplaza al frágil POST
+// /booking-chat/converted fire-and-forget del frontend, que se perdía si el
+// cliente cerraba la pestaña justo tras confirmar (dejando la sesión como
+// "Preparada" pese a existir la reserva). Idempotente y no-bloqueante: un fallo
+// aquí nunca debe afectar la creación de la reserva.
+function markChatConversion(chatSessionId, organizationId, source) {
+  if (source !== "ai_chatbot" || !chatSessionId) return;
+  ChatLog.updateOne(
+    { sessionId: chatSessionId, organizationId, type: "booking", reservationCreated: { $ne: true } },
+    { $set: { reservationCreated: true, reservationCreatedAt: new Date() } }
+  ).catch((err) =>
+    console.error("[markChatConversion] No se pudo marcar la conversión:", err.message)
+  );
+}
 
 // ---------------------- helpers de notificación ----------------------
 
@@ -608,7 +625,7 @@ const reservationController = {
 
   // POST /api/reservations/multi
   createMultipleReservations: async (req, res) => {
-    const { services, startDate, customerDetails, organizationId, clientPackageId, recurrencePattern, source } = req.body;
+    const { services, startDate, customerDetails, organizationId, clientPackageId, recurrencePattern, source, chatSessionId } = req.body;
     const bookingSource = ["ai_chatbot", "manual_booking", "admin"].includes(source) ? source : "manual_booking";
 
     if (!services || !Array.isArray(services) || services.length === 0) {
@@ -868,6 +885,9 @@ const reservationController = {
             multi: true,
           });
 
+          // Reserva creada con éxito → marcar conversión del chatbot (si vino de él)
+          markChatConversion(chatSessionId, organizationId, bookingSource);
+
           return sendResponse(
             res,
             201,
@@ -961,6 +981,9 @@ const reservationController = {
           isAuto: false,
           multi: true,
         });
+
+        // Reserva (pendiente) creada con éxito → marcar conversión del chatbot
+        markChatConversion(chatSessionId, organizationId, bookingSource);
 
         return sendResponse(
           res,
