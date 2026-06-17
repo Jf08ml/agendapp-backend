@@ -41,6 +41,8 @@ import chatRoutes from "./chatRoutes.js";
 import bookingChatRoutes from "./bookingChatRoutes.js";
 import waAgentRoutes from "./waAgentRoutes.js";
 import metaRoutes from "./metaRoutes.js";
+import collectionRoutes from "./collectionRoutes.js";
+import collectionPublicRoutes from "./collectionPublicRoutes.js";
 import membershipService from "../services/membershipService.js";
 import { organizationResolver } from "../middleware/organizationResolver";
 import { verifyToken } from "../middleware/authMiddleware.js";
@@ -57,6 +59,12 @@ router.get("/organization-config", organizationResolver, async (req, res) => {
   const orgObj = organization.toObject();
   delete orgObj.password;
   delete orgObj.__v;
+
+  // 🔐 No exponer credenciales de cobro (tokens del vendedor). Solo el flag de
+  // conexión, que el flujo de depósito público necesita.
+  if (orgObj.mpCollect) {
+    orgObj.mpCollect = { connected: !!orgObj.mpCollect.connected };
+  }
 
   try {
     orgObj.planLimits = await membershipService.getPlanLimits(organization._id);
@@ -127,6 +135,9 @@ router.use("/roles", roleRoutes);
 // Pagos: webhook público, checkout/confirm protegido internamente
 router.use("/payments", paymentRoutes);
 
+// Cobros cliente→org (Mercado Pago): callback OAuth público (la org va en el state)
+router.use("/mp", collectionPublicRoutes);
+
 // Registro público: signup, exchange code, check slug
 router.use(registrationRoutes);
 
@@ -154,6 +165,7 @@ router.use("/packages", packageRoutes);
 // ═══════════════════════════════════════════════════
 router.use("/organizations", organizationResolver, verifyToken, organizationRoutes);
 router.use("/organizations", organizationResolver, verifyToken, metaRoutes);
+router.use("/organizations", organizationResolver, verifyToken, collectionRoutes);
 router.use("/notifications", verifyToken, notificationRoutes);
 router.use("/chat", organizationResolver, verifyToken, chatRoutes);
 

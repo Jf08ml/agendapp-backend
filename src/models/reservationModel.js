@@ -88,6 +88,21 @@ const reservationSchema = new mongoose.Schema(
       recurrencePattern: { type: mongoose.Schema.Types.Mixed },
       totalOccurrences: { type: Number },
     },
+    // 💳 Depósito de reserva (cobro cliente→org vía Mercado Pago)
+    // depositAmount: parte del depósito que corresponde a ESTA reserva (su
+    // servicio). La suma del grupo = Order.amount. paymentStatus refleja el
+    // estado del pago del grupo; orderId apunta al Order compartido.
+    depositAmount: { type: Number, default: 0 },
+    paymentStatus: {
+      type: String,
+      enum: ["none", "pending", "paid"],
+      default: "none",
+    },
+    orderId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Order",
+      default: null,
+    },
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now },
   },

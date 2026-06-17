@@ -89,6 +89,26 @@ const PaymentMethodSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// 💳 Credenciales de cobro cliente→organización (Mercado Pago, modelo marketplace/OAuth).
+// El dinero va directo a la cuenta del negocio; la plataforma no toca los fondos.
+// Tokens guardados por-org (mismo patrón que la conexión Meta). El access_token de MP
+// dura 180 días y se refresca con el refresh_token (cron mpTokenRefreshJob).
+const MpCollectSchema = new mongoose.Schema(
+  {
+    connected: { type: Boolean, default: false },
+    userId: { type: String },        // user_id del vendedor en MP
+    accessToken: { type: String },   // TODO: cifrar en reposo
+    refreshToken: { type: String },
+    publicKey: { type: String },
+    scope: { type: String },
+    site: { type: String },          // país/site: MCO, MLA, MLM...
+    tokenExpiresAt: { type: Date },
+    connectedAt: { type: Date },
+    oauthState: { type: String },    // nonce anti-CSRF del flujo OAuth en curso
+  },
+  { _id: false }
+);
+
 const organizationSchema = new mongoose.Schema({
   name: {
     type: String,
@@ -386,6 +406,11 @@ const organizationSchema = new mongoose.Schema({
     default: 50,
     min: 0,
     max: 100,
+  },
+  // 💳 Cobros cliente→org vía Mercado Pago (ver MpCollectSchema arriba)
+  mpCollect: {
+    type: MpCollectSchema,
+    default: () => ({}),
   },
   welcomeTitle: {
     type: String,

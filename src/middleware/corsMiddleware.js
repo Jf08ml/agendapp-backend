@@ -56,7 +56,7 @@ export const dynamicCorsOptions = {
     if (process.env.NODE_ENV !== "production") {
       try {
         const url = new URL(origin);
-        if (url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "entire-toll-managing-exceptions.trycloudflare.com") {
+        if (url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "draw-neural-interest-join.trycloudflare.com") {
           return callback(null, origin);
         }
       } catch {

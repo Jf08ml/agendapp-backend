@@ -29,7 +29,7 @@ export const generateCancellationLink = (token, organization, source = 'confirma
 /**
  * Resuelve la URL base pública de una organización (dominio custom > slug > fallback).
  */
-const resolveBaseUrl = (organization) => {
+export const resolveBaseUrl = (organization) => {
   let baseUrl = process.env.FRONTEND_BASE_URL || 'http://localhost:5173';
   if (organization) {
     if (organization.domains && organization.domains.length > 0) {
@@ -56,4 +56,5 @@ export const generateClassCancellationLink = (token, organization) => {
 export default {
   generateCancellationLink,
   generateClassCancellationLink,
+  resolveBaseUrl,
 };

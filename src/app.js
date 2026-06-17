@@ -12,6 +12,8 @@ import routes from "./routes/indexRoutes.js";
 import membershipCheckJob from "./cron/membershipCheckJob.js";
 import paypalSubscriptionSyncJob from "./cron/paypalSubscriptionSyncJob.js";
 import reminderJob from "./cron/reminderJob.js";
+import mpTokenRefreshJob from "./cron/mpTokenRefreshJob.js";
+import orderExpiryJob from "./cron/orderExpiryJob.js";
 import { dynamicCorsOptions } from "./middleware/corsMiddleware.js";
 
 const app = express();
@@ -139,6 +141,10 @@ dbConnection()
     console.log("⏰ Cron job iniciado: sync activo de suscripciones PayPal (cada 30 min)");
     reminderJob();
     console.log("⏰ Cron job iniciado: recordatorios de citas (cada media hora)");
+    mpTokenRefreshJob.start();
+    console.log("⏰ Cron job iniciado: refresh de tokens Mercado Pago (3 AM diario)");
+    orderExpiryJob.start();
+    console.log("⏰ Cron job iniciado: expiración de holds de reserva (cada 5 min)");
   })
   .catch((err) => {
     console.error("Failed to connect to the database", err);
