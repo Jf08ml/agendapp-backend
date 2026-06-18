@@ -193,6 +193,26 @@ const packageController = {
     }
   },
 
+  // Público: verificar paquetes de SERVICIO por el identificador configurado
+  checkClientPackagesByIdentifierPublic: async (req, res) => {
+    try {
+      const { field, value, serviceIds, organizationId } = req.query;
+      if (!field || !value || !serviceIds || !organizationId) {
+        return sendResponse(res, 400, null, "Faltan parámetros: field, value, serviceIds, organizationId");
+      }
+      const serviceIdArray = Array.isArray(serviceIds) ? serviceIds : serviceIds.split(",");
+      const result = await packageService.checkClientPackagesByIdentifier(
+        field,
+        value,
+        serviceIdArray,
+        organizationId
+      );
+      sendResponse(res, 200, result, "Verificación de paquetes completada");
+    } catch (error) {
+      sendResponse(res, 500, null, error.message);
+    }
+  },
+
   // 📚 Público: verificar paquetes con créditos de clase por teléfono
   checkClientClassPackagesPublic: async (req, res) => {
     try {

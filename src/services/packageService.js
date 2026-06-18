@@ -274,6 +274,50 @@ const packageService = {
     return { client, packages: packagesWithAvailability };
   },
 
+  // Buscar paquetes de SERVICIO por el identificador configurado (reserva pública)
+  checkClientPackagesByIdentifier: async (field, value, serviceIds, organizationId) => {
+    const Client = mongoose.model("Client");
+    const v = (value || "").trim();
+    if (!v) return { client: null, packages: [] };
+
+    let query = { organizationId };
+    if (field === "email") {
+      query.email = v.toLowerCase();
+    } else if (field === "documentId") {
+      query.documentId = v;
+    } else {
+      // phone: el frontend envía E.164; aceptamos también el nacional como respaldo
+      query.$or = [{ phone_e164: v }, { phoneNumber: v }];
+    }
+
+    const client = await Client.findOne(query);
+    if (!client) return { client: null, packages: [] };
+
+    const now = new Date();
+    const serviceObjectIds = serviceIds.map((id) => new mongoose.Types.ObjectId(id));
+
+    const packages = await ClientPackage.find({
+      clientId: client._id,
+      organizationId,
+      status: "active",
+      expirationDate: { $gt: now },
+      "services.serviceId": { $in: serviceObjectIds },
+    })
+      .populate("servicePackageId", "name description")
+      .populate("services.serviceId", "name price duration")
+      .populate("classes.classId", "name color pricePerPerson duration");
+
+    const packagesWithAvailability = packages.filter((pkg) =>
+      pkg.services.some(
+        (svc) =>
+          serviceObjectIds.some((id) => id.equals(svc.serviceId._id || svc.serviceId)) &&
+          svc.sessionsRemaining > 0
+      )
+    );
+
+    return { client, packages: packagesWithAvailability };
+  },
+
   // Buscar paquetes por teléfono (para reserva online pública)
   checkClientPackagesByPhone: async (phone_e164, serviceIds, organizationId) => {
     // Buscar cliente por teléfono

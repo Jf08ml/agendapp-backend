@@ -698,6 +698,184 @@ async function addPayment(enrollmentId, paymentData) {
 }
 
 // ══════════════════════════════════════════════════════
+// INSCRIPCIÓN PAGABLE (pay-to-confirm con depósito MP)
+// ══════════════════════════════════════════════════════
+
+/**
+ * Retiene el cupo y crea la(s) inscripción(es) en estado "pending_payment"
+ * (sin WhatsApp ni notificación al admin todavía). El depósito se cobra aparte
+ * (Mercado Pago) y la confirmación la dispara el webhook. Si el pago no se
+ * completa, `releaseEnrollmentHold` libera el cupo.
+ *
+ * Devuelve { created, totalPriceSum, groupId, classDoc, session, org }.
+ */
+async function holdEnrollmentsForPayment({ organizationId, sessionId, attendee, companion, notes }) {
+  const numPeople = companion ? 2 : 1;
+
+  await assertClassesModule(organizationId);
+
+  const session = await ClassSession.findById(sessionId).populate("classId");
+  if (!session) throw new Error("Sesión no encontrada");
+  if (session.status === "cancelled") throw new Error("Esta sesión fue cancelada");
+  if (session.status === "completed") throw new Error("Esta sesión ya finalizó");
+  if (session.organizationId.toString() !== organizationId.toString()) {
+    throw new Error("La sesión no pertenece a esta organización");
+  }
+
+  const classDoc = session.classId;
+
+  // Reservar cupos atómicamente (hold)
+  const updatedSession = await ClassSession.findOneAndUpdate(
+    {
+      _id: sessionId,
+      status: { $in: ["open"] },
+      $expr: { $lte: [{ $add: ["$enrolledCount", numPeople] }, "$capacity"] },
+    },
+    { $inc: { enrolledCount: numPeople } },
+    { new: true }
+  );
+  if (!updatedSession) {
+    throw new Error("No hay cupos suficientes disponibles para esta sesión");
+  }
+  if (updatedSession.enrolledCount >= updatedSession.capacity) {
+    updatedSession.status = "full";
+    await updatedSession.save();
+  }
+
+  const discountPercent = computeDiscountPercent(classDoc.groupDiscount, numPeople);
+  const totalPricePerPerson = computeTotalPrice(classDoc.pricePerPerson, discountPercent);
+
+  const org = await Organization.findById(organizationId);
+  const approvalMode = org?.reservationPolicy?.autoApprove ? "auto" : "manual";
+
+  // groupId SIEMPRE (referenciamos el grupo desde el Order, aunque sea 1 persona)
+  const groupId = new Types.ObjectId();
+
+  const attendeesData = [attendee];
+  if (companion) attendeesData.push(companion);
+
+  const created = [];
+  for (const attendeeData of attendeesData) {
+    const client = await findOrCreateClient(organizationId, attendeeData, org);
+    const { token, hash } = generateToken();
+    const normalized = normalizePhoneNumber(attendeeData.phone, attendeeData.phone_country || "CO");
+
+    const enrollment = new Enrollment({
+      sessionId,
+      classId: classDoc._id,
+      organizationId,
+      groupId,
+      clientId: client?._id || null,
+      attendee: {
+        name: attendeeData.name,
+        phone: attendeeData.phone,
+        phone_e164: normalized?.phone_e164 || attendeeData.phone,
+        phone_country: attendeeData.phone_country || null,
+        email: attendeeData.email || null,
+      },
+      pricePerPerson: classDoc.pricePerPerson,
+      discountPercent,
+      totalPrice: totalPricePerPerson,
+      status: "pending_payment",
+      approvalMode,
+      cancelTokenHash: hash,
+      cancellationLink: generateClassCancellationLink(token, org),
+      notes: notes || "",
+    });
+    await enrollment.save();
+    created.push(enrollment);
+  }
+
+  const totalPriceSum = created.reduce((sum, e) => sum + (e.totalPrice || 0), 0);
+
+  return { created, totalPriceSum, groupId, classDoc, session: updatedSession, org };
+}
+
+/**
+ * Confirma las inscripciones de un grupo tras recibir el pago del depósito
+ * (llamado desde el webhook de MP). Cambia pending_payment → confirmed/pending
+ * según el modo de aprobación, registra el pago del depósito y envía el WhatsApp
+ * de acuse + notifica al admin. Idempotente: si no hay pending_payment, no hace nada.
+ */
+async function confirmPaidEnrollmentGroup(groupId, { depositAmount = 0 } = {}) {
+  const enrollments = await Enrollment.find({ groupId, status: "pending_payment" })
+    .populate("sessionId")
+    .populate("classId");
+  if (!enrollments.length) return [];
+
+  const org = await Organization.findById(enrollments[0].organizationId);
+
+  // El depósito se reparte equitativamente entre los asistentes del grupo.
+  const share = enrollments.length ? depositAmount / enrollments.length : 0;
+
+  const confirmed = [];
+  for (const e of enrollments) {
+    e.status = e.approvalMode === "auto" ? "confirmed" : "pending";
+    if (share > 0) {
+      e.payments.push({ amount: share, method: "card", note: "Depósito (Mercado Pago)" });
+    }
+    await e.save(); // pre-save recalcula paymentStatus
+
+    const ackTemplate = e.status === "confirmed" ? "classEnrollmentConfirmed" : "classEnrollmentPending";
+    await sendEnrollmentWhatsApp(ackTemplate, e.organizationId, e, e.sessionId, e.classId, org);
+    confirmed.push(e);
+  }
+
+  // Notificar al admin (silencioso)
+  try {
+    const first = enrollments[0];
+    const attendeeName = first.attendee?.name || "Un cliente";
+    const className = first.classId?.name || "una clase";
+    const isAuto = first.approvalMode === "auto";
+    const title = isAuto ? "Nueva inscripción a clase" : "Nueva inscripción pendiente";
+    const message = isAuto
+      ? `${attendeeName} se inscribió en ${className} (depósito pagado)`
+      : `${attendeeName} pagó el depósito para ${className}. Pendiente de aprobación.`;
+
+    await notificationService.createNotification({
+      title,
+      message,
+      organizationId: first.organizationId,
+      type: "reservation",
+      frontendRoute: "/gestionar-clases",
+      status: "unread",
+    });
+    await subscriptionService.sendNotificationToUser(
+      first.organizationId,
+      JSON.stringify({ title, message, icon: org?.branding?.pwaIcon })
+    );
+  } catch (e) {
+    console.warn("[enrollmentService] Error notificando al admin (pago clase):", e?.message || e);
+  }
+
+  return confirmed;
+}
+
+/**
+ * Libera el hold de un grupo cuyo pago no se completó (llamado desde el cron de
+ * expiración). Cancela las inscripciones en pending_payment y devuelve el cupo.
+ */
+async function releaseEnrollmentHold(groupId) {
+  const enrollments = await Enrollment.find({ groupId, status: "pending_payment" });
+  let released = 0;
+  for (const e of enrollments) {
+    e.status = "cancelled";
+    e.cancelledBy = "customer";
+    e.cancelledAt = new Date();
+    await e.save();
+
+    await ClassSession.findByIdAndUpdate(e.sessionId, { $inc: { enrolledCount: -1 } });
+    const session = await ClassSession.findById(e.sessionId);
+    if (session?.status === "full" && session.enrolledCount < session.capacity) {
+      session.status = "open";
+      await session.save();
+    }
+    released++;
+  }
+  return released;
+}
+
+// ══════════════════════════════════════════════════════
 // RECORDATORIOS DE CLASES
 // ══════════════════════════════════════════════════════
 
@@ -789,4 +967,7 @@ export default {
   sendClassReminders,
   computeDiscountPercent,
   computeTotalPrice,
+  holdEnrollmentsForPayment,
+  confirmPaidEnrollmentGroup,
+  releaseEnrollmentHold,
 };

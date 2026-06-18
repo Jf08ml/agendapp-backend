@@ -97,8 +97,8 @@ const MpCollectSchema = new mongoose.Schema(
   {
     connected: { type: Boolean, default: false },
     userId: { type: String },        // user_id del vendedor en MP
-    accessToken: { type: String },   // TODO: cifrar en reposo
-    refreshToken: { type: String },
+    accessToken: { type: String },   // cifrado en reposo (AES-256-GCM, utils/cryptoTokens.js)
+    refreshToken: { type: String },  // cifrado en reposo
     publicKey: { type: String },
     scope: { type: String },
     site: { type: String },          // país/site: MCO, MLA, MLM...
@@ -402,6 +402,17 @@ const organizationSchema = new mongoose.Schema({
     default: false,
   },
   reservationDepositPercentage: {
+    type: Number,
+    default: 50,
+    min: 0,
+    max: 100,
+  },
+  // 🎓 Depósito para inscripción a CLASES (config propia, independiente de las reservas)
+  requireClassDeposit: {
+    type: Boolean,
+    default: false,
+  },
+  classDepositPercentage: {
     type: Number,
     default: 50,
     min: 0,

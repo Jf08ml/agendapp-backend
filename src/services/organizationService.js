@@ -161,6 +161,8 @@ const organizationService = {
       paymentMethods,
       requireReservationDeposit,
       reservationDepositPercentage,
+      requireClassDeposit,
+      classDepositPercentage,
       default_country,
       timezone,
       currency,
@@ -316,6 +318,14 @@ const organizationService = {
 
     if (reservationDepositPercentage !== undefined) {
       organization.reservationDepositPercentage = reservationDepositPercentage;
+    }
+
+    if (requireClassDeposit !== undefined) {
+      organization.requireClassDeposit = requireClassDeposit;
+    }
+
+    if (classDepositPercentage !== undefined) {
+      organization.classDepositPercentage = classDepositPercentage;
     }
 
     // 🌍 Actualizar país por defecto

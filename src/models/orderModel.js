@@ -54,6 +54,11 @@ const orderSchema = new mongoose.Schema(
     // Idempotencia de webhooks (mismo patrón que PaymentSession).
     processedEventIds: [{ type: String }],
 
+    // Datos necesarios para "cumplir" la orden al confirmarse el pago (webhook).
+    // - package: { clientId, servicePackageId } → crea el ClientPackage.
+    // - class:   { groupId } (también en refId) → confirma las inscripciones.
+    metadata: { type: mongoose.Schema.Types.Mixed },
+
     raw: { type: mongoose.Schema.Types.Mixed }, // respuestas crudas de MP (debug)
   },
   { timestamps: true }

@@ -85,6 +85,90 @@ export async function createReservationOrder({
 }
 
 /**
+ * Calcula el depósito a cobrar para una inscripción a clase, aplicando la config
+ * PROPIA de clases (`requireClassDeposit` + `classDepositPercentage`),
+ * independiente de la de reservas.
+ *
+ * @param {Object} org   Organization (currency, requireClassDeposit, classDepositPercentage)
+ * @param {number} totalPrice  precio total a cobrar (suma de los asistentes)
+ * @returns {Object} { required, percentage, currency, subtotal, total }
+ */
+export function computeClassDeposit(org, totalPrice = 0) {
+  const currency = String(org?.currency || "COP").toUpperCase();
+  const percentage = Number(org?.classDepositPercentage ?? 0);
+  const required = !!org?.requireClassDeposit && percentage > 0;
+  const subtotal = Number(totalPrice || 0);
+  const total = roundForCurrency((subtotal * percentage) / 100, currency);
+  return { required, percentage, currency, subtotal, total };
+}
+
+/**
+ * Crea un Order para el depósito de una inscripción a clase. refId = groupId del
+ * grupo de inscripciones (o el id de la única inscripción).
+ */
+export async function createClassOrder({
+  organizationId,
+  groupId,
+  amount,
+  currency,
+  marketplaceFee = 0,
+  expiresAt = null,
+  metadata = null,
+}) {
+  const order = await Order.create({
+    organizationId,
+    type: "class",
+    refId: groupId || null,
+    amount,
+    currency: String(currency || "COP").toUpperCase(),
+    marketplaceFee,
+    provider: "mercadopago",
+    status: "created",
+    expiresAt,
+    metadata,
+  });
+
+  order.externalReference = String(order._id);
+  await order.save();
+  return order;
+}
+
+/**
+ * Crea un Order para la COMPRA de un paquete. refId = servicePackageId. El
+ * `metadata` lleva { clientId, servicePackageId } para crear el ClientPackage al
+ * confirmarse el pago (webhook).
+ */
+export async function createPackageOrder({
+  organizationId,
+  servicePackageId,
+  clientId,
+  amount,
+  currency,
+  marketplaceFee = 0,
+  expiresAt = null,
+}) {
+  const order = await Order.create({
+    organizationId,
+    type: "package",
+    refId: servicePackageId || null,
+    amount,
+    currency: String(currency || "COP").toUpperCase(),
+    marketplaceFee,
+    provider: "mercadopago",
+    status: "created",
+    expiresAt,
+    metadata: {
+      servicePackageId: String(servicePackageId),
+      clientId: clientId ? String(clientId) : null,
+    },
+  });
+
+  order.externalReference = String(order._id);
+  await order.save();
+  return order;
+}
+
+/**
  * Marca un Order como pagado de forma idempotente (ignora eventos ya procesados).
  * Devuelve { order, alreadyProcessed }.
  */

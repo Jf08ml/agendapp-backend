@@ -11,17 +11,19 @@
 import cron from "node-cron";
 import Order from "../models/orderModel.js";
 import Reservation from "../models/reservationModel.js";
+import enrollmentService from "../services/enrollmentService.js";
 import { RES_STATUS } from "../constants/reservationStatus.js";
 
 export const runOrderExpiry = async () => {
   const now = new Date();
 
+  // Cualquier tipo de Order sin pago confirmado cuyo hold ya venció.
   const expired = await Order.find({
-    type: "reservation",
+    type: { $in: ["reservation", "class", "package"] },
     status: { $in: ["created", "pending"] },
     expiresAt: { $lt: now },
   })
-    .select("_id refId")
+    .select("_id refId type")
     .lean();
 
   if (expired.length === 0) return { expired: 0 };
@@ -32,7 +34,9 @@ export const runOrderExpiry = async () => {
   for (const order of expired) {
     try {
       await Order.updateOne({ _id: order._id }, { status: "expired" });
-      if (order.refId) {
+
+      if (order.type === "reservation" && order.refId) {
+        // Sacar las reservas del grupo de "pending" para que no queden accionables.
         await Reservation.updateMany(
           { groupId: order.refId, status: RES_STATUS.PENDING, paymentStatus: "pending" },
           {
@@ -40,7 +44,12 @@ export const runOrderExpiry = async () => {
             errorMessage: "Reserva no confirmada: el pago del depósito no se completó a tiempo.",
           }
         );
+      } else if (order.type === "class" && order.refId) {
+        // Liberar el cupo retenido de la(s) inscripción(es) sin pagar.
+        await enrollmentService.releaseEnrollmentHold(order.refId);
       }
+      // package: no retiene cupo → basta con marcar el Order expired.
+
       count++;
     } catch (err) {
       console.error(`[Order Expiry] Error con Order ${order._id}:`, err.message);

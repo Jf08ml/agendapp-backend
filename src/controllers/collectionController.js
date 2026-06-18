@@ -15,14 +15,66 @@ import * as mpConnect from "../services/collection/mpConnectService.js";
 import * as orderService from "../services/collection/orderService.js";
 import * as mpProvider from "../services/collection/providers/MercadoPagoCollectionProvider.js";
 import reservationService from "../services/reservationService.js";
+import enrollmentService from "../services/enrollmentService.js";
+import packageService from "../services/packageService.js";
+import { fulfillOrder } from "../services/collection/fulfillmentService.js";
 import Organization from "../models/organizationModel.js";
 import Service from "../models/serviceModel.js";
 import Reservation from "../models/reservationModel.js";
+import Enrollment from "../models/enrollmentModel.js";
+import ServicePackage from "../models/servicePackageModel.js";
 import { resolveBaseUrl } from "../utils/cancellationUtils.js";
 import Order from "../models/orderModel.js";
 
 // Minutos que se retiene el cupo mientras el cliente paga (hold).
 const HOLD_MINUTES = 15;
+
+/**
+ * Crea la preference de MP para un Order ya persistido y la vincula al Order.
+ * Centraliza la lógica de back_urls por-dominio (compartida por reserva/clase/
+ * paquete). El comprador vuelve siempre a `/reserva/pago` (la pantalla de retorno
+ * adapta el copy según el tipo de Order). Devuelve la preference.
+ */
+async function buildAndAttachCheckout({ org, order, title, expiresAt }) {
+  const { accessToken } = await mpConnect.getSellerToken(org._id);
+
+  // Dominio/subdominio propio de la org (dominio custom > slug > FRONTEND_BASE_URL).
+  const base = resolveBaseUrl(org);
+  // MP rechaza back_urls no públicas (localhost/127.0.0.1) → solo si la base es pública.
+  const isPublicBase =
+    /^https:\/\//i.test(base) ||
+    (/^http:\/\//i.test(base) && !/localhost|127\.0\.0\.1/i.test(base));
+  const ref = order.externalReference;
+  const backUrls = isPublicBase
+    ? {
+        success: `${base}/reserva/pago?status=success&ref=${ref}`,
+        failure: `${base}/reserva/pago?status=failure&ref=${ref}`,
+        pending: `${base}/reserva/pago?status=pending&ref=${ref}`,
+      }
+    : undefined;
+
+  const pref = await mpProvider.createCheckout({
+    amount: order.amount,
+    currency: order.currency,
+    externalReference: ref,
+    sellerToken: accessToken,
+    marketplaceFee: 0,
+    backUrls,
+    notificationUrl: process.env.MP_WEBHOOK_URL
+      ? `${process.env.MP_WEBHOOK_URL}?org=${org._id}`
+      : undefined,
+    title,
+    expirationDate: expiresAt ? moment(expiresAt).toISOString() : null,
+  });
+
+  order.providerPrefId = pref.id;
+  order.checkoutUrl = pref.checkoutUrl;
+  order.status = "pending";
+  order.raw = pref.raw;
+  await order.save();
+
+  return pref;
+}
 
 // GET /organizations/:id/mp/connect  → { url }
 export const getMpConnectUrl = async (req, res) => {
@@ -139,42 +191,12 @@ export const createReservationCheckout = async (req, res) => {
       expiresAt,
     });
 
-    const { accessToken } = await mpConnect.getSellerToken(organizationId);
-    // Dominio/subdominio propio de la org (dominio custom > slug > FRONTEND_BASE_URL).
-    // Así el comprador vuelve al sitio de la organización donde reservó, no al central.
-    const base = resolveBaseUrl(org);
-    // MP rechaza back_urls no públicas (localhost/127.0.0.1) → las deja vacías y
-    // el checkout falla. Solo las enviamos si la base es pública.
-    const isPublicBase =
-      /^https:\/\//i.test(base) ||
-      (/^http:\/\//i.test(base) && !/localhost|127\.0\.0\.1/i.test(base));
-    const backUrls = isPublicBase
-      ? {
-          success: `${base}/reserva/pago?status=success&ref=${order.externalReference}`,
-          failure: `${base}/reserva/pago?status=failure&ref=${order.externalReference}`,
-          pending: `${base}/reserva/pago?status=pending&ref=${order.externalReference}`,
-        }
-      : undefined;
-
-    const pref = await mpProvider.createCheckout({
-      amount: deposit.total,
-      currency: deposit.currency,
-      externalReference: order.externalReference,
-      sellerToken: accessToken,
-      marketplaceFee: 0,
-      backUrls,
-      notificationUrl: process.env.MP_WEBHOOK_URL
-        ? `${process.env.MP_WEBHOOK_URL}?org=${organizationId}`
-        : undefined,
+    const pref = await buildAndAttachCheckout({
+      org,
+      order,
       title: `Depósito de reserva — ${org.name}`,
-      expirationDate: moment(expiresAt).toISOString(),
+      expiresAt,
     });
-
-    order.providerPrefId = pref.id;
-    order.checkoutUrl = pref.checkoutUrl;
-    order.status = "pending";
-    order.raw = pref.raw;
-    await order.save();
 
     await Reservation.updateMany({ groupId }, { orderId: order._id });
 
@@ -192,6 +214,186 @@ export const createReservationCheckout = async (req, res) => {
     );
   } catch (err) {
     console.error("[createReservationCheckout]", err.response?.data || err.message);
+    const msg = err.response?.data?.message || err.message || "No se pudo crear el checkout.";
+    return sendResponse(res, 400, null, msg);
+  }
+};
+
+// POST /enrollments/checkout  → { checkoutUrl, orderId, externalReference, amount, currency }
+// Pay-to-confirm para inscripción a CLASE: retiene el cupo, crea inscripción(es)
+// en pending_payment, calcula el depósito (config propia de clases), crea la
+// preference de MP y devuelve el checkout. La confirmación la da el webhook.
+export const createClassCheckout = async (req, res) => {
+  const { sessionId, attendee, companion, notes, organizationId } = req.body;
+
+  if (!sessionId || !attendee?.name || !organizationId) {
+    return sendResponse(res, 400, null, "Datos incompletos para el checkout de clase.");
+  }
+
+  try {
+    const org = await Organization.findById(organizationId);
+    if (!org) return sendResponse(res, 404, null, "Organización no encontrada.");
+    if (!org.mpCollect?.connected) {
+      return sendResponse(res, 400, null, "La organización no tiene Mercado Pago conectado.");
+    }
+
+    // Retener cupo + crear inscripciones en pending_payment.
+    const hold = await enrollmentService.holdEnrollmentsForPayment({
+      organizationId,
+      sessionId,
+      attendee,
+      companion,
+      notes,
+    });
+
+    // Calcular el depósito con la config PROPIA de clases.
+    const deposit = orderService.computeClassDeposit(org, hold.totalPriceSum);
+    if (!deposit.required || deposit.total <= 0) {
+      // No exige depósito → liberar el hold; el caller debe usar el flujo normal.
+      await enrollmentService.releaseEnrollmentHold(hold.groupId);
+      return sendResponse(res, 400, null, "La organización no exige depósito para clases o el monto es 0.");
+    }
+
+    const expiresAt = moment().add(HOLD_MINUTES, "minutes").toDate();
+    const order = await orderService.createClassOrder({
+      organizationId,
+      groupId: hold.groupId,
+      amount: deposit.total,
+      currency: deposit.currency,
+      marketplaceFee: 0,
+      expiresAt,
+    });
+
+    const pref = await buildAndAttachCheckout({
+      org,
+      order,
+      title: `Depósito de clase — ${hold.classDoc?.name || org.name}`,
+      expiresAt,
+    });
+
+    // Vincular el Order a las inscripciones del grupo.
+    await Enrollment.updateMany({ groupId: hold.groupId }, { orderId: order._id });
+
+    return sendResponse(
+      res,
+      201,
+      {
+        checkoutUrl: pref.checkoutUrl,
+        orderId: String(order._id),
+        externalReference: order.externalReference,
+        amount: deposit.total,
+        currency: deposit.currency,
+      },
+      "Checkout de depósito de clase creado."
+    );
+  } catch (err) {
+    console.error("[createClassCheckout]", err.response?.data || err.message);
+    const msg = err.response?.data?.message || err.message || "No se pudo crear el checkout.";
+    return sendResponse(res, 400, null, msg);
+  }
+};
+
+// GET /packages/public?org=<orgId>  → paquetes activos para compra pública
+export const listPublicPackages = async (req, res) => {
+  try {
+    const organizationId = req.query.org || req.organization?._id;
+    if (!organizationId) return sendResponse(res, 400, null, "Falta la organización.");
+
+    const org = await Organization.findById(organizationId).select("currency mpCollect").lean();
+    if (!org) return sendResponse(res, 404, null, "Organización no encontrada.");
+
+    const packages = await ServicePackage.find({ organizationId, isActive: true })
+      .populate("services.serviceId", "name duration")
+      .populate("classes.classId", "name duration")
+      .sort({ price: 1 })
+      .lean();
+
+    return sendResponse(
+      res,
+      200,
+      {
+        currency: String(org.currency || "COP").toUpperCase(),
+        mpConnected: !!org.mpCollect?.connected,
+        packages,
+      },
+      "Paquetes disponibles."
+    );
+  } catch (err) {
+    return sendResponse(res, 400, null, err.message);
+  }
+};
+
+// POST /packages/checkout  → { checkoutUrl, orderId, externalReference, amount, currency }
+// Compra pública de un paquete pagada online: crea/ubica el cliente, crea el
+// Order (type package), la preference de MP y devuelve el checkout. El
+// ClientPackage se crea cuando el webhook confirma el pago.
+export const createPackageCheckout = async (req, res) => {
+  const { servicePackageId, customerDetails, organizationId } = req.body;
+
+  if (!servicePackageId || !customerDetails?.name || !customerDetails?.phone || !organizationId) {
+    return sendResponse(res, 400, null, "Datos incompletos para la compra del paquete.");
+  }
+
+  try {
+    const org = await Organization.findById(organizationId);
+    if (!org) return sendResponse(res, 404, null, "Organización no encontrada.");
+    if (!org.mpCollect?.connected) {
+      return sendResponse(res, 400, null, "La organización no tiene Mercado Pago conectado.");
+    }
+
+    const pkg = await ServicePackage.findOne({
+      _id: servicePackageId,
+      organizationId,
+      isActive: true,
+    });
+    if (!pkg) return sendResponse(res, 404, null, "Paquete no encontrado o inactivo.");
+
+    const amount = orderService.roundForCurrency(Number(pkg.price || 0), org.currency);
+    if (amount <= 0) return sendResponse(res, 400, null, "El paquete no tiene un precio válido.");
+
+    // Crear/ubicar el cliente comprador.
+    const customer = await reservationService.ensureClientExists({
+      name: customerDetails.name,
+      phoneNumber: customerDetails.phone,
+      email: customerDetails.email,
+      organizationId,
+      birthDate: customerDetails.birthDate,
+      documentId: customerDetails.documentId,
+      notes: customerDetails.notes,
+    });
+
+    const expiresAt = moment().add(HOLD_MINUTES, "minutes").toDate();
+    const order = await orderService.createPackageOrder({
+      organizationId,
+      servicePackageId,
+      clientId: customer._id,
+      amount,
+      currency: String(org.currency || "COP").toUpperCase(),
+      marketplaceFee: 0,
+      expiresAt,
+    });
+
+    const pref = await buildAndAttachCheckout({
+      org,
+      order,
+      title: `Paquete — ${pkg.name}`,
+      expiresAt,
+    });
+
+    return sendResponse(
+      res,
+      201,
+      {
+        checkoutUrl: pref.checkoutUrl,
+        orderId: String(order._id),
+        externalReference: order.externalReference,
+        amount,
+        currency: String(org.currency || "COP").toUpperCase(),
+      },
+      "Checkout de compra de paquete creado."
+    );
+  } catch (err) {
+    console.error("[createPackageCheckout]", err.response?.data || err.message);
     const msg = err.response?.data?.message || err.message || "No se pudo crear el checkout.";
     return sendResponse(res, 400, null, msg);
   }
@@ -269,17 +471,8 @@ export const mpWebhook = async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // Aprobar la reserva del grupo (crea las citas + WhatsApp). Basta una.
-    const groupReservations = await Reservation.find({ groupId: order.refId });
-    if (groupReservations.length > 0) {
-      await reservationService.updateReservation(String(groupReservations[0]._id), {
-        status: "approved",
-      });
-      await Reservation.updateMany(
-        { groupId: order.refId },
-        { paymentStatus: "paid" }
-      );
-    }
+    // Cumplir la orden según su tipo (reserva / clase / paquete).
+    await fulfillOrder(order);
 
     // Marcar el Order pagado (idempotente).
     await orderService.markOrderPaid(order._id, {

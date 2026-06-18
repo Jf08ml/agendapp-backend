@@ -1,6 +1,7 @@
 // src/routes/enrollmentRoutes.js
 import express from "express";
 import enrollmentController from "../controllers/enrollmentController.js";
+import { createClassCheckout } from "../controllers/collectionController.js";
 import { verifyToken } from "../middleware/authMiddleware.js";
 import { organizationResolver } from "../middleware/organizationResolver.js";
 import { requireActiveMembership, requireClassesModule } from "../middleware/membershipMiddleware.js";
@@ -13,6 +14,9 @@ const router = express.Router();
 
 // Cliente reserva desde la web (sin auth)
 router.post("/public", enrollmentController.createPublic);
+
+// Pay-to-confirm: crea el checkout de depósito de clase (sin auth; org en el body)
+router.post("/checkout", createClassCheckout);
 
 // Consultar y cancelar inscripción por token (sin auth)
 router.get("/public/cancel", enrollmentController.getByToken);

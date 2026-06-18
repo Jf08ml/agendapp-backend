@@ -1,15 +1,25 @@
 import express from "express";
 import packageController from "../controllers/packageController.js";
+import { listPublicPackages, createPackageCheckout } from "../controllers/collectionController.js";
 import { verifyToken } from "../middleware/authMiddleware.js";
 import { organizationResolver } from "../middleware/organizationResolver.js";
 
 const router = express.Router();
+
+// Compra pública de paquetes (pagados online vía Mercado Pago)
+router.get("/public/list", organizationResolver, listPublicPackages);
+router.post("/public/checkout", createPackageCheckout);
 
 // Rutas públicas (para reserva online)
 router.get(
   "/public/client-check",
   organizationResolver,
   packageController.checkClientPackagesPublic
+);
+router.get(
+  "/public/client-check-by-identifier",
+  organizationResolver,
+  packageController.checkClientPackagesByIdentifierPublic
 );
 router.get(
   "/public/client-class-check",

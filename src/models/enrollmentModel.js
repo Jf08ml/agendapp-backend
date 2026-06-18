@@ -50,8 +50,16 @@ const enrollmentSchema = new Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "confirmed", "cancelled", "attended", "no_show"],
+      // pending_payment: cupo retenido mientras el cliente paga el depósito (MP).
+      // Al confirmarse el pago pasa a confirmed/pending; si expira, a cancelled.
+      enum: ["pending_payment", "pending", "confirmed", "cancelled", "attended", "no_show"],
       default: "pending",
+    },
+    // 💳 Order de Mercado Pago que cubre el depósito de esta inscripción (pay-to-confirm)
+    orderId: {
+      type: Types.ObjectId,
+      ref: "Order",
+      default: null,
     },
     // Modo de aprobación al momento de crear la inscripción
     approvalMode: { type: String, enum: ["manual", "auto"], default: "manual" },

@@ -17,13 +17,18 @@
 import axios from "axios";
 import crypto from "crypto";
 import Organization from "../../models/organizationModel.js";
+import { encryptSecret, decryptSecret } from "../../utils/cryptoTokens.js";
+import { normalizeCountry, getCountryMeta } from "./mpCountries.js";
 
 const AUTH_BASE = "https://auth.mercadopago.com/authorization";
 const TOKEN_URL = "https://api.mercadopago.com/oauth/token";
 
 // Credenciales de la aplicación MP por país (integrador/plataforma).
 function appCreds(country) {
-  const cc = String(country || "CO").toUpperCase();
+  const cc = normalizeCountry(country);
+  if (!getCountryMeta(cc)) {
+    throw new Error(`País ${cc} no está en el catálogo de Mercado Pago soportado.`);
+  }
   const clientId = process.env[`MP_${cc}_CLIENT_ID`];
   const clientSecret = process.env[`MP_${cc}_CLIENT_SECRET`];
   if (!clientId || !clientSecret) {
@@ -105,8 +110,8 @@ export async function handleCallback(code, state) {
     mpCollect: {
       connected: true,
       userId: String(data.user_id),
-      accessToken: data.access_token,
-      refreshToken: data.refresh_token,
+      accessToken: encryptSecret(data.access_token),
+      refreshToken: encryptSecret(data.refresh_token),
       publicKey: data.public_key,
       scope: data.scope,
       site: country,
@@ -135,7 +140,7 @@ export async function refreshToken(orgId) {
       client_id: clientId,
       client_secret: clientSecret,
       grant_type: "refresh_token",
-      refresh_token: org.mpCollect.refreshToken,
+      refresh_token: decryptSecret(org.mpCollect.refreshToken),
     },
     { headers: { "Content-Type": "application/json" } }
   );
@@ -143,8 +148,8 @@ export async function refreshToken(orgId) {
   const expiresAt = new Date(Date.now() + Number(data.expires_in || 0) * 1000);
 
   await Organization.findByIdAndUpdate(orgId, {
-    "mpCollect.accessToken": data.access_token,
-    "mpCollect.refreshToken": data.refresh_token,
+    "mpCollect.accessToken": encryptSecret(data.access_token),
+    "mpCollect.refreshToken": encryptSecret(data.refresh_token),
     "mpCollect.tokenExpiresAt": expiresAt,
     ...(data.scope ? { "mpCollect.scope": data.scope } : {}),
   });
@@ -177,7 +182,7 @@ export async function getSellerToken(orgId) {
   }
 
   return {
-    accessToken: org.mpCollect.accessToken,
+    accessToken: decryptSecret(org.mpCollect.accessToken),
     publicKey: org.mpCollect.publicKey,
     site: org.mpCollect.site,
   };
