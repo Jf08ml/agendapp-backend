@@ -114,8 +114,12 @@ const registrationController = {
 
       const savedOrg = await newOrg.save();
 
-      // Notificar al WhatsApp de contacto de AgenditApp (no bloquea ni falla el registro)
-      notifyNewRegistration({
+      // Notificar al WhatsApp de contacto de AgenditApp. Se AWAITea a propósito:
+      // sin await, en serverless (Vercel) la instancia se congela tras enviar la
+      // respuesta y mata la petición a Meta en vuelo → el mensaje nunca sale.
+      // notifyNewRegistration nunca lanza (try/catch interno), así que awaitearlo
+      // no bloquea ni rompe el registro.
+      await notifyNewRegistration({
         businessName: savedOrg.name,
         ownerName: savedOrg.ownerName,
         phone: savedOrg.phoneNumber,

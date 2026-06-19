@@ -91,10 +91,15 @@ const NEW_SIGNUP_TEMPLATE_NAME = "nuevo_registro";
  * @param {{ businessName: string, ownerName?: string, phone: string, email: string }} data
  */
 export async function notifyNewRegistration({ businessName, ownerName, phone, email }) {
-  if (!NEW_SIGNUP_NOTIFY_PHONE) return;
+  if (!NEW_SIGNUP_NOTIFY_PHONE) {
+    console.warn(
+      "[metaApi] WHATSAPP_NEW_SIGNUP_NOTIFY_PHONE no configurado en este entorno; no se envía la notificación de nuevo registro."
+    );
+    return;
+  }
 
   try {
-    await sendTemplateMessage(NEW_SIGNUP_NOTIFY_PHONE, NEW_SIGNUP_TEMPLATE_NAME, "es", [
+    const { messageId } = await sendTemplateMessage(NEW_SIGNUP_NOTIFY_PHONE, NEW_SIGNUP_TEMPLATE_NAME, "es", [
       {
         type: "body",
         parameters: [
@@ -105,6 +110,7 @@ export async function notifyNewRegistration({ businessName, ownerName, phone, em
         ],
       },
     ]);
+    console.log(`[metaApi] Notificación de nuevo registro enviada (msg ${messageId}) — negocio "${businessName}".`);
   } catch (err) {
     console.error("[metaApi] Error notificando nuevo registro:", err.response?.data || err.message);
   }

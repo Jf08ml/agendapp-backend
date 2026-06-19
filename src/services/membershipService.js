@@ -105,31 +105,50 @@ const membershipService = {
   /**
    * Convierte una membresía de trial vencida al plan gratuito permanente.
    * Se llama automáticamente desde checkExpiringMemberships.
+   *
+   * Actualiza la MISMA membresía in-place (no crea una segunda): el documento de
+   * trial pasa a apuntar al plan gratuito y queda activo. Antes se creaba una
+   * membresía nueva y la vieja quedaba huérfana en "expired" → 2 docs por org.
+   *
+   * @param {Object|string} membershipOrOrgId  el doc de membresía (preferido) o,
+   *        por compatibilidad, un organizationId (se busca su membresía actual).
    */
-  convertTrialToFree: async (organizationId) => {
+  convertTrialToFree: async (membershipOrOrgId) => {
     const freePlan = await planModel.findOne({ slug: "plan-gratuito", isActive: true });
     if (!freePlan) throw new Error("[convertTrialToFree] plan-gratuito no encontrado en BD");
 
-    const membership = await membershipModel.create({
-      organizationId,
-      planId: freePlan._id,
-      startDate: new Date(),
-      currentPeriodStart: new Date(),
-      currentPeriodEnd: null,  // permanente, sin vencimiento
-      nextPaymentDue: null,
-      status: "active",
-    });
+    // Resolver la membresía a actualizar.
+    let membership = membershipOrOrgId;
+    if (!membership || !membership._id || typeof membership.save !== "function") {
+      // Recibimos un organizationId (o algo no-documento): buscar su membresía actual.
+      const organizationId = membership?._id || membership;
+      const org = await organizationModel.findById(organizationId).select("currentMembershipId");
+      membership = org?.currentMembershipId
+        ? await membershipModel.findById(org.currentMembershipId)
+        : await membershipModel.findOne({ organizationId }).sort({ createdAt: -1 });
+      if (!membership) throw new Error(`[convertTrialToFree] No se encontró membresía para org ${organizationId}`);
+    }
 
-    const orgUpdate = {
+    const organizationId = membership.organizationId?._id || membership.organizationId;
+
+    // Actualizar la membresía existente al plan gratuito (permanente).
+    membership.planId = freePlan._id;
+    membership.status = "active";
+    membership.currentPeriodStart = new Date();
+    membership.currentPeriodEnd = null; // permanente, sin vencimiento
+    membership.nextPaymentDue = null;
+    membership.autoRenew = false;
+    membership.lastCheckedAt = new Date();
+    await membership.save();
+
+    await organizationModel.findByIdAndUpdate(organizationId, {
       currentMembershipId: membership._id,
       membershipStatus: "active",
       hasAccessBlocked: false,
       ...buildPlanResetFields(freePlan),
-    };
+    });
 
-    await organizationModel.findByIdAndUpdate(organizationId, orgUpdate);
-
-    console.log(`[convertTrialToFree] Org ${organizationId} convertida a plan gratuito`);
+    console.log(`[convertTrialToFree] Org ${organizationId} convertida a plan gratuito (membresía ${membership._id} actualizada in-place)`);
     return membership;
   },
 
@@ -216,13 +235,11 @@ const membershipService = {
       }
 
       // Trial de plan-demo vencido → convertir a plan gratuito (sin importar cuántos días hace)
+      // Actualiza la MISMA membresía in-place (no crea otra).
       if (daysLeft <= 0 && isTrial && isTrialPlan) {
         try {
-          await membershipService.convertTrialToFree(membership.organizationId._id);
+          await membershipService.convertTrialToFree(membership);
           results.convertedToFree.push(membership);
-          membership.status = "expired";
-          membership.lastCheckedAt = now;
-          await membership.save();
           continue;
         } catch (err) {
           console.error("[checkExpiring] Error convirtiendo trial a free:", err.message);
