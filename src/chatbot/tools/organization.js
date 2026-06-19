@@ -1,6 +1,7 @@
 import Organization from "../../models/organizationModel.js";
 import Service from "../../models/serviceModel.js";
 import Employee from "../../models/employeeModel.js";
+import { markOnboardingMilestone } from "../../utils/onboardingMilestones.js";
 
 const DAY_MAP = { domingo: 0, lunes: 1, martes: 2, miercoles: 3, miércoles: 3, jueves: 4, viernes: 5, sabado: 6, sábado: 6 };
 
@@ -109,6 +110,9 @@ Cada día debe tener: day (0=domingo..6=sábado), isOpen (true/false), start ("H
       }
 
       await Organization.findByIdAndUpdate(context.organizationId, { setupCompleted: true });
+      // Marcar el hito del funnel de activación (la org se completó vía chatbot,
+      // que no pasa por organizationService donde normalmente se setea).
+      await markOnboardingMilestone(context.organizationId, "setupCompletedAt");
       return { success: true, message: "Configuración inicial completada." };
     },
   },
