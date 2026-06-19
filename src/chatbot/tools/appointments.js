@@ -395,6 +395,11 @@ Si el cliente no existe y se proporciona clientPhone, se crea automáticamente. 
         description: "Abono o anticipo del cliente (opcional, por defecto 0).",
         required: false,
       },
+      consecutive: {
+        type: "boolean",
+        description: "Cuando el cliente recibe VARIOS servicios en una misma visita a partir de una sola hora de inicio, ponlo en true: los servicios se agendan CONSECUTIVOS (cada uno empieza cuando termina el anterior, según su duración). Pon la hora de inicio en el PRIMER servicio (las horas de los demás se ignoran). Déjalo en false (o no lo envíes) solo si el usuario indicó horas distintas para cada servicio (ej: 'a las 2 retiro y a las 4 uñas') o si son citas en días/horarios independientes.",
+        required: false,
+      },
     },
     handler: async (params, context) => {
       const { organizationId, organization } = context;
@@ -430,8 +435,10 @@ Si el cliente no existe y se proporciona clientPhone, se crea automáticamente. 
       // 2. Resolver servicios, empleados y horarios
       const resolved = [];
       const warnings = [];
+      let prevEnd = null; // fin de la cita anterior (para modo consecutivo)
 
-      for (const appt of params.appointments) {
+      for (let i = 0; i < params.appointments.length; i++) {
+        const appt = params.appointments[i];
         const svc = await findServiceByName(organizationId, appt.serviceName);
         if (!svc) {
           return { success: false, error: `No se encontró el servicio "${appt.serviceName}". Verifica el nombre.` };
@@ -446,11 +453,19 @@ Si el cliente no existe y se proporciona clientPhone, se crea automáticamente. 
           return { success: false, error: `No se encontró el profesional "${appt.employeeName}". Verifica el nombre.` };
         }
 
-        const startMoment = moment.tz(`${appt.date}T${appt.time}:00`, "YYYY-MM-DDTHH:mm:ss", timezone);
+        // Modo consecutivo: a partir del 2º servicio, el inicio es el fin del anterior
+        // (no la hora que mandó el modelo). El 1º usa su hora explícita.
+        let startMoment;
+        if (params.consecutive && i > 0 && prevEnd) {
+          startMoment = prevEnd.clone();
+        } else {
+          startMoment = moment.tz(`${appt.date}T${appt.time}:00`, "YYYY-MM-DDTHH:mm:ss", timezone);
+        }
         if (!startMoment.isValid()) {
           return { success: false, error: `Fecha u hora inválida: "${appt.date} ${appt.time}". Usa formato YYYY-MM-DD y HH:mm.` };
         }
         const endMoment = startMoment.clone().add(svc.duration, "minutes");
+        prevEnd = endMoment.clone();
 
         // 3. Verificar solapamiento (advertencia, no bloqueo)
         const overlapping = await Appointment.find({

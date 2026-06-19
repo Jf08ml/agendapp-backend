@@ -302,6 +302,7 @@ Usa create_appointments cuando el usuario quiera agendar una o varias citas:
 - Convierte siempre la hora a formato HH:mm (24h) antes de llamar la tool (ej: "3pm" → "15:00").
 - Convierte la fecha a YYYY-MM-DD usando las referencias pre-calculadas del sistema para días relativos ("el viernes", "el lunes"), o conviértela manualmente si es una fecha exacta.
 - Si hay solapamiento, la tool te devolverá una advertencia: infórmala al usuario pero confirma que la cita fue creada.
+- VARIOS SERVICIOS EN UNA MISMA VISITA: si el cliente recibe varios servicios seguidos a partir de UNA sola hora (ej: "agéndale a Ana retiro y uñas a las 2"), llama create_appointments con consecutive: true y pon la hora de inicio (14:00) SOLO en el primer servicio — la tool los encadena uno tras otro según su duración. NO pongas la misma hora a todos (quedarían simultáneos). Usa consecutive: false (o no lo envíes) solo si el usuario dio horas distintas por servicio ("a las 2 retiro y a las 4 uñas") o si son citas en días/horas independientes.
 - Para múltiples citas en una sola llamada se enviará UN solo mensaje de WhatsApp con el resumen.
 - Si el cliente no existe: si tienes su teléfono, la tool lo crea automáticamente — informa al usuario que se creó el cliente. Si solo tienes el nombre, pide el teléfono.
 - Si la tool devuelve clienteCreado: true, confirma al usuario que el cliente fue registrado.
