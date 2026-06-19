@@ -1,5 +1,19 @@
 import SystemAnnouncement from "../models/systemAnnouncementModel.js";
+import Employee from "../models/employeeModel.js";
 import sendResponse from "../utils/sendResponse.js";
+
+// Resuelve el organizationId del usuario autenticado. El JWT solo lleva
+// { userId, userType }, así que: admin → su userId ES el organizationId;
+// employee → se busca su organizationId. (No hay organizationResolver en esta ruta.)
+async function resolveOrgId(user) {
+  if (!user) return null;
+  if (user.userType === "admin") return user.userId;
+  if (user.userType === "employee") {
+    const emp = await Employee.findById(user.userId).select("organizationId").lean();
+    return emp?.organizationId || null;
+  }
+  return null;
+}
 
 // Quita readBy del response y añade viewCount
 const toPublicDoc = ({ readBy, ...rest }) => ({ ...rest, viewCount: readBy?.length ?? 0 });
@@ -32,7 +46,7 @@ export const getLatestDate = async (req, res) => {
 // Marca todos los anuncios publicados como leídos por esta organización
 export const markRead = async (req, res) => {
   try {
-    const orgId = req.user?.organizationId;
+    const orgId = await resolveOrgId(req.user);
     if (!orgId) return sendResponse(res, 200, null); // superadmin u otro — ignorar
 
     await SystemAnnouncement.updateMany(

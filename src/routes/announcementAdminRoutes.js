@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireSuperAdmin } from "../middleware/authMiddleware.js";
+import { verifyToken, requireSuperAdmin } from "../middleware/authMiddleware.js";
 import {
   adminGetAll,
   adminCreate,
@@ -10,7 +10,8 @@ import {
 
 const router = Router();
 
-router.use(requireSuperAdmin);
+// verifyToken pone req.user (que requireSuperAdmin necesita); sin él → 401 siempre.
+router.use(verifyToken, requireSuperAdmin);
 
 router.get("/", adminGetAll);
 router.post("/", adminCreate);
