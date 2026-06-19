@@ -383,6 +383,12 @@ const adminController = {
           0,
         ],
       });
+      // Acumula { _id, name } de las orgs que alcanzaron el hito (omite el resto con $$REMOVE)
+      const pushIf = (path) => ({
+        $push: {
+          $cond: [{ $ifNull: [path, false] }, { _id: "$_id", name: "$name" }, "$$REMOVE"],
+        },
+      });
 
       const [agg] = await Organization.aggregate([
         { $addFields: { _regDate: regDateExpr } },
@@ -402,6 +408,14 @@ const adminController = {
             pagoConPrimeraCita: { $sum: hasAnd("$onboardingMilestones.firstAppointmentAt") },
             pagoConWhatsapp: { $sum: hasAnd("$onboardingMilestones.whatsappConnectedAt") },
             pagoConPrimerMensaje: { $sum: hasAnd("$onboardingMilestones.firstAutoMessageAt") },
+            // Listas de orgs por hito (para drill-down en el panel)
+            registradosOrgs: { $push: { _id: "$_id", name: "$name" } },
+            setupCompletoOrgs: pushIf("$onboardingMilestones.setupCompletedAt"),
+            conDemoOrgs: pushIf("$onboardingMilestones.seededDemoAt"),
+            primeraCitaOrgs: pushIf("$onboardingMilestones.firstAppointmentAt"),
+            whatsappConectadoOrgs: pushIf("$onboardingMilestones.whatsappConnectedAt"),
+            primerMensajeOrgs: pushIf("$onboardingMilestones.firstAutoMessageAt"),
+            convertidasPagoOrgs: pushIf("$convertedToPayingAt"),
           },
         },
       ]);
@@ -410,7 +424,14 @@ const adminController = {
         registrados: 0, setupCompleto: 0, conDemo: 0, primeraCita: 0,
         whatsappConectado: 0, primerMensaje: 0, convertidasPago: 0,
         pagoConSetup: 0, pagoConPrimeraCita: 0, pagoConWhatsapp: 0, pagoConPrimerMensaje: 0,
+        registradosOrgs: [], setupCompletoOrgs: [], conDemoOrgs: [], primeraCitaOrgs: [],
+        whatsappConectadoOrgs: [], primerMensajeOrgs: [], convertidasPagoOrgs: [],
       };
+      // Normaliza {_id,name} → {id,name} (string) y ordena por nombre
+      const orgList = (arr) =>
+        (arr || [])
+          .map((o) => ({ id: String(o._id), name: o.name || "—" }))
+          .sort((a, b) => a.name.localeCompare(b.name));
       const pct = (num, den) => (den > 0 ? Math.round((num / den) * 1000) / 10 : 0);
 
       sendResponse(res, 200, {
@@ -418,13 +439,13 @@ const adminController = {
         endDate,
         // Funnel: cada hito como conteo + % sobre registrados
         funnel: [
-          { hito: "Registrados", clave: "registrados", total: d.registrados, pct: d.registrados > 0 ? 100 : 0 },
-          { hito: "Completó/saltó setup", clave: "setupCompleto", total: d.setupCompleto, pct: pct(d.setupCompleto, d.registrados) },
-          { hito: "Usó datos de ejemplo", clave: "conDemo", total: d.conDemo, pct: pct(d.conDemo, d.registrados) },
-          { hito: "Creó 1ª cita", clave: "primeraCita", total: d.primeraCita, pct: pct(d.primeraCita, d.registrados) },
-          { hito: "Conectó WhatsApp", clave: "whatsappConectado", total: d.whatsappConectado, pct: pct(d.whatsappConectado, d.registrados) },
-          { hito: "1er mensaje automático", clave: "primerMensaje", total: d.primerMensaje, pct: pct(d.primerMensaje, d.registrados) },
-          { hito: "Convirtió a pago", clave: "convertidasPago", total: d.convertidasPago, pct: pct(d.convertidasPago, d.registrados) },
+          { hito: "Registrados", clave: "registrados", total: d.registrados, pct: d.registrados > 0 ? 100 : 0, orgs: orgList(d.registradosOrgs) },
+          { hito: "Completó/saltó setup", clave: "setupCompleto", total: d.setupCompleto, pct: pct(d.setupCompleto, d.registrados), orgs: orgList(d.setupCompletoOrgs) },
+          { hito: "Usó datos de ejemplo", clave: "conDemo", total: d.conDemo, pct: pct(d.conDemo, d.registrados), orgs: orgList(d.conDemoOrgs) },
+          { hito: "Creó 1ª cita", clave: "primeraCita", total: d.primeraCita, pct: pct(d.primeraCita, d.registrados), orgs: orgList(d.primeraCitaOrgs) },
+          { hito: "Conectó WhatsApp", clave: "whatsappConectado", total: d.whatsappConectado, pct: pct(d.whatsappConectado, d.registrados), orgs: orgList(d.whatsappConectadoOrgs) },
+          { hito: "1er mensaje automático", clave: "primerMensaje", total: d.primerMensaje, pct: pct(d.primerMensaje, d.registrados), orgs: orgList(d.primerMensajeOrgs) },
+          { hito: "Convirtió a pago", clave: "convertidasPago", total: d.convertidasPago, pct: pct(d.convertidasPago, d.registrados), orgs: orgList(d.convertidasPagoOrgs) },
         ],
         // % de conversión a pago entre quienes alcanzaron cada hito (qué predice la compra)
         conversionPorHito: [

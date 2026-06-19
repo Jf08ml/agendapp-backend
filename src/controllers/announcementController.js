@@ -18,6 +18,16 @@ async function resolveOrgId(user) {
 // Quita readBy del response y añade viewCount
 const toPublicDoc = ({ readBy, ...rest }) => ({ ...rest, viewCount: readBy?.length ?? 0 });
 
+// Para superadmin: además del conteo, incluye los nombres de las orgs que vieron
+// el anuncio (acepta readBy poblado {_id,name} o sin poblar [ObjectId]).
+const toAdminDoc = ({ readBy, ...rest }) => ({
+  ...rest,
+  viewCount: readBy?.length ?? 0,
+  viewers: (readBy || []).map((o) =>
+    o && o._id ? { _id: String(o._id), name: o.name || "—" } : { _id: String(o), name: "—" }
+  ),
+});
+
 // ── Endpoints públicos (verifyToken, sin membership check) ────────────────
 
 export const getPublished = async (req, res) => {
@@ -65,8 +75,9 @@ export const adminGetAll = async (req, res) => {
   try {
     const docs = await SystemAnnouncement.find()
       .sort({ isoDate: -1 })
+      .populate("readBy", "name")
       .lean();
-    sendResponse(res, 200, docs.map(toPublicDoc));
+    sendResponse(res, 200, docs.map(toAdminDoc));
   } catch (err) {
     sendResponse(res, 500, null, err.message);
   }
