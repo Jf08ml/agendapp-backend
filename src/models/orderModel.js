@@ -33,6 +33,8 @@ const orderSchema = new mongoose.Schema(
     currency: { type: String, required: true }, // de Organization.currency
     marketplaceFee: { type: Number, default: 0 }, // comisión de plataforma (v1 = 0)
 
+    // "mercadopago" (checkout automático) | "receipt" (transferencia manual +
+    // comprobante validado con IA). El cumplimiento (fulfillOrder) es el mismo.
     provider: { type: String, default: "mercadopago" },
     providerPrefId: { type: String }, // id de la preference de MP
     providerPaymentId: { type: String }, // id del payment (llega por webhook)
@@ -43,9 +45,44 @@ const orderSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["created", "pending", "paid", "failed", "expired", "refunded"],
+      // in_review: comprobante recibido, esperando aprobación del admin (provider "receipt").
+      enum: ["created", "pending", "in_review", "paid", "failed", "expired", "refunded"],
       default: "created",
     },
+
+    // 🧾 Comprobante de pago (provider "receipt"). La imagen la sube el cliente
+    // en la pantalla de pago; la IA extrae los datos y valida contra el Order.
+    receipt: {
+      imageUrl: { type: String },
+      imageFileId: { type: String }, // fileId de ImageKit (para poder borrar)
+      uploadedAt: { type: Date },
+      // Datos extraídos por la IA del comprobante.
+      extracted: {
+        amount: { type: Number },
+        currency: { type: String },
+        date: { type: String }, // fecha/hora del comprobante (texto crudo)
+        reference: { type: String }, // n.º de transacción / referencia (anti-duplicado)
+        destinationAccount: { type: String },
+        bank: { type: String },
+        senderName: { type: String },
+      },
+      aiConfidence: { type: Number }, // 0–1
+      aiVerdict: { type: String, enum: ["match", "mismatch", "unreadable"] },
+      aiNotes: { type: String }, // explicación corta de la IA
+      // auto_approved: la IA confirmó sola | pending_review: requiere admin
+      // approved/rejected: decisión manual del admin.
+      reviewStatus: {
+        type: String,
+        enum: ["auto_approved", "pending_review", "approved", "rejected"],
+      },
+      reviewedBy: { type: String }, // id/nombre del admin que decidió
+      reviewedAt: { type: Date },
+      reviewNotes: { type: String }, // motivo del rechazo, opcional
+    },
+
+    // Nº de comprobantes subidos para esta orden (anti-abuso: cada subida llama
+    // a la IA, que cuesta). Se topa en submitReceipt.
+    receiptAttempts: { type: Number, default: 0 },
 
     checkoutUrl: { type: String },
     paidAt: { type: Date },
@@ -65,6 +102,8 @@ const orderSchema = new mongoose.Schema(
 );
 
 orderSchema.index({ organizationId: 1, status: 1 });
+// Anti-duplicado de comprobantes: misma org + misma referencia ya pagada.
+orderSchema.index({ organizationId: 1, "receipt.extracted.reference": 1 });
 
 const Order = mongoose.models.Order || mongoose.model("Order", orderSchema);
 export default Order;

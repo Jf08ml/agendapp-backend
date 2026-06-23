@@ -65,6 +65,7 @@ export async function createReservationOrder({
   currency,
   marketplaceFee = 0,
   expiresAt = null,
+  provider = "mercadopago",
 }) {
   const order = await Order.create({
     organizationId,
@@ -73,7 +74,7 @@ export async function createReservationOrder({
     amount,
     currency: String(currency || "COP").toUpperCase(),
     marketplaceFee,
-    provider: "mercadopago",
+    provider,
     status: "created",
     expiresAt,
   });
@@ -114,6 +115,7 @@ export async function createClassOrder({
   marketplaceFee = 0,
   expiresAt = null,
   metadata = null,
+  provider = "mercadopago",
 }) {
   const order = await Order.create({
     organizationId,
@@ -122,7 +124,7 @@ export async function createClassOrder({
     amount,
     currency: String(currency || "COP").toUpperCase(),
     marketplaceFee,
-    provider: "mercadopago",
+    provider,
     status: "created",
     expiresAt,
     metadata,
@@ -146,6 +148,7 @@ export async function createPackageOrder({
   currency,
   marketplaceFee = 0,
   expiresAt = null,
+  provider = "mercadopago",
 }) {
   const order = await Order.create({
     organizationId,
@@ -154,7 +157,7 @@ export async function createPackageOrder({
     amount,
     currency: String(currency || "COP").toUpperCase(),
     marketplaceFee,
-    provider: "mercadopago",
+    provider,
     status: "created",
     expiresAt,
     metadata: {

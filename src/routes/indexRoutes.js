@@ -43,6 +43,8 @@ import waAgentRoutes from "./waAgentRoutes.js";
 import metaRoutes from "./metaRoutes.js";
 import collectionRoutes from "./collectionRoutes.js";
 import collectionPublicRoutes from "./collectionPublicRoutes.js";
+import receiptPublicRoutes from "./receiptPublicRoutes.js";
+import receiptAdminRoutes from "./receiptAdminRoutes.js";
 import membershipService from "../services/membershipService.js";
 import { organizationResolver } from "../middleware/organizationResolver";
 import { verifyToken } from "../middleware/authMiddleware.js";
@@ -138,6 +140,9 @@ router.use("/payments", paymentRoutes);
 // Cobros cliente→org (Mercado Pago): callback OAuth público (la org va en el state)
 router.use("/mp", collectionPublicRoutes);
 
+// Cobros por transferencia + comprobante con IA: checkouts y subida (públicos)
+router.use("/collection", receiptPublicRoutes);
+
 // Registro público: signup, exchange code, check slug
 router.use(registrationRoutes);
 
@@ -166,6 +171,7 @@ router.use("/packages", packageRoutes);
 router.use("/organizations", organizationResolver, verifyToken, organizationRoutes);
 router.use("/organizations", organizationResolver, verifyToken, metaRoutes);
 router.use("/organizations", organizationResolver, verifyToken, collectionRoutes);
+router.use("/receipts", organizationResolver, verifyToken, receiptAdminRoutes);
 router.use("/notifications", verifyToken, notificationRoutes);
 router.use("/chat", organizationResolver, verifyToken, chatRoutes);
 

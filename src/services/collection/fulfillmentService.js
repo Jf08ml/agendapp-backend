@@ -74,4 +74,21 @@ export async function fulfillOrder(order) {
   }
 }
 
-export default { fulfillOrder };
+/**
+ * Libera el "hold" de un Order que NO se va a cumplir (pago rechazado/expirado).
+ * Misma lógica que `cron/orderExpiryJob`: reserva→rejected, clase→libera cupo,
+ * paquete→nada. Idempotente.
+ */
+export async function releaseOrderHold(order, reason = "Pago no confirmado.") {
+  if (order.type === "reservation" && order.refId) {
+    await Reservation.updateMany(
+      { groupId: order.refId, status: "pending", paymentStatus: "pending" },
+      { status: "rejected", errorMessage: reason }
+    );
+  } else if (order.type === "class" && order.refId) {
+    await enrollmentService.releaseEnrollmentHold(order.refId);
+  }
+  // package: no retiene cupo.
+}
+
+export default { fulfillOrder, releaseOrderHold };

@@ -299,7 +299,7 @@ export const listPublicPackages = async (req, res) => {
     const organizationId = req.query.org || req.organization?._id;
     if (!organizationId) return sendResponse(res, 400, null, "Falta la organización.");
 
-    const org = await Organization.findById(organizationId).select("currency mpCollect").lean();
+    const org = await Organization.findById(organizationId).select("currency mpCollect paymentMethods").lean();
     if (!org) return sendResponse(res, 404, null, "Organización no encontrada.");
 
     const packages = await ServicePackage.find({ organizationId, isActive: true })
@@ -308,12 +308,23 @@ export const listPublicPackages = async (req, res) => {
       .sort({ price: 1 })
       .lean();
 
+    // Métodos de transferencia para el flujo de comprobante (campos públicos).
+    const paymentMethods = (org.paymentMethods || []).map((pm) => ({
+      type: pm.type,
+      accountName: pm.accountName,
+      accountNumber: pm.accountNumber,
+      phoneNumber: pm.phoneNumber,
+      qrCodeUrl: pm.qrCodeUrl,
+      notes: pm.notes,
+    }));
+
     return sendResponse(
       res,
       200,
       {
         currency: String(org.currency || "COP").toUpperCase(),
         mpConnected: !!org.mpCollect?.connected,
+        paymentMethods,
         packages,
       },
       "Paquetes disponibles."

@@ -423,6 +423,14 @@ const organizationSchema = new mongoose.Schema({
     type: MpCollectSchema,
     default: () => ({}),
   },
+  // Cuando hay AMBOS medios de cobro disponibles (MP conectado + métodos de
+  // transferencia), define cuál usar para el abono. "mercadopago" = checkout
+  // automático; "receipt" = transferencia + comprobante validado con IA.
+  depositPreferredMethod: {
+    type: String,
+    enum: ["mercadopago", "receipt"],
+    default: "mercadopago",
+  },
   welcomeTitle: {
     type: String,
     default: "¡Hola! Bienvenido",
