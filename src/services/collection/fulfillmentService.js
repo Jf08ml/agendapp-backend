@@ -13,13 +13,19 @@
  */
 
 import Reservation from "../../models/reservationModel.js";
+import Appointment from "../../models/appointmentModel.js";
 import reservationService from "../reservationService.js";
 import enrollmentService from "../enrollmentService.js";
 import packageService from "../packageService.js";
 
+// Nota con la que se marca el abono del depósito online en Appointment.payments[]
+// (se usa también como guarda de idempotencia para no duplicar el registro).
+const DEPOSIT_PAYMENT_NOTE = "Depósito (pago online)";
+
 /**
- * reservation: aprueba la primera reserva del grupo (crea las citas + WhatsApp)
- * y marca el grupo como pagado.
+ * reservation: aprueba la primera reserva del grupo (crea las citas + WhatsApp),
+ * marca el grupo como pagado y registra el depósito en cada cita creada para que
+ * aparezca en el seguimiento de pagos.
  */
 async function fulfillReservationOrder(order) {
   const groupReservations = await Reservation.find({ groupId: order.refId });
@@ -29,6 +35,30 @@ async function fulfillReservationOrder(order) {
     status: "approved",
   });
   await Reservation.updateMany({ groupId: order.refId }, { paymentStatus: "paid" });
+
+  // Propagar el depósito pagado al seguimiento de pagos de cada cita.
+  // Cada Reservation guarda su parte del depósito (`depositAmount`) y queda
+  // vinculada a su cita vía `appointmentId`. Replica el patrón de las clases
+  // (enrollmentService.confirmPaidEnrollmentGroup): registra un pago en
+  // Appointment.payments[] para que el abono se vea en la agenda.
+  const method = order.provider === "receipt" ? "transfer" : "card";
+  const approved = await Reservation.find({ groupId: order.refId });
+  for (const r of approved) {
+    if (!r.appointmentId || !(r.depositAmount > 0)) continue;
+    const appt = await Appointment.findById(r.appointmentId);
+    if (!appt) continue;
+    // Idempotencia: no duplicar el abono si ya quedó registrado.
+    const alreadyRegistered = (appt.payments || []).some(
+      (p) => p.note === DEPOSIT_PAYMENT_NOTE
+    );
+    if (alreadyRegistered) continue;
+    appt.payments.push({
+      amount: r.depositAmount,
+      method,
+      note: DEPOSIT_PAYMENT_NOTE,
+    });
+    await appt.save(); // pre-save recalcula paymentStatus
+  }
 }
 
 /**
