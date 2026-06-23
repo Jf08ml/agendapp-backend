@@ -18,7 +18,7 @@ import axios from "axios";
 import crypto from "crypto";
 import Organization from "../../models/organizationModel.js";
 import { encryptSecret, decryptSecret } from "../../utils/cryptoTokens.js";
-import { normalizeCountry, getCountryMeta } from "./mpCountries.js";
+import { normalizeCountry, getCountryMeta, isCountryEnabled } from "./mpCountries.js";
 
 const AUTH_BASE = "https://auth.mercadopago.com/authorization";
 const TOKEN_URL = "https://api.mercadopago.com/oauth/token";
@@ -50,8 +50,28 @@ function redirectUri() {
  * para que conecte su cuenta de Mercado Pago. Guarda un nonce anti-CSRF en la org.
  */
 export async function buildAuthUrl(orgId) {
-  const org = await Organization.findById(orgId).select("default_country").lean();
+  const org = await Organization.findById(orgId).select("default_country name").lean();
   if (!org) throw new Error("Organización no encontrada.");
+
+  // No usar el fallback silencioso a "CO": si la org no tiene país configurado o
+  // su país no está habilitado (sin credenciales MP), abortar con un mensaje claro
+  // en vez de redirigir a la aplicación MP de otro país (la pantalla de MP se cuelga).
+  if (!org.default_country) {
+    throw new Error(
+      "Tu negocio no tiene un país configurado. Configúralo antes de conectar Mercado Pago."
+    );
+  }
+  const cc = normalizeCountry(org.default_country);
+  const meta = getCountryMeta(cc);
+  if (!meta) {
+    throw new Error(`Mercado Pago no está soportado para el país ${cc}.`);
+  }
+  if (!isCountryEnabled(cc)) {
+    throw new Error(
+      `Cobros con Mercado Pago aún no está disponible en ${meta.name}. Pronto lo habilitaremos.`
+    );
+  }
+
   const { clientId, country } = appCreds(org.default_country);
 
   const nonce = crypto.randomBytes(16).toString("hex");
