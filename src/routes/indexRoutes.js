@@ -45,6 +45,7 @@ import collectionRoutes from "./collectionRoutes.js";
 import collectionPublicRoutes from "./collectionPublicRoutes.js";
 import receiptPublicRoutes from "./receiptPublicRoutes.js";
 import receiptAdminRoutes from "./receiptAdminRoutes.js";
+import impactSurveyRoutes from "./impactSurveyRoutes.js";
 import membershipService from "../services/membershipService.js";
 import { organizationResolver } from "../middleware/organizationResolver";
 import { verifyToken } from "../middleware/authMiddleware.js";
@@ -188,6 +189,7 @@ router.use("/reminders", verifyToken, requireActiveMembership, reminderRoutes);
 router.use("/campaigns", verifyToken, requireActiveMembership, campaignRoutes);
 router.use("/expenses", organizationResolver, verifyToken, requireActiveMembership, expenseRoutes);
 router.use("/audit-logs", organizationResolver, verifyToken, auditLogRoutes);
+router.use("/impact-survey", organizationResolver, verifyToken, impactSurveyRoutes);
 router.use("/announcements", verifyToken, announcementRoutes);
 router.use("/admin/announcements", announcementAdminRoutes);
 

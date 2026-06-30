@@ -25,6 +25,7 @@ import ClientPackage from "../models/clientPackageModel.js";
 import AuditLog from "../models/auditLogModel.js";
 import ChatLog from "../models/chatLogModel.js";
 import ChatbotFeedback from "../models/chatbotFeedbackModel.js";
+import ImpactSurveyResponse from "../models/impactSurveyResponseModel.js";
 import Expense from "../models/expenseModel.js";
 import Class from "../models/classModel.js";
 import ClassSession from "../models/classSessionModel.js";
@@ -36,6 +37,7 @@ import {
   getPlatformTimeSeries,
   getOrganizationRanking,
 } from "../services/platformAnalyticsService.js";
+import { listImpactReports } from "../services/impactReportService.js";
 
 /** TTL del ExchangeCode de impersonación (90 segundos) */
 const IMPERSONATION_CODE_TTL_MS = 90 * 1000;
@@ -458,6 +460,53 @@ const adminController = {
     } catch (error) {
       console.error("[admin/getOnboardingFunnel] Error:", error);
       sendResponse(res, 500, null, "Error al obtener el funnel de onboarding");
+    }
+  },
+
+  // ─── Reportes de impacto por organización ───────────────────────────────────
+
+  /**
+   * GET /api/admin/impact-reports
+   * Preview superadmin de los reportes de impacto: por cada org elegible
+   * (antigüedad ≥ 45 días y ≥ 20 citas pasadas), cuántas citas gestionó, cuántas
+   * reservas llegaron solas por su link y —cuando lo registra— su tasa de ausencias.
+   * Query: includeIneligible=true para incluir también orgs que aún no califican.
+   */
+  getImpactReports: async (req, res) => {
+    try {
+      const includeIneligible = req.query.includeIneligible === "true";
+      const data = await listImpactReports({ includeIneligible });
+      sendResponse(res, 200, data);
+    } catch (error) {
+      console.error("[admin/getImpactReports] Error:", error);
+      sendResponse(res, 500, null, "Error al obtener los reportes de impacto");
+    }
+  },
+
+  /**
+   * GET /api/admin/impact-survey/responses
+   * Seguimiento: respuestas que los admins dieron a la encuesta del reporte de
+   * impacto (qué usaban antes, percepción de inasistencias). Sin agregación todavía.
+   */
+  getImpactSurveyResponses: async (req, res) => {
+    try {
+      const docs = await ImpactSurveyResponse.find({ status: "answered" })
+        .sort({ updatedAt: -1 })
+        .populate("organizationId", "name")
+        .lean();
+
+      const responses = docs.map((d) => ({
+        orgId: String(d.organizationId?._id || d.organizationId || ""),
+        orgName: d.organizationId?.name || "—",
+        answers: d.answers || {},
+        reportSnapshot: d.reportSnapshot || {},
+        respondedAt: d.updatedAt,
+      }));
+
+      sendResponse(res, 200, { total: responses.length, responses });
+    } catch (error) {
+      console.error("[admin/getImpactSurveyResponses] Error:", error);
+      sendResponse(res, 500, null, "Error al obtener las respuestas de la encuesta");
     }
   },
 

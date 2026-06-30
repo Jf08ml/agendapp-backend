@@ -92,6 +92,22 @@ router.get(
   adminController.getOnboardingFunnel
 );
 
+// ─── Reportes de impacto por organización (solo superadmins) ────────────────
+
+router.get(
+  "/admin/impact-reports",
+  verifyToken,
+  requireSuperAdmin,
+  adminController.getImpactReports
+);
+
+router.get(
+  "/admin/impact-survey/responses",
+  verifyToken,
+  requireSuperAdmin,
+  adminController.getImpactSurveyResponses
+);
+
 // ─── Analítica de chatbots IA (solo superadmins) ────────────────────────────
 
 router.get(
