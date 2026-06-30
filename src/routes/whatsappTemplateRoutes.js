@@ -29,4 +29,7 @@ router.get("/:organizationId/settings", whatsappTemplateController.getTemplateSe
 // 🆕 Actualizar configuración de envíos
 router.put("/:organizationId/settings", whatsappTemplateController.updateTemplateSettings);
 
+// 🎂 Actualizar beneficio de cumpleaños ({{beneficio}})
+router.put("/:organizationId/birthday-benefit", whatsappTemplateController.updateBirthdayBenefit);
+
 export default router;

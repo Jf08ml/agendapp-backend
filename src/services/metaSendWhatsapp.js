@@ -44,6 +44,8 @@ const META_TEMPLATE_NAMES = {
   classEnrollmentPending:    "clase_pendiente",
   classEnrollmentCancelled:  "clase_cancelada",
   classReminder:             "recordatorio_clase",
+  // 🎂 Cumpleaños
+  birthdayGreeting:          "cumpleanos_cliente",
 };
 
 // ── Variable order per template type ─────────────────────────────────────────
@@ -81,6 +83,8 @@ const VARIABLE_ORDER = {
   clase_pendiente:         ["nombre_cliente", "nombre_clase", "fecha_clase", "hora_inicio", "hora_fin", "nombre_negocio", "precio"],
   clase_cancelada:         ["nombre_cliente", "nombre_clase", "fecha_clase", "hora_inicio", "hora_fin", "nombre_negocio"],
   recordatorio_clase:      ["nombre_cliente", "nombre_clase", "fecha_clase", "hora_inicio", "hora_fin", "nombre_negocio", "direccion"],
+  // 🎂 Cumpleaños
+  cumpleanos_cliente:      ["nombre_cliente", "nombre_negocio", "beneficio"],
 };
 
 // ── Data key → Meta variable name ────────────────────────────────────────────
@@ -108,6 +112,7 @@ function buildMetaVarMap(data) {
     hora_inicio:          data.startTime          ?? "",
     hora_fin:             data.endTime            ?? "",
     precio:               data.price              ?? "",
+    beneficio:            data.beneficio          ?? "",
     // enlace_cancelacion ya existe arriba; añadimos fallback al cancelLink de clases
     ...(data.cancelLink ? { enlace_cancelacion: data.cancellationLink ?? data.cancelLink } : {}),
   };

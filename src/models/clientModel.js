@@ -80,6 +80,11 @@ const clientSchema = new mongoose.Schema(
       type: Date,
       required: false,
     },
+    // 🎂 Última vez que se envió el saludo de cumpleaños (idempotencia anual)
+    lastBirthdayGreetingAt: {
+      type: Date,
+      required: false,
+    },
   },
   {
     timestamps: true,

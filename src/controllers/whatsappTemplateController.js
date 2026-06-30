@@ -43,6 +43,8 @@ const whatsappTemplateController = {
         classEnrollmentPending: whatsappTemplates.getDefaultTemplate('classEnrollmentPending'),
         classEnrollmentCancelled: whatsappTemplates.getDefaultTemplate('classEnrollmentCancelled'),
         classReminder: whatsappTemplates.getDefaultTemplate('classReminder'),
+        // 🎂 Cumpleaños
+        birthdayGreeting: whatsappTemplates.getDefaultTemplate('birthdayGreeting'),
       };
 
       // Plantillas personalizadas (si existen)
@@ -136,12 +138,20 @@ const whatsappTemplateController = {
           isCustom: !!customTemplates.classReminder,
           variables: ['{{names}}', '{{organization}}', '{{address}}', '{{className}}', '{{date}}', '{{startTime}}', '{{endTime}}', '{{cancelBlock}}'],
         },
+        // 🎂 Cumpleaños
+        birthdayGreeting: {
+          content: customTemplates.birthdayGreeting || defaultTemplates.birthdayGreeting,
+          isCustom: !!customTemplates.birthdayGreeting,
+          variables: ['{{names}}', '{{organization}}', '{{beneficio}}'],
+        },
       };
 
       // También enviar los templates por defecto para el botón "Restaurar"
-      sendResponse(res, 200, { 
-        templates, 
-        defaultTemplates 
+      sendResponse(res, 200, {
+        templates,
+        defaultTemplates,
+        // 🎂 Beneficio de cumpleaños configurado por la org (texto para {{beneficio}})
+        birthdayBenefit: templateDoc?.birthdayBenefit || "",
       }, "Plantillas obtenidas correctamente");
     } catch (error) {
       console.error("Error obteniendo plantillas:", error);
@@ -176,6 +186,7 @@ const whatsappTemplateController = {
         'classEnrollmentPending',
         'classEnrollmentCancelled',
         'classReminder',
+        'birthdayGreeting',
       ];
 
       if (!validTypes.includes(templateType)) {
@@ -248,6 +259,7 @@ const whatsappTemplateController = {
         'classEnrollmentPending',
         'classEnrollmentCancelled',
         'classReminder',
+        'birthdayGreeting',
       ];
 
       if (!validTypes.includes(templateType)) {
@@ -317,6 +329,7 @@ const whatsappTemplateController = {
         'classEnrollmentPending',
         'classEnrollmentCancelled',
         'classReminder',
+        'birthdayGreeting',
       ];
 
       for (const key in templates) {
@@ -388,6 +401,7 @@ const whatsappTemplateController = {
         manage_block: "https://agenda.example.com/manage/abc123",
         recommendations: `\n\n📝 *Recomendaciones:*\n• Llegar 10 minutos antes\n• Traer el cabello limpio y seco`,
         reward: "1 servicio gratis en tu próxima visita",
+        beneficio: "20% de descuento en tu próximo servicio",
         // 📚 Módulo de Clases
         className: "Yoga para principiantes",
         startTime: "07:00 AM",
@@ -445,6 +459,7 @@ const whatsappTemplateController = {
           classEnrollmentPending: true,
           classEnrollmentCancelled: true,
           classReminder: true,
+          birthdayGreeting: false,
         };
         return sendResponse(res, 200, defaults, "Configuración por defecto");
       }
@@ -466,6 +481,7 @@ const whatsappTemplateController = {
         classEnrollmentPending: true,
         classEnrollmentCancelled: true,
         classReminder: true,
+        birthdayGreeting: false,
       };
 
       sendResponse(res, 200, settings, "Configuración obtenida correctamente");
@@ -506,6 +522,7 @@ const whatsappTemplateController = {
         'classEnrollmentPending',
         'classEnrollmentCancelled',
         'classReminder',
+        'birthdayGreeting',
       ];
 
       for (const key of Object.keys(enabledTypes)) {
@@ -527,6 +544,31 @@ const whatsappTemplateController = {
       sendResponse(res, 200, updated.enabledTypes, "Configuración actualizada correctamente");
     } catch (error) {
       console.error("Error actualizando configuración:", error);
+      sendResponse(res, 500, null, error.message);
+    }
+  },
+
+  /**
+   * 🎂 Actualiza el beneficio de cumpleaños (texto inyectado en {{beneficio}})
+   */
+  updateBirthdayBenefit: async (req, res) => {
+    try {
+      const { organizationId } = req.params;
+      const { birthdayBenefit } = req.body;
+
+      if (typeof birthdayBenefit !== "string") {
+        return sendResponse(res, 400, null, "birthdayBenefit debe ser texto");
+      }
+
+      const updated = await WhatsappTemplate.findOneAndUpdate(
+        { organizationId },
+        { birthdayBenefit: birthdayBenefit.trim() },
+        { new: true, upsert: true }
+      );
+
+      sendResponse(res, 200, { birthdayBenefit: updated.birthdayBenefit }, "Beneficio de cumpleaños actualizado");
+    } catch (error) {
+      console.error("Error actualizando beneficio de cumpleaños:", error);
       sendResponse(res, 500, null, error.message);
     }
   },

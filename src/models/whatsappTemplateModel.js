@@ -83,6 +83,11 @@ const whatsappTemplateSchema = new mongoose.Schema(
           type: Boolean,
           default: true,
         },
+        // 🎂 Saludo de cumpleaños (desactivado por defecto)
+        birthdayGreeting: {
+          type: Boolean,
+          default: false,
+        },
       },
       default: () => ({
         scheduleAppointment: true,
@@ -102,6 +107,7 @@ const whatsappTemplateSchema = new mongoose.Schema(
         classEnrollmentPending: true,
         classEnrollmentCancelled: true,
         classReminder: true,
+        birthdayGreeting: false,
       }),
     },
     scheduleAppointment: {
@@ -174,6 +180,16 @@ const whatsappTemplateSchema = new mongoose.Schema(
     classReminder: {
       type: String,
       default: null,
+    },
+    // 🎂 Saludo de cumpleaños
+    birthdayGreeting: {
+      type: String,
+      default: null, // null = usar template por defecto del sistema
+    },
+    // 🎂 Beneficio de cumpleaños (texto editable por la org; se inyecta en {{beneficio}})
+    birthdayBenefit: {
+      type: String,
+      default: "",
     },
   },
   {

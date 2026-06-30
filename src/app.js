@@ -14,6 +14,7 @@ import paypalSubscriptionSyncJob from "./cron/paypalSubscriptionSyncJob.js";
 import reminderJob from "./cron/reminderJob.js";
 import mpTokenRefreshJob from "./cron/mpTokenRefreshJob.js";
 import orderExpiryJob from "./cron/orderExpiryJob.js";
+import birthdayJob from "./cron/birthdayJob.js";
 import { dynamicCorsOptions } from "./middleware/corsMiddleware.js";
 
 const app = express();
@@ -145,6 +146,8 @@ dbConnection()
     console.log("⏰ Cron job iniciado: refresh de tokens Mercado Pago (3 AM diario)");
     orderExpiryJob.start();
     console.log("⏰ Cron job iniciado: expiración de holds de reserva (cada 5 min)");
+    birthdayJob.start();
+    console.log("⏰ Cron job iniciado: saludos de cumpleaños (9 AM hora Colombia)");
   })
   .catch((err) => {
     console.error("Failed to connect to the database", err);

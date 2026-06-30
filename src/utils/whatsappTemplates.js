@@ -225,6 +225,15 @@ Te recordamos tu próxima clase:
 {{cancelBlock}}
 ¡Te esperamos!`,
 
+      // 🎂 Saludo de cumpleaños
+      birthdayGreeting: `🎂 ¡Feliz cumpleaños, {{names}}! 🎉
+
+De parte de todo el equipo de *{{organization}}*, te deseamos un día lleno de alegría.
+
+🎁 Como regalo de cumpleaños: {{beneficio}}
+
+¡Gracias por ser parte de nuestra familia! Te esperamos pronto para celebrarlo. 💖`,
+
       // ❌ Inscripción cancelada
       classEnrollmentCancelled: `❌ ¡Hola, {{names}}!
 
