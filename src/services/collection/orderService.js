@@ -172,6 +172,57 @@ export async function createPackageOrder({
 }
 
 /**
+ * Crea un Order para un PEDIDO DE TIENDA pública (type "store"). Los `items` son
+ * snapshots { productId, name, quantity, unitPrice } ya validados por el caller
+ * (precio siempre desde el Product, nunca del cliente). No descuenta stock: eso
+ * ocurre al confirmarse el pago (fulfillStoreOrder) o al cobrar contraentrega.
+ *
+ * `provider`: "mercadopago" | "receipt" | "cod". Con "cod" el pedido nace
+ * "pending" (no hay checkout que lo transicione) — pasar status: "pending".
+ */
+export async function createStoreOrder({
+  organizationId,
+  items,
+  customer,
+  delivery,
+  amount,
+  currency,
+  marketplaceFee = 0,
+  expiresAt = null,
+  provider = "mercadopago",
+  status = "created",
+}) {
+  const order = await Order.create({
+    organizationId,
+    type: "store",
+    amount,
+    currency: String(currency || "COP").toUpperCase(),
+    marketplaceFee,
+    provider,
+    status,
+    expiresAt,
+    store: {
+      items,
+      customer: {
+        name: customer?.name || "",
+        phone: customer?.phone || "",
+        email: customer?.email || "",
+      },
+      delivery: {
+        mode: delivery?.mode || "pickup",
+        address: delivery?.address || "",
+        notes: delivery?.notes || "",
+      },
+      fulfillmentStatus: "pending",
+    },
+  });
+
+  order.externalReference = String(order._id);
+  await order.save();
+  return order;
+}
+
+/**
  * Marca un Order como pagado de forma idempotente (ignora eventos ya procesados).
  * Devuelve { order, alreadyProcessed }.
  */

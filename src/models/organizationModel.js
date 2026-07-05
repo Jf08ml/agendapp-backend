@@ -431,6 +431,16 @@ const organizationSchema = new mongoose.Schema({
     enum: ["mercadopago", "receipt"],
     default: "mercadopago",
   },
+  // 🛍️ Tienda pública de productos (/tienda). Flags públicos (se exponen en
+  // GET /organization-config). storeCodEnabled = aceptar pago contraentrega.
+  storeEnabled: {
+    type: Boolean,
+    default: false,
+  },
+  storeCodEnabled: {
+    type: Boolean,
+    default: true,
+  },
   welcomeTitle: {
     type: String,
     default: "¡Hola! Bienvenido",

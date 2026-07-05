@@ -31,6 +31,7 @@ import paymentRoutes from "./paymentRoutes.js";
 import classRoutes from "./classRoutes.js";
 import enrollmentRoutes from "./enrollmentRoutes.js";
 import expenseRoutes from "./expenseRoutes.js";
+import productRoutes from "./productRoutes.js";
 import registrationRoutes from "./registrationRoutes.js";
 import adminRoutes from "./adminRoutes.js";
 import agentRoutes from "./agentRoutes.js";
@@ -45,6 +46,8 @@ import collectionRoutes from "./collectionRoutes.js";
 import collectionPublicRoutes from "./collectionPublicRoutes.js";
 import receiptPublicRoutes from "./receiptPublicRoutes.js";
 import receiptAdminRoutes from "./receiptAdminRoutes.js";
+import storePublicRoutes from "./storePublicRoutes.js";
+import storeAdminRoutes from "./storeAdminRoutes.js";
 import impactSurveyRoutes from "./impactSurveyRoutes.js";
 import membershipService from "../services/membershipService.js";
 import { organizationResolver } from "../middleware/organizationResolver";
@@ -68,6 +71,11 @@ router.get("/organization-config", organizationResolver, async (req, res) => {
   if (orgObj.mpCollect) {
     orgObj.mpCollect = { connected: !!orgObj.mpCollect.connected };
   }
+
+  // 🛍️ Flags públicos de la tienda (normalizados por si el doc es legacy y no
+  // tiene los campos: storeEnabled default false, storeCodEnabled default true).
+  orgObj.storeEnabled = !!orgObj.storeEnabled;
+  orgObj.storeCodEnabled = orgObj.storeCodEnabled !== false;
 
   try {
     orgObj.planLimits = await membershipService.getPlanLimits(organization._id);
@@ -144,6 +152,10 @@ router.use("/mp", collectionPublicRoutes);
 // Cobros por transferencia + comprobante con IA: checkouts y subida (públicos)
 router.use("/collection", receiptPublicRoutes);
 
+// 🛍️ Tienda pública de productos: catálogo + checkouts (MP / contraentrega).
+// El pago por comprobante de la tienda vive en /collection/receipt/store.
+router.use("/store", storePublicRoutes);
+
 // Registro público: signup, exchange code, check slug
 router.use(registrationRoutes);
 
@@ -188,6 +200,10 @@ router.use("/wa", verifyToken, requireActiveMembership, waRoutes);
 router.use("/reminders", verifyToken, requireActiveMembership, reminderRoutes);
 router.use("/campaigns", verifyToken, requireActiveMembership, campaignRoutes);
 router.use("/expenses", organizationResolver, verifyToken, requireActiveMembership, expenseRoutes);
+router.use("/products", organizationResolver, verifyToken, requireActiveMembership, productRoutes);
+// Hook futuro para límite por plan: checkPlanLimit("maxProducts") — NO activar ahora
+// 🛍️ Bandeja admin de pedidos de la tienda pública
+router.use("/store-orders", organizationResolver, verifyToken, requireActiveMembership, storeAdminRoutes);
 router.use("/audit-logs", organizationResolver, verifyToken, auditLogRoutes);
 router.use("/impact-survey", organizationResolver, verifyToken, impactSurveyRoutes);
 router.use("/announcements", verifyToken, announcementRoutes);

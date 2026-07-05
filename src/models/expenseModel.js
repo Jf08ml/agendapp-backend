@@ -32,6 +32,13 @@ const expenseSchema = new mongoose.Schema(
       enum: ["expense", "income"],
       default: "expense",
     },
+    // Método de pago del movimiento. Default null a propósito:
+    // los movimientos históricos sin método NO deben contar como efectivo.
+    method: {
+      type: String,
+      enum: ["cash", "card", "transfer", "other", null],
+      default: null,
+    },
     registeredBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Employee",

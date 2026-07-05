@@ -6,6 +6,8 @@
  *  - reservation → aprueba el grupo de reservas (crea las citas + WhatsApp).
  *  - class       → confirma las inscripciones del grupo (pending_payment → confirmed/pending).
  *  - package     → crea el ClientPackage (compra de paquete pagada online).
+ *  - store       → registra la venta en caja (ProductSale, descuento atómico de
+ *                  stock + alerta stock bajo) y notifica el pedido al admin.
  *
  * Cada handler es idempotente a nivel de efecto (busca el estado pendiente y, si
  * ya no existe, no hace nada); la idempotencia por evento la garantiza el Order
@@ -14,9 +16,13 @@
 
 import Reservation from "../../models/reservationModel.js";
 import Appointment from "../../models/appointmentModel.js";
+import Order from "../../models/orderModel.js";
+import Organization from "../../models/organizationModel.js";
 import reservationService from "../reservationService.js";
 import enrollmentService from "../enrollmentService.js";
 import packageService from "../packageService.js";
+import productService from "../productService.js";
+import { notifyNewStoreOrder, notifyStoreStockConflict } from "./storeNotifier.js";
 
 // Nota con la que se marca el abono del depósito online en Appointment.payments[]
 // (se usa también como guarda de idempotencia para no duplicar el registro).
@@ -89,6 +95,63 @@ async function fulfillPackageOrder(order) {
 }
 
 /**
+ * store: el pago del pedido se confirmó → registrar la venta en caja
+ * (productService.createSale: descuento ATÓMICO de stock + comisión + alerta de
+ * stock bajo) y notificar el pedido nuevo al admin.
+ *
+ * Decisión 2 del plan: si al pagar ya no hay stock, el fulfillment NO revienta
+ * (el pago no se revierte) — el pedido queda pagado sin venta y se notifica el
+ * conflicto para que el admin lo resuelva manualmente.
+ *
+ * Mapeo de método en la ProductSale: comprobante → "transfer"; MP → "other"
+ * con nota "Tienda online · Mercado Pago". (COD no pasa por aquí: la venta la
+ * crea el admin en POST /store-orders/:id/collect con el método que elija.)
+ */
+async function fulfillStoreOrder(order) {
+  // Idempotencia a nivel de efecto: si ya hay venta vinculada, no repetir.
+  if (order.store?.saleId) return;
+
+  const org = await Organization.findById(order.organizationId);
+  if (!org) throw new Error("Organización no encontrada para el pedido de tienda.");
+
+  const method = order.provider === "receipt" ? "transfer" : "other";
+  const note =
+    order.provider === "receipt"
+      ? "Tienda online · Transferencia (comprobante)"
+      : "Tienda online · Mercado Pago";
+
+  try {
+    const sale = await productService.createSale(org, {
+      items: (order.store?.items || []).map((i) => ({
+        productId: i.productId,
+        quantity: i.quantity,
+        unitPrice: i.unitPrice,
+      })),
+      method,
+      note,
+      clientId: null,
+    });
+
+    // Trazabilidad: vincular la venta al pedido (updateOne para no pisar el
+    // status, que lo maneja el caller: markOrderPaid / claim de submitReceipt).
+    order.store.saleId = sale._id;
+    await Order.updateOne({ _id: order._id }, { $set: { "store.saleId": sale._id } });
+  } catch (err) {
+    // Conflicto de stock (u otro fallo al registrar la venta): NO propagar — el
+    // pedido queda pagado y el admin recibe el aviso de conflicto.
+    console.error(`[fulfillStoreOrder] Venta no registrada para Order ${order._id}:`, err?.message || err);
+    notifyStoreStockConflict({ org, order, reason: err?.message }).catch((e) =>
+      console.warn("[fulfillStoreOrder] notifyStoreStockConflict falló:", e?.message || e)
+    );
+  }
+
+  // Notificar el pedido nuevo (best-effort; nunca rompe el flujo de pago).
+  notifyNewStoreOrder({ org, order }).catch((e) =>
+    console.warn("[fulfillStoreOrder] notifyNewStoreOrder falló:", e?.message || e)
+  );
+}
+
+/**
  * Despachador por tipo. Lanza si el tipo no está soportado.
  */
 export async function fulfillOrder(order) {
@@ -99,6 +162,8 @@ export async function fulfillOrder(order) {
       return fulfillClassOrder(order);
     case "package":
       return fulfillPackageOrder(order);
+    case "store":
+      return fulfillStoreOrder(order);
     default:
       throw new Error(`Tipo de Order no soportado: ${order.type}`);
   }
@@ -119,6 +184,8 @@ export async function releaseOrderHold(order, reason = "Pago no confirmado.") {
     await enrollmentService.releaseEnrollmentHold(order.refId);
   }
   // package: no retiene cupo.
+  // store: no-op — el stock NO se retiene al crear el pedido (solo se valida);
+  // se descuenta al confirmarse el pago, así que no hay hold que liberar.
 }
 
 export default { fulfillOrder, releaseOrderHold };

@@ -32,10 +32,11 @@ const HOLD_MINUTES = 15;
 /**
  * Crea la preference de MP para un Order ya persistido y la vincula al Order.
  * Centraliza la lógica de back_urls por-dominio (compartida por reserva/clase/
- * paquete). El comprador vuelve siempre a `/reserva/pago` (la pantalla de retorno
- * adapta el copy según el tipo de Order). Devuelve la preference.
+ * paquete/tienda). El comprador vuelve siempre a `/reserva/pago` (la pantalla de
+ * retorno adapta el copy según el tipo de Order). Devuelve la preference.
+ * Exportada: la reusa el checkout de la tienda pública (storeController).
  */
-async function buildAndAttachCheckout({ org, order, title, expiresAt }) {
+export async function buildAndAttachCheckout({ org, order, title, expiresAt }) {
   const { accessToken } = await mpConnect.getSellerToken(org._id);
 
   // Dominio/subdominio propio de la org (dominio custom > slug > FRONTEND_BASE_URL).

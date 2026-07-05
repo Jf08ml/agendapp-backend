@@ -1,12 +1,16 @@
 import Expense from "../models/expenseModel.js";
 import sendResponse from "../utils/sendResponse.js";
 
+const VALID_METHODS = ["cash", "card", "transfer", "other"];
+const sanitizeMethod = (method) =>
+  VALID_METHODS.includes(method) ? method : null;
+
 const expenseController = {
   // Crear gasto general
   createExpense: async (req, res) => {
     try {
       if (!req.organization) return sendResponse(res, 400, null, "Organización no identificada");
-      const { concept, amount, category, date, type } = req.body;
+      const { concept, amount, category, date, type, method } = req.body;
       const expense = await Expense.create({
         organizationId: req.organization._id,
         concept,
@@ -14,6 +18,7 @@ const expenseController = {
         category: category || "",
         date: date || new Date(),
         type: type === "income" ? "income" : "expense",
+        method: sanitizeMethod(method),
       });
       sendResponse(res, 201, expense, type === "income" ? "Ingreso registrado exitosamente" : "Gasto registrado exitosamente");
     } catch (error) {
@@ -62,9 +67,13 @@ const expenseController = {
     try {
       if (!req.organization) return sendResponse(res, 400, null, "Organización no identificada");
       const organizationId = req.organization._id;
+      const update = { ...req.body };
+      if ("method" in update) {
+        update.method = sanitizeMethod(update.method);
+      }
       const expense = await Expense.findOneAndUpdate(
         { _id: req.params.id, organizationId },
-        req.body,
+        update,
         { new: true }
       );
       if (!expense) return sendResponse(res, 404, null, "Gasto no encontrado");

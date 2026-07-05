@@ -26,6 +26,7 @@ const TYPE_LABEL = {
   reservation: "reserva",
   class: "clase",
   package: "paquete",
+  store: "pedido de tienda",
 };
 
 /**

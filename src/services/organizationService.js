@@ -181,6 +181,8 @@ const organizationService = {
       metaPhone,
       autoMarkAttended,
       aiAssistantName,
+      storeEnabled,
+      storeCodEnabled,
     } = organizationData;
 
     const organization = await Organization.findById(id);
@@ -418,6 +420,10 @@ const organizationService = {
 
     // ✅ Auto-marcar asistencia
     if (autoMarkAttended !== undefined) organization.autoMarkAttended = autoMarkAttended;
+
+    // 🛍️ Tienda pública de productos (flags del toggle en /inventario)
+    if (storeEnabled !== undefined) organization.storeEnabled = !!storeEnabled;
+    if (storeCodEnabled !== undefined) organization.storeCodEnabled = !!storeCodEnabled;
 
     // 🔗 Conexión híbrida WA (Meta/Baileys)
     if (waConnectionType !== undefined) organization.waConnectionType = waConnectionType;

@@ -11,6 +11,45 @@ import mongoose from "mongoose";
  * Primer objeto pagable: el depósito de una reserva (pay-to-confirm). En el
  * futuro: paquetes y clases (de ahí el campo `type`).
  */
+// 🛍️ Pedido de TIENDA pública (type "store"). Subdoc explícito (no metadata)
+// para que la bandeja admin (/store-orders) sea consultable. Los items son
+// snapshots (nombre/precio al momento de comprar); el stock se descuenta al
+// confirmarse el pago (fulfillStoreOrder) o al cobrar contraentrega (collect).
+// `default: undefined` en el Order: solo existe en pedidos de tienda.
+const StoreOrderSchema = new mongoose.Schema(
+  {
+    items: [
+      {
+        productId: { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
+        name: { type: String },
+        quantity: { type: Number },
+        unitPrice: { type: Number },
+      },
+    ],
+    // Snapshot del comprador (no se crea Client).
+    customer: {
+      name: { type: String },
+      phone: { type: String },
+      email: { type: String },
+    },
+    delivery: {
+      mode: { type: String, enum: ["pickup", "delivery"] },
+      address: { type: String },
+      notes: { type: String },
+    },
+    fulfillmentStatus: {
+      type: String,
+      enum: ["pending", "delivered", "cancelled"],
+      default: "pending",
+    },
+    fulfilledAt: { type: Date },
+    fulfilledBy: { type: mongoose.Schema.Types.ObjectId, ref: "Employee" },
+    // ProductSale creada al confirmar el pago (fulfillment) o al cobrar COD.
+    saleId: { type: mongoose.Schema.Types.ObjectId, ref: "ProductSale" },
+  },
+  { _id: false }
+);
+
 const orderSchema = new mongoose.Schema(
   {
     organizationId: {
@@ -23,7 +62,7 @@ const orderSchema = new mongoose.Schema(
     // Qué se está pagando. v1 solo "reservation".
     type: {
       type: String,
-      enum: ["reservation", "package", "class"],
+      enum: ["reservation", "package", "class", "store"],
       default: "reservation",
     },
     // Referencia al objeto pagado. Para reservas = groupId del grupo de reservas.
@@ -34,7 +73,9 @@ const orderSchema = new mongoose.Schema(
     marketplaceFee: { type: Number, default: 0 }, // comisión de plataforma (v1 = 0)
 
     // "mercadopago" (checkout automático) | "receipt" (transferencia manual +
-    // comprobante validado con IA). El cumplimiento (fulfillOrder) es el mismo.
+    // comprobante validado con IA) | "cod" (contraentrega — solo type "store":
+    // el pedido nace "pending" y el admin registra el cobro al entregar).
+    // El cumplimiento (fulfillOrder) es el mismo para los pagos online.
     provider: { type: String, default: "mercadopago" },
     providerPrefId: { type: String }, // id de la preference de MP
     providerPaymentId: { type: String }, // id del payment (llega por webhook)
@@ -84,6 +125,9 @@ const orderSchema = new mongoose.Schema(
     // a la IA, que cuesta). Se topa en submitReceipt.
     receiptAttempts: { type: Number, default: 0 },
 
+    // 🛍️ Datos del pedido de tienda (ver StoreOrderSchema). Solo en type "store".
+    store: { type: StoreOrderSchema, default: undefined },
+
     checkoutUrl: { type: String },
     paidAt: { type: Date },
     expiresAt: { type: Date }, // TTL del hold del cupo
@@ -102,6 +146,8 @@ const orderSchema = new mongoose.Schema(
 );
 
 orderSchema.index({ organizationId: 1, status: 1 });
+// Bandeja de pedidos de tienda (/store-orders?fulfillment=...).
+orderSchema.index({ organizationId: 1, type: 1, "store.fulfillmentStatus": 1 });
 // Anti-duplicado de comprobantes: misma org + misma referencia ya pagada.
 orderSchema.index({ organizationId: 1, "receipt.extracted.reference": 1 });
 

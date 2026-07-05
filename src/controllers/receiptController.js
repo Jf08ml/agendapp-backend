@@ -81,8 +81,9 @@ async function releaseAbandonedReceiptHolds(organizationId, customerId) {
   }
 }
 
-/** Métodos de pago "manuales" (transferencia) configurados por la org, para mostrar al cliente. */
-function publicPaymentMethods(org) {
+/** Métodos de pago "manuales" (transferencia) configurados por la org, para mostrar al cliente.
+ *  Exportada: la reusa la tienda pública (storeController: catálogo + checkout por comprobante). */
+export function publicPaymentMethods(org) {
   return (org.paymentMethods || []).map((pm) => ({
     type: pm.type,
     accountName: pm.accountName,
