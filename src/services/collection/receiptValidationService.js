@@ -26,6 +26,9 @@ const ZERO_DECIMAL_CURRENCIES = new Set(["COP", "CLP", "PYG", "JPY", "KRW"]);
 const AMOUNT_TOLERANCE_PCT = 0.01;
 // Confianza mínima de la IA para auto-aprobar.
 const MIN_CONFIDENCE = 0.8;
+// Comprobantes con fecha legible más vieja que esto NO se auto-aprueban
+// (van a revisión manual) — evita reciclar pagos de compras anteriores.
+const MAX_RECEIPT_AGE_DAYS = 3;
 
 // Herramienta de extracción: forzamos tool_use para obtener salida estructurada.
 const EXTRACT_TOOL = {
@@ -45,6 +48,10 @@ const EXTRACT_TOOL = {
       },
       currency: { type: "string", description: "Moneda detectada (ISO, ej: COP, MXN). Vacío si no aparece." },
       date: { type: "string", description: "Fecha y hora del comprobante tal como aparece." },
+      dateIso: {
+        type: "string",
+        description: "Fecha del comprobante normalizada a formato YYYY-MM-DD. Omitir si no es legible.",
+      },
       reference: {
         type: "string",
         description: "Número de transacción / referencia / comprobante / autorización. El identificador único del pago.",
@@ -116,6 +123,7 @@ export async function extractReceiptData({ imageBase64, mimeType, expected = {} 
     amount: typeof data.amount === "number" ? data.amount : null,
     currency: (data.currency || "").toUpperCase() || null,
     date: data.date || null,
+    dateIso: /^\d{4}-\d{2}-\d{2}$/.test(data.dateIso || "") ? data.dateIso : null,
     reference: data.reference ? String(data.reference).trim() : null,
     destinationAccount: data.destinationAccount || null,
     bank: data.bank || null,
@@ -247,8 +255,29 @@ export function evaluateReceipt({
   const hasReference = !!extracted.reference;
   if (!hasReference) reasons.push("No se detectó número de referencia.");
 
+  // Antigüedad: un comprobante viejo puede ser un pago reciclado de otra compra.
+  // Solo bloquea el auto-approve cuando la fecha ES legible y está claramente
+  // fuera de rango (viejo o futuro); sin fecha legible no se penaliza — los
+  // demás criterios (referencia única + monto + destino + confianza) sostienen.
+  let okDate = true;
+  if (extracted.dateIso) {
+    const receiptDate = new Date(`${extracted.dateIso}T00:00:00`);
+    if (!Number.isNaN(receiptDate.getTime())) {
+      const ageDays = (Date.now() - receiptDate.getTime()) / 86400000;
+      if (ageDays > MAX_RECEIPT_AGE_DAYS) {
+        okDate = false;
+        reasons.push(
+          `El comprobante tiene fecha de hace ${Math.floor(ageDays)} días (máximo ${MAX_RECEIPT_AGE_DAYS} para aprobación automática).`
+        );
+      } else if (ageDays < -1) {
+        okDate = false;
+        reasons.push("La fecha del comprobante está en el futuro.");
+      }
+    }
+  }
+
   const autoApprove =
-    okAmount && okConfidence && hasReference && dest.hadAccounts && dest.matched;
+    okAmount && okConfidence && hasReference && okDate && dest.hadAccounts && dest.matched;
 
   return {
     autoApprove,

@@ -30,7 +30,7 @@ import productService from "../services/productService.js";
 import * as orderService from "../services/collection/orderService.js";
 import { buildAndAttachCheckout } from "./collectionController.js";
 import { publicPaymentMethods } from "./receiptController.js";
-import { notifyNewStoreOrder } from "../services/collection/storeNotifier.js";
+import { notifyNewStoreOrder, notifyStorePaymentReceived } from "../services/collection/storeNotifier.js";
 
 const COD_METHODS = ["cash", "card", "transfer", "other"];
 
@@ -469,6 +469,11 @@ export const collectStoreOrder = async (req, res) => {
       return sendResponse(res, 400, null, saleErr.message || "No se pudo registrar la venta.");
     }
 
+    // 🛍️ WhatsApp "Pago recibido" al comprador (best-effort; nunca rompe el cobro).
+    notifyStorePaymentReceived({ org: req.organization, order }).catch((e) =>
+      console.warn("[collectStoreOrder] notifyStorePaymentReceived falló:", e?.message || e)
+    );
+
     return sendResponse(res, 200, { order }, "Cobro registrado y pedido entregado.");
   } catch (err) {
     return sendResponse(res, 400, null, err.message);
@@ -505,6 +510,40 @@ export const cancelStoreOrder = async (req, res) => {
     }
 
     return sendResponse(res, 200, { order }, "Pedido cancelado.");
+  } catch (err) {
+    return sendResponse(res, 400, null, err.message);
+  }
+};
+
+// DELETE /store-orders/:id  → elimina el pedido DEFINITIVAMENTE (no reversible).
+// No toca stock ni ProductSale (la venta es registro contable de la caja).
+// Bloqueado si: pagado sin entregar (primero entregar o gestionar reembolso) o
+// comprobante en revisión (primero resolverlo en /gestionar-pagos).
+export const deleteStoreOrder = async (req, res) => {
+  try {
+    const organizationId = req.organization?._id;
+
+    // Guard en el filtro: el borrado solo procede en estados terminales o sin pago.
+    const deleted = await Order.findOneAndDelete({
+      _id: req.params.id,
+      organizationId,
+      type: "store",
+      status: { $ne: "in_review" },
+      $nor: [{ status: "paid", "store.fulfillmentStatus": "pending" }],
+    });
+
+    if (!deleted) {
+      const existing = await Order.findOne({ _id: req.params.id, organizationId, type: "store" })
+        .select("status store.fulfillmentStatus")
+        .lean();
+      if (!existing) return sendResponse(res, 404, null, "Pedido no encontrado.");
+      if (existing.status === "in_review") {
+        return sendResponse(res, 400, null, "El pedido tiene un comprobante en revisión. Apruébalo o recházalo en Comprobantes de pago antes de eliminarlo.");
+      }
+      return sendResponse(res, 400, null, "El pedido está pagado y sin entregar. Márcalo entregado (o gestiona el reembolso) antes de eliminarlo.");
+    }
+
+    return sendResponse(res, 200, null, "Pedido eliminado definitivamente.");
   } catch (err) {
     return sendResponse(res, 400, null, err.message);
   }

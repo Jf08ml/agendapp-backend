@@ -22,7 +22,7 @@ import reservationService from "../reservationService.js";
 import enrollmentService from "../enrollmentService.js";
 import packageService from "../packageService.js";
 import productService from "../productService.js";
-import { notifyNewStoreOrder, notifyStoreStockConflict } from "./storeNotifier.js";
+import { notifyNewStoreOrder, notifyStoreStockConflict, notifyStorePaymentReceived } from "./storeNotifier.js";
 
 // Nota con la que se marca el abono del depósito online en Appointment.payments[]
 // (se usa también como guarda de idempotencia para no duplicar el registro).
@@ -148,6 +148,11 @@ async function fulfillStoreOrder(order) {
   // Notificar el pedido nuevo (best-effort; nunca rompe el flujo de pago).
   notifyNewStoreOrder({ org, order }).catch((e) =>
     console.warn("[fulfillStoreOrder] notifyNewStoreOrder falló:", e?.message || e)
+  );
+
+  // 🛍️ WhatsApp "Pago recibido" al comprador (best-effort; nunca rompe el pago).
+  notifyStorePaymentReceived({ org, order }).catch((e) =>
+    console.warn("[fulfillStoreOrder] notifyStorePaymentReceived falló:", e?.message || e)
   );
 }
 

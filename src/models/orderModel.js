@@ -102,6 +102,7 @@ const orderSchema = new mongoose.Schema(
         amount: { type: Number },
         currency: { type: String },
         date: { type: String }, // fecha/hora del comprobante (texto crudo)
+        dateIso: { type: String }, // fecha normalizada YYYY-MM-DD (regla de antigüedad)
         reference: { type: String }, // n.º de transacción / referencia (anti-duplicado)
         destinationAccount: { type: String },
         bank: { type: String },

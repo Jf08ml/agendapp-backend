@@ -45,6 +45,11 @@ const whatsappTemplateController = {
         classReminder: whatsappTemplates.getDefaultTemplate('classReminder'),
         // 🎂 Cumpleaños
         birthdayGreeting: whatsappTemplates.getDefaultTemplate('birthdayGreeting'),
+        // 🛍️ Tienda pública
+        paymentReceived: whatsappTemplates.getDefaultTemplate('paymentReceived'),
+        // 🔔 Mensajes del sistema (avisos al admin)
+        adminPaymentAlert: whatsappTemplates.getDefaultTemplate('adminPaymentAlert'),
+        adminNewOrderAlert: whatsappTemplates.getDefaultTemplate('adminNewOrderAlert'),
       };
 
       // Plantillas personalizadas (si existen)
@@ -144,6 +149,23 @@ const whatsappTemplateController = {
           isCustom: !!customTemplates.birthdayGreeting,
           variables: ['{{names}}', '{{organization}}', '{{beneficio}}'],
         },
+        // 🛍️ Tienda pública
+        paymentReceived: {
+          content: customTemplates.paymentReceived || defaultTemplates.paymentReceived,
+          isCustom: !!customTemplates.paymentReceived,
+          variables: ['{{names}}', '{{organization}}', '{{monto}}', '{{detalle}}'],
+        },
+        // 🔔 Mensajes del sistema (avisos al admin)
+        adminPaymentAlert: {
+          content: customTemplates.adminPaymentAlert || defaultTemplates.adminPaymentAlert,
+          isCustom: !!customTemplates.adminPaymentAlert,
+          variables: ['{{tipo}}', '{{monto}}', '{{detalle}}', '{{estado}}'],
+        },
+        adminNewOrderAlert: {
+          content: customTemplates.adminNewOrderAlert || defaultTemplates.adminNewOrderAlert,
+          isCustom: !!customTemplates.adminNewOrderAlert,
+          variables: ['{{cliente}}', '{{pedido}}', '{{entrega}}', '{{pago}}'],
+        },
       };
 
       // También enviar los templates por defecto para el botón "Restaurar"
@@ -187,6 +209,9 @@ const whatsappTemplateController = {
         'classEnrollmentCancelled',
         'classReminder',
         'birthdayGreeting',
+        'paymentReceived',
+        'adminPaymentAlert',
+        'adminNewOrderAlert',
       ];
 
       if (!validTypes.includes(templateType)) {
@@ -260,6 +285,9 @@ const whatsappTemplateController = {
         'classEnrollmentCancelled',
         'classReminder',
         'birthdayGreeting',
+        'paymentReceived',
+        'adminPaymentAlert',
+        'adminNewOrderAlert',
       ];
 
       if (!validTypes.includes(templateType)) {
@@ -330,6 +358,9 @@ const whatsappTemplateController = {
         'classEnrollmentCancelled',
         'classReminder',
         'birthdayGreeting',
+        'paymentReceived',
+        'adminPaymentAlert',
+        'adminNewOrderAlert',
       ];
 
       for (const key in templates) {
@@ -410,7 +441,23 @@ const whatsappTemplateController = {
         discount: "🎉 Descuento grupal del 10% aplicado\n",
         cancelLink: "https://agenda.example.com/cancelar-clase?token=abc123",
         cancelBlock: "\n❌ Si necesitas cancelar tu inscripción, hazlo aquí:\nhttps://agenda.example.com/cancelar-clase?token=abc123\n",
+        // 🛍️ Tienda pública
+        monto: "$45.000",
+        detalle: "2× Shampoo, 1× Cera",
+        // 🔔 Mensajes del sistema (avisos al admin)
+        tipo: "reserva",
+        estado: "Validado automáticamente con IA ✅",
+        cliente: "María García",
+        pedido: "3 productos · $45.000",
+        entrega: "Domicilio: Calle 123 #45-67",
+        pago: "Pagado ✅",
       };
+
+      // 🔔 En el aviso de pago al admin, {{detalle}} es remitente/referencia
+      // del comprobante (no el detalle del pedido de la tienda)
+      if (templateType === 'adminPaymentAlert') {
+        sampleData.detalle = "De: Juan Pérez · Ref: 123456";
+      }
 
       // Renderizar la plantilla con los datos de ejemplo
       let preview = content;
@@ -460,6 +507,9 @@ const whatsappTemplateController = {
           classEnrollmentCancelled: true,
           classReminder: true,
           birthdayGreeting: false,
+          paymentReceived: true,
+          adminPaymentAlert: true,
+          adminNewOrderAlert: true,
         };
         return sendResponse(res, 200, defaults, "Configuración por defecto");
       }
@@ -482,6 +532,9 @@ const whatsappTemplateController = {
         classEnrollmentCancelled: true,
         classReminder: true,
         birthdayGreeting: false,
+        paymentReceived: true,
+        adminPaymentAlert: true,
+        adminNewOrderAlert: true,
       };
 
       sendResponse(res, 200, settings, "Configuración obtenida correctamente");
@@ -523,6 +576,9 @@ const whatsappTemplateController = {
         'classEnrollmentCancelled',
         'classReminder',
         'birthdayGreeting',
+        'paymentReceived',
+        'adminPaymentAlert',
+        'adminNewOrderAlert',
       ];
 
       for (const key of Object.keys(enabledTypes)) {

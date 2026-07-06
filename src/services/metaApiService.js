@@ -74,6 +74,27 @@ export async function sendTemplateMessage(toPhone, templateName, languageCode = 
   return { messageId };
 }
 
+/**
+ * Atajo para plantillas de la plataforma con solo variables de BODY en texto.
+ * Meta rechaza parámetros con saltos de línea/tabs, así que se colapsan a
+ * espacios (ej. direcciones escritas en textarea).
+ * @param {string} toPhone
+ * @param {string} templateName
+ * @param {Array<string|number>} textParams - en el orden de {{1}}..{{n}}
+ */
+export async function sendPlatformTemplate(toPhone, templateName, textParams = []) {
+  const components = textParams.length
+    ? [{
+        type: "body",
+        parameters: textParams.map((t) => ({
+          type: "text",
+          text: String(t).replace(/\s+/g, " ").trim() || "—",
+        })),
+      }]
+    : [];
+  return sendTemplateMessage(toPhone, templateName, "es", components);
+}
+
 // ── Notificación interna: nuevo registro ────────────────────────────────────
 
 const NEW_SIGNUP_NOTIFY_PHONE = process.env.WHATSAPP_NEW_SIGNUP_NOTIFY_PHONE;

@@ -234,6 +234,16 @@ De parte de todo el equipo de *{{organization}}*, te deseamos un día lleno de a
 
 ¡Gracias por ser parte de nuestra familia! Te esperamos pronto para celebrarlo. 💖`,
 
+      // 🛍️ Pago recibido (pedido de la tienda pública)
+      paymentReceived: `✅ ¡Hola, {{names}}!
+
+Hemos recibido tu pago en *{{organization}}*. 🎉
+
+💰 Monto pagado: {{monto}}
+🛍️ Tu pedido: {{detalle}}
+
+¡Gracias por tu compra! Si tienes alguna pregunta, responde a este mensaje.`,
+
       // ❌ Inscripción cancelada
       classEnrollmentCancelled: `❌ ¡Hola, {{names}}!
 
@@ -245,6 +255,26 @@ Tu inscripción a la siguiente clase ha sido cancelada:
 📍 {{organization}}
 
 Si deseas inscribirte en otra sesión o tienes alguna pregunta, responde a este mensaje y con gusto te ayudamos.`,
+
+      // 🔔 Aviso al admin: pago recibido (comprobante)
+      adminPaymentAlert: `💰 *Aviso de pago recibido*
+
+🧾 Tipo: {{tipo}}
+💵 Monto: {{monto}}
+📄 Detalle: {{detalle}}
+📌 Estado: {{estado}}
+
+Revisa los detalles en tu panel de AgenditApp.`,
+
+      // 🔔 Aviso al admin: nuevo pedido en la tienda
+      adminNewOrderAlert: `🛍️ *Nuevo pedido en tu tienda*
+
+👤 Cliente: {{cliente}}
+📦 Pedido: {{pedido}}
+🚚 Entrega: {{entrega}}
+💳 Pago: {{pago}}
+
+Gestiona el pedido desde tu panel de AgenditApp, en la sección Pedidos.`,
     };
 
     return templates[templateType] || '';

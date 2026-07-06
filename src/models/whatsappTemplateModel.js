@@ -88,6 +88,20 @@ const whatsappTemplateSchema = new mongoose.Schema(
           type: Boolean,
           default: false,
         },
+        // 🛍️ Pago recibido (tienda pública) — transaccional, activo por defecto
+        paymentReceived: {
+          type: Boolean,
+          default: true,
+        },
+        // 🔔 Mensajes del sistema (avisos al admin) — activos por defecto
+        adminPaymentAlert: {
+          type: Boolean,
+          default: true,
+        },
+        adminNewOrderAlert: {
+          type: Boolean,
+          default: true,
+        },
       },
       default: () => ({
         scheduleAppointment: true,
@@ -108,6 +122,9 @@ const whatsappTemplateSchema = new mongoose.Schema(
         classEnrollmentCancelled: true,
         classReminder: true,
         birthdayGreeting: false,
+        paymentReceived: true,
+        adminPaymentAlert: true,
+        adminNewOrderAlert: true,
       }),
     },
     scheduleAppointment: {
@@ -185,6 +202,20 @@ const whatsappTemplateSchema = new mongoose.Schema(
     birthdayGreeting: {
       type: String,
       default: null, // null = usar template por defecto del sistema
+    },
+    // 🛍️ Pago recibido (tienda pública)
+    paymentReceived: {
+      type: String,
+      default: null, // null = usar template por defecto del sistema
+    },
+    // 🔔 Mensajes del sistema (avisos al admin de la org)
+    adminPaymentAlert: {
+      type: String,
+      default: null,
+    },
+    adminNewOrderAlert: {
+      type: String,
+      default: null,
     },
     // 🎂 Beneficio de cumpleaños (texto editable por la org; se inyecta en {{beneficio}})
     birthdayBenefit: {

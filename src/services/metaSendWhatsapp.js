@@ -46,6 +46,11 @@ const META_TEMPLATE_NAMES = {
   classReminder:             "recordatorio_clase",
   // 🎂 Cumpleaños
   birthdayGreeting:          "cumpleanos_cliente",
+  // 🛍️ Tienda pública
+  paymentReceived:           "pago_recibido",
+  // 🔔 Mensajes del sistema (avisos al admin)
+  adminPaymentAlert:         "aviso_pago_admin",
+  adminNewOrderAlert:        "aviso_pedido_admin",
 };
 
 // ── Variable order per template type ─────────────────────────────────────────
@@ -85,6 +90,11 @@ const VARIABLE_ORDER = {
   recordatorio_clase:      ["nombre_cliente", "nombre_clase", "fecha_clase", "hora_inicio", "hora_fin", "nombre_negocio", "direccion"],
   // 🎂 Cumpleaños
   cumpleanos_cliente:      ["nombre_cliente", "nombre_negocio", "beneficio"],
+  // 🛍️ Tienda pública
+  pago_recibido:           ["nombre_cliente", "nombre_negocio", "monto", "detalle_pedido"],
+  // 🔔 Mensajes del sistema (avisos al admin)
+  aviso_pago_admin:        ["tipo", "monto", "detalle", "estado"],
+  aviso_pedido_admin:      ["cliente", "pedido", "entrega", "pago"],
 };
 
 // ── Data key → Meta variable name ────────────────────────────────────────────
@@ -113,6 +123,17 @@ function buildMetaVarMap(data) {
     hora_fin:             data.endTime            ?? "",
     precio:               data.price              ?? "",
     beneficio:            data.beneficio          ?? "",
+    // 🛍️ Tienda pública
+    monto:                data.monto              ?? "",
+    detalle_pedido:       data.detalle            ?? "",
+    // 🔔 Mensajes del sistema (avisos al admin)
+    tipo:                 data.tipo               ?? "",
+    detalle:              data.detalle            ?? "",
+    estado:               data.estado             ?? "",
+    cliente:              data.cliente            ?? "",
+    pedido:               data.pedido             ?? "",
+    entrega:              data.entrega            ?? "",
+    pago:                 data.pago               ?? "",
     // enlace_cancelacion ya existe arriba; añadimos fallback al cancelLink de clases
     ...(data.cancelLink ? { enlace_cancelacion: data.cancellationLink ?? data.cancelLink } : {}),
   };
