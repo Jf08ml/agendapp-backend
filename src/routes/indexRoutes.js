@@ -49,6 +49,7 @@ import receiptAdminRoutes from "./receiptAdminRoutes.js";
 import storePublicRoutes from "./storePublicRoutes.js";
 import storeAdminRoutes from "./storeAdminRoutes.js";
 import impactSurveyRoutes from "./impactSurveyRoutes.js";
+import metaConversionsRoutes from "./metaConversionsRoutes.js";
 import membershipService from "../services/membershipService.js";
 import { organizationResolver } from "../middleware/organizationResolver";
 import { verifyToken } from "../middleware/authMiddleware.js";
@@ -158,6 +159,9 @@ router.use("/store", storePublicRoutes);
 
 // Registro público: signup, exchange code, check slug
 router.use(registrationRoutes);
+
+// Meta Pixel + Conversions API: CompleteRegistration server-side (dedup con el Pixel)
+router.use("/meta-capi", metaConversionsRoutes);
 
 // Superadmin de plataforma: login + impersonation (endpoints propios manejan auth)
 router.use(adminRoutes);
