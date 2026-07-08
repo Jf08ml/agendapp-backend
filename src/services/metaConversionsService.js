@@ -19,17 +19,22 @@ function normalizePhoneDigits(phone) {
 }
 
 /**
- * Envía el evento estándar CompleteRegistration a la Conversions API de Meta.
+ * Envía un evento a la Conversions API de Meta. Soporta tanto el evento
+ * estándar CompleteRegistration (con advanced matching email/teléfono
+ * hasheados) como otros eventos sin datos personales (p.ej. Contact) — el
+ * hashing de email/phone solo aplica cuando eventName es CompleteRegistration.
  * Nunca lanza: los errores se registran y el llamador siempre responde 200
- * (el registro de la organización ya se completó; esto es solo tracking).
+ * (esto es solo tracking, nunca debe bloquear el flujo principal).
  */
-export async function sendCompleteRegistrationEvent({
+export async function sendMetaCapiEvent({
+  eventName,
   eventId,
   eventSourceUrl,
   fbp,
   fbc,
   email,
   phone,
+  customData,
   clientIp,
   userAgent,
 }) {
@@ -43,8 +48,9 @@ export async function sendCompleteRegistrationEvent({
     return;
   }
 
-  const normalizedEmail = normalizeEmail(email);
-  const normalizedPhone = normalizePhoneDigits(phone);
+  const isCompleteRegistration = eventName === "CompleteRegistration";
+  const normalizedEmail = isCompleteRegistration ? normalizeEmail(email) : undefined;
+  const normalizedPhone = isCompleteRegistration ? normalizePhoneDigits(phone) : undefined;
 
   const userData = {
     ...(normalizedEmail && { em: [sha256(normalizedEmail)] }),
@@ -56,13 +62,13 @@ export async function sendCompleteRegistrationEvent({
   };
 
   const event = {
-    event_name: "CompleteRegistration",
+    event_name: eventName,
     event_time: Math.floor(Date.now() / 1000),
     event_id: eventId,
     action_source: "website",
     ...(eventSourceUrl && { event_source_url: eventSourceUrl }),
     user_data: userData,
-    custom_data: { status: true },
+    custom_data: customData || {},
   };
 
   const body = {
@@ -78,7 +84,7 @@ export async function sendCompleteRegistrationEvent({
     });
   } catch (err) {
     console.error(
-      "[metaConversions] Error enviando CompleteRegistration a CAPI:",
+      `[metaConversions] Error enviando ${eventName} a CAPI:`,
       err.response?.data || err.message
     );
   }
