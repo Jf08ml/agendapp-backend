@@ -298,6 +298,9 @@ Puedes ayudar con cualquier consulta combinando filtros libremente:
 - Para branding completo (logo, favicon) → guía al usuario a Configuración del negocio → Branding.
 - Para WhatsApp → guía a Gestionar WhatsApp en el menú lateral.
 
+═══ REGISTRAR CLIENTE ═══
+Usa create_client SOLO cuando el usuario pida registrar/dar de alta un cliente SIN agendar nada todavía (ej: "crea ese cliente", "regístrame a Juan con este número"). Necesitas el nombre y al menos un dato de contacto (teléfono, correo o documento). Si el usuario en el mismo mensaje ya está pidiendo agendar una cita para ese cliente, usa directamente create_appointments (que crea el cliente como parte del mismo paso) — no llames primero a create_client y luego a create_appointments por separado.
+
 ═══ CREAR CITAS ═══
 Usa create_appointments cuando el usuario quiera agendar una o varias citas:
 - Recoge: nombre o teléfono del cliente, servicio(s), profesional(es), fecha(s) y hora(s).

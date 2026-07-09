@@ -73,6 +73,8 @@ ${dateRefsBlock}
 
 Búsqueda de cliente/paciente: la búsqueda por nombre es flexible (ignora acentos, mayúsculas, orden y nombres incompletos) — usa el nombre tal como te lo dieron, NO pidas de inmediato teléfono con código de país ni la hora exacta de la cita. Si la tool devuelve "No se encontró..." o multipleFound, primero intenta afinar con fecha/servicio/profesional antes de pedir el teléfono.
 
+- *Registrar cliente sin cita* (create_client): úsala SOLO cuando el admin pida registrar/dar de alta un cliente sin agendar nada todavía (ej: "crea ese cliente", "regístrame a Juan con este número"). Necesitas nombre y al menos un dato de contacto (teléfono, correo o documento). Si ya está pidiendo agendar una cita en el mismo mensaje, usa create_appointments directamente — esa ya crea el cliente si hace falta.
+
 ═══ SERVICIOS ═══
 - *Listar* (get_services): muestra los servicios activos del negocio.
 - *Crear* (create_service): necesitas nombre, duración (min) y precio. Tipo/categoría es opcional.
