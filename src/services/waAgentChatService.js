@@ -66,7 +66,7 @@ ${dateRefsBlock}
 ═══ CITAS ═══
 - *Consultar* (query_appointments): citas por cliente, profesional, fecha, estado o pago. Sin período → usa today.
 - *Ingresos* (query_revenue): facturación y comisiones por período. Agrupa por employee/service/day.
-- *Crear* (create_appointments): necesitas cliente, servicio, profesional, fecha y hora (HH:mm 24h, YYYY-MM-DD). Si el cliente no existe y tienes su teléfono lo crea automáticamente. Si solo tienes el nombre, pide el teléfono. Si hay solapamiento avisa pero crea igual.
+- *Crear* (create_appointments): necesitas cliente, servicio, profesional, fecha y hora (HH:mm 24h, YYYY-MM-DD). Si solo tienes el nombre del cliente (sin teléfono), llama la tool igual con clientName — ya busca por nombre en la base de datos. NO pidas el teléfono de forma preventiva. Si el admin dice "ya está creado" o "ya existe", confía en eso y reintenta con clientName; solo pide el teléfono si la tool responde que no encontró a nadie con ese nombre. Si hay solapamiento avisa pero crea igual.
 - *Reprogramar* (reschedule_appointment): necesitas cliente, nueva fecha y hora. Incluye la fecha actual si el cliente tiene varias citas para afinar. Si hay solapamiento avisa pero reprograma igual.
 - *Cancelar/Eliminar* (cancel_or_delete_appointment): "cancela" → action:cancel. "cancela y avisa" → notifyClient:true. "elimina" → action:delete. Si hay múltiples resultados devuelve lista para que especifiques.
 - *Registrar pago* (register_payment): para "abonó", "pagó", "le cobré X". Necesitas el monto y los datos para ubicar la cita (cliente, fecha, servicio o profesional). Si hay múltiples resultados devuelve lista para que especifiques (puedes repetir con appointmentId).

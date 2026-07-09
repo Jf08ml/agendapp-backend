@@ -72,6 +72,36 @@ const findClientsByName = async (organizationId, searchTerm) => {
   return scored.filter((s) => s.overlap === maxOverlap).map((s) => s.client);
 };
 
+// Busca profesionales por nombre: coincidencia directa primero, luego difusa por
+// solapamiento de palabras (tolera acentos distintos —"Martínez" vs "Martinez"—
+// u orden de palabras diferente). Antes de este helper, las búsquedas de
+// profesional usaban un regex crudo sin normalizar tildes, por lo que un nombre
+// con acento (muy común al escribir desde WhatsApp) nunca matcheaba el registro.
+const findEmployeesByName = async (organizationId, searchTerm) => {
+  const direct = await Employee.find({
+    organizationId,
+    names: { $regex: escapeRegex(searchTerm), $options: "i" },
+    isActive: true,
+  });
+  if (direct.length > 0) return direct;
+
+  const queryWords = normalizeForSearch(searchTerm).split(" ").filter(Boolean);
+  if (queryWords.length === 0) return [];
+
+  const employees = await Employee.find({ organizationId, isActive: true });
+  const scored = employees
+    .map((e) => {
+      const nameWords = normalizeForSearch(e.names).split(" ").filter(Boolean);
+      const overlap = queryWords.filter((w) => nameWords.includes(w)).length;
+      return { employee: e, overlap };
+    })
+    .filter((s) => s.overlap >= Math.min(2, queryWords.length));
+
+  if (scored.length === 0) return [];
+  const maxOverlap = Math.max(...scored.map((s) => s.overlap));
+  return scored.filter((s) => s.overlap === maxOverlap).map((s) => s.employee);
+};
+
 // Busca clientes por teléfono comparando los últimos 10 dígitos (ignora código de país y formato)
 const findClientsByPhone = async (organizationId, phone) => {
   const digits = (phone || "").replace(/\D/g, "");
@@ -457,14 +487,19 @@ Si el cliente no existe y se proporciona clientPhone, se crea automáticamente. 
           };
         }
 
-        const emp = await Employee.findOne({
-          organizationId,
-          names: { $regex: escapeRegex(appt.employeeName), $options: "i" },
-          isActive: true,
-        });
-        if (!emp) {
+        const emps = await findEmployeesByName(organizationId, appt.employeeName);
+        if (emps.length === 0) {
           return { success: false, error: `No se encontró el profesional "${appt.employeeName}". Verifica el nombre.` };
         }
+        if (emps.length > 1) {
+          return {
+            success: false,
+            multipleFound: true,
+            message: `Encontré ${emps.length} profesionales que coinciden con "${appt.employeeName}". ¿A cuál te refieres?`,
+            profesionales: emps.map((e) => ({ id: e._id, name: e.names })),
+          };
+        }
+        const emp = emps[0];
 
         // Modo consecutivo: a partir del 2º servicio, el inicio es el fin del anterior
         // (no la hora que mandó el modelo). El 1º usa su hora explícita.
@@ -683,7 +718,7 @@ Busca la cita por criterios (cliente, fecha, servicio, profesional). Si encuentr
 
       // 5. Filtrar por profesional
       if (params.employeeName) {
-        const emps = await Employee.find({ organizationId, names: { $regex: params.employeeName, $options: "i" }, isActive: true }).select("_id");
+        const emps = await findEmployeesByName(organizationId, params.employeeName);
         if (emps.length === 0) return { success: false, error: `No se encontró el profesional "${params.employeeName}".` };
         filter.employee = { $in: emps.map((e) => e._id) };
       }
@@ -841,7 +876,7 @@ Si hay solapamiento en el nuevo horario, lo avisa pero reprograma igual.`,
       }
 
       if (params.employeeName) {
-        const emps = await Employee.find({ organizationId, names: { $regex: params.employeeName, $options: "i" }, isActive: true }).select("_id");
+        const emps = await findEmployeesByName(organizationId, params.employeeName);
         if (emps.length === 0) return { success: false, error: `No se encontró el profesional "${params.employeeName}".` };
         filter.employee = { $in: emps.map((e) => e._id) };
       }
@@ -1025,7 +1060,7 @@ Busca la cita por cliente, fecha, servicio o profesional — igual que cancel_or
         }
 
         if (params.employeeName) {
-          const emps = await Employee.find({ organizationId, names: { $regex: escapeRegex(params.employeeName), $options: "i" }, isActive: true }).select("_id");
+          const emps = await findEmployeesByName(organizationId, params.employeeName);
           if (emps.length === 0) return { success: false, error: `No se encontró el profesional "${params.employeeName}".` };
           filter.employee = { $in: emps.map((e) => e._id) };
         }
