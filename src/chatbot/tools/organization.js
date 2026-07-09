@@ -4,8 +4,40 @@ import Employee from "../../models/employeeModel.js";
 import { markOnboardingMilestone } from "../../utils/onboardingMilestones.js";
 
 const DAY_MAP = { domingo: 0, lunes: 1, martes: 2, miercoles: 3, miércoles: 3, jueves: 4, viernes: 5, sabado: 6, sábado: 6 };
+const DAY_NAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+
+// Convierte el weeklySchedule de la organización en líneas legibles ("lunes: 08:00–20:00").
+const formatWeeklySchedule = (weeklySchedule) => {
+  if (!weeklySchedule?.enabled || !weeklySchedule?.schedule?.length) return null;
+  return weeklySchedule.schedule
+    .slice()
+    .sort((a, b) => a.day - b.day)
+    .map((d) => (d.isOpen ? `${DAY_NAMES[d.day]}: ${d.start}–${d.end}` : `${DAY_NAMES[d.day]}: cerrado`));
+};
 
 export default [
+  {
+    name: "get_organization_info",
+    description:
+      "Obtiene la dirección, horario de atención, teléfono/WhatsApp y redes sociales del negocio. Úsala cuando el usuario pregunte por estos datos en vez de inventarlos o decir que no los tienes.",
+    parameters: {},
+    handler: async (_params, context) => {
+      const { organization } = context;
+      const hours = formatWeeklySchedule(organization.weeklySchedule);
+      const { lat, lng } = organization.location || {};
+      return {
+        success: true,
+        businessName: organization.name,
+        address: organization.address || null,
+        mapsUrl: lat && lng ? `https://www.google.com/maps?q=${lat},${lng}` : null,
+        hours: hours || null,
+        phone: organization.phoneNumber || null,
+        whatsapp: organization.whatsappUrl || null,
+        instagram: organization.instagramUrl || null,
+        facebook: organization.facebookUrl || null,
+      };
+    },
+  },
   {
     name: "get_setup_status",
     description:

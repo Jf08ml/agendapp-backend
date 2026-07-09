@@ -43,6 +43,38 @@ const ORG_INVALIDATING_TOOLS = new Set([
   "mark_setup_complete",
 ]);
 
+// Tools de creación/asignación cuyo éxito el modelo podría afirmar sin haberlas
+// llamado realmente (o ignorando que el resultado real fue un error/duplicado).
+const MUTATION_TOOLS = new Set([
+  "create_service",
+  "bulk_create_services",
+  "create_employee",
+  "assign_services_to_employee",
+]);
+
+// Detecta cuando la respuesta afirma que se creó/agregó/asignó/registró un
+// servicio o profesional (en cualquier orden de palabras y cualquier conjugación).
+const ACTION_STEM = "(cre\\w*|agreg\\w*|asign\\w*|registr\\w*)";
+const ENTITY_NOUN = "(servicio|profesional|empleado)s?";
+const CRUD_CLAIM_PATTERN = new RegExp(
+  `\\b${ENTITY_NOUN}\\b.{0,120}\\b${ACTION_STEM}\\b|\\b${ACTION_STEM}\\b.{0,120}\\b${ENTITY_NOUN}\\b`,
+  "i"
+);
+
+// Detecta si el ÚLTIMO mensaje de texto del usuario pidió crear/agregar/asignar
+// algo — para no disparar el guard cuando el usuario solo está preguntando por
+// algo ya creado en un turno anterior (ej: "¿ya quedó el servicio?").
+const CREATION_INTENT_PATTERN =
+  /\b(crea|crear|creame|créame|cream[eo]s|agrega|agregar|agrégame|añad[ei]|asigna|asignar|asígnale|asígname|registra|registrar|dame de alta|da de alta|suma|sumar)\b/i;
+
+const findLastUserText = (messages) => {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role === "user" && typeof m.content === "string") return m.content;
+  }
+  return "";
+};
+
 export const processChat = async (organization, user, messages) => {
   const context = await buildContext(organization, user);
   const systemPrompt = buildSystemPrompt(context);
@@ -71,7 +103,35 @@ export const processChat = async (organization, user, messages) => {
     outputTokens += response.usage?.output_tokens ?? 0;
 
     if (response.stop_reason !== "tool_use") {
-      const reply = extractText(response.content);
+      // Fallback: si el modelo terminó el turno sin bloque de texto (puede pasar en
+      // sesiones largas con muchas tool calls seguidas), nunca devolver un reply vacío.
+      const reply =
+        extractText(response.content) ||
+        "Listo, ya quedó registrado. ¿Hay algo más en lo que te pueda ayudar?";
+
+      // Guard: el bot afirma que creó/agregó/asignó un servicio o profesional pero
+      // nunca llamó la herramienta correspondiente en esta conversación, Y el
+      // usuario sí pidió esa acción en su último mensaje (para no disparar esto
+      // cuando solo está preguntando por algo creado en un turno anterior).
+      const calledMutationTool = [...executedTools].some((t) => MUTATION_TOOLS.has(t));
+      if (
+        !calledMutationTool &&
+        CRUD_CLAIM_PATTERN.test(reply) &&
+        CREATION_INTENT_PATTERN.test(findLastUserText(currentMessages)) &&
+        round < MAX_TOOL_ROUNDS - 1
+      ) {
+        currentMessages = [
+          ...currentMessages,
+          { role: "assistant", content: response.content },
+          {
+            role: "user",
+            content:
+              "[SISTEMA] No llamaste ninguna herramienta de creación/asignación (create_service, bulk_create_services, create_employee o assign_services_to_employee) todavía. Debes llamarla AHORA con los datos reales antes de confirmar esto. Si la herramienta devuelve success: false, duplicateWarning o priceWarning, o algún item en 'failed', informa ese resultado real al usuario — no digas que se creó/asignó si no fue así.",
+          },
+        ];
+        continue;
+      }
+
       const invalidates = [...executedTools].some((t) => ORG_INVALIDATING_TOOLS.has(t))
         ? ["organization"]
         : [];

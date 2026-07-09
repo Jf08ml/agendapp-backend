@@ -441,7 +441,20 @@ Si el cliente no existe y se proporciona clientPhone, se crea automáticamente. 
         const appt = params.appointments[i];
         const svc = await findServiceByName(organizationId, appt.serviceName);
         if (!svc) {
-          return { success: false, error: `No se encontró el servicio "${appt.serviceName}". Verifica el nombre.` };
+          // No hubo match exacto ni difuso (ej. el usuario dio un nombre de categoría
+          // como "pestañas hawaianas" que no aparece literal en el nombre del servicio).
+          // En vez de fallar en seco, devolver el catálogo activo para que el modelo
+          // (o el usuario) identifique el nombre correcto y se reintente.
+          const activeServices = await Service.find({ organizationId, isActive: true })
+            .select("name")
+            .lean();
+          return {
+            success: false,
+            error: `No se encontró el servicio "${appt.serviceName}".`,
+            availableServices: activeServices.map((s) => s.name),
+            _instruction:
+              "No existe un servicio con ese nombre exacto en el catálogo. Revisa 'availableServices': si hay una coincidencia clara, reintenta create_appointments con ese nombre exacto. Si hay varias opciones razonables o ninguna coincide, pregúntale al usuario cuál de los servicios del catálogo es — nunca inventes ni asumas uno.",
+          };
         }
 
         const emp = await Employee.findOne({

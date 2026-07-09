@@ -138,4 +138,97 @@ export default [
       };
     },
   },
+  {
+    name: "bulk_create_services",
+    description:
+      "Crea VARIOS servicios en una sola llamada. Úsala SIEMPRE que el usuario pegue o dicte una lista de 2 o más servicios de una sola vez (por ejemplo, copiando su catálogo completo durante el onboarding) — NUNCA llames create_service uno por uno en ese caso, es mucho más lento y costoso. Aplica el mismo chequeo de duplicados y de precio desproporcionado que create_service, item por item, sin bloquear el resto del lote.",
+    parameters: {
+      services: {
+        type: "array",
+        description:
+          "Lista de servicios a crear. Cada item: { name, type, duration, price, description?, recommendations? }. 'type' es la categoría — infiere una apropiada si el usuario no la da. 'price' se interpreta igual que en create_service ('60 mil' = 60000, no 60000000).",
+        required: true,
+        items: { type: "object" },
+      },
+      force: {
+        type: "boolean",
+        description:
+          "Crear igual los servicios que salgan marcados como posible duplicado o precio sospechoso. Úsalo SOLO reenviando esos items puntuales después de que el usuario confirme explícitamente.",
+        required: false,
+      },
+    },
+    handler: async (params, context) => {
+      const { services, force } = params;
+      if (!Array.isArray(services) || services.length === 0) {
+        return { success: false, error: "No se recibió ninguna lista de servicios para crear." };
+      }
+
+      const org = await Organization.findById(context.organizationId).select("businessVertical currency");
+      const catalog = getVerticalCatalog(org?.businessVertical);
+      const mult = LARGE_DENOMINATION_CURRENCIES.has(String(org?.currency || "").toUpperCase()) ? 1000 : 1;
+      const typicalMax = Math.max(0, ...catalog.services.map((s) => Number(s.price) || 0)) * mult;
+
+      const existing = await Service.find({ organizationId: context.organizationId, isActive: true }).select("name");
+      // Índice mutable: se actualiza dentro del loop para detectar duplicados entre
+      // items del mismo lote (ej. el usuario repite un servicio dos veces en su lista).
+      const knownNorms = existing.map((s) => ({ id: s._id, name: s.name, norm: normalizeForCompare(s.name) }));
+
+      const created = [];
+      const skippedDuplicates = [];
+      const priceWarnings = [];
+      const failed = [];
+
+      for (const item of services) {
+        try {
+          if (!item?.name || !item?.duration || item?.price == null) {
+            failed.push({ name: item?.name || "(sin nombre)", error: "Faltan campos obligatorios: name, duration y price." });
+            continue;
+          }
+
+          if (!force && typicalMax > 0 && Number(item.price) > typicalMax * 25) {
+            priceWarnings.push({ name: item.name, price: item.price, suggestedPrice: Math.round(Number(item.price) / 1000) });
+            continue;
+          }
+
+          if (!force) {
+            const newNorm = normalizeForCompare(item.name);
+            const similar = knownNorms.filter(({ norm }) => norm === newNorm || norm.includes(newNorm) || newNorm.includes(norm));
+            if (similar.length > 0) {
+              skippedDuplicates.push({ name: item.name, existingServices: similar.map((s) => ({ id: s.id, name: s.name })) });
+              continue;
+            }
+          }
+
+          const doc = await Service.create({
+            name: item.name,
+            type: item.type || "General",
+            duration: item.duration,
+            price: item.price,
+            description: item.description || "",
+            recommendations: item.recommendations || null,
+            maxConcurrentAppointments: item.maxConcurrentAppointments ?? 1,
+            costs: Array.isArray(item.costs) ? item.costs : [],
+            organizationId: context.organizationId,
+          });
+          knownNorms.push({ id: doc._id, name: doc.name, norm: normalizeForCompare(doc.name) });
+          created.push({ id: doc._id, name: doc.name, duration: doc.duration, price: doc.price });
+        } catch (err) {
+          failed.push({ name: item?.name || "(sin nombre)", error: err.message });
+        }
+      }
+
+      return {
+        success: true,
+        createdCount: created.length,
+        created,
+        skippedDuplicates,
+        priceWarnings,
+        failed,
+        _instruction:
+          skippedDuplicates.length > 0 || priceWarnings.length > 0
+            ? "Dile al usuario cuántos servicios se crearon. Para los de skippedDuplicates y priceWarnings, muéstraselos puntualmente y pregunta si quiere crearlos igual — si confirma, reintenta bulk_create_services SOLO con esos items y force: true. No repitas la lista completa del lote."
+            : "Confirma al usuario cuántos servicios se crearon exitosamente, con un resumen breve (no hace falta listar los 50 uno por uno si son muchos).",
+      };
+    },
+  },
 ];
