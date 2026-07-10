@@ -90,6 +90,10 @@ router.get("/organization-config", organizationResolver, async (req, res) => {
 
 router.get("/manifest.webmanifest", organizationResolver, (req, res) => {
   const org = req.organization;
+  // Preferir el ícono PWA dedicado; si el negocio no lo subió pero sí tiene un
+  // logo general, usar ese antes de caer al genérico de AgenditApp — evita que
+  // instale con un ícono ajeno al negocio solo porque no llenaron ese campo puntual.
+  const iconSrc = org.branding?.pwaIcon || org.branding?.logoUrl || "/logo_default.png";
   res.setHeader("Content-Type", "application/manifest+json");
   res.send(
     JSON.stringify({
@@ -102,17 +106,17 @@ router.get("/manifest.webmanifest", organizationResolver, (req, res) => {
       theme_color: org.branding?.themeColor || "#fff",
       icons: [
         {
-          src: org.branding?.pwaIcon || "/logo_default.png",
+          src: iconSrc,
           sizes: "192x192",
           type: "image/png",
         },
         {
-          src: org.branding?.pwaIcon || "/logo_default.png",
+          src: iconSrc,
           sizes: "512x512",
           type: "image/png",
         },
         {
-          src: org.branding?.pwaIcon || "/logo_default.png",
+          src: iconSrc,
           sizes: "512x512",
           type: "image/png",
           purpose: "any maskable",

@@ -5,6 +5,7 @@
 import express from "express";
 import scheduleController from "../controllers/scheduleController.js";
 import { verifyToken } from "../middleware/authMiddleware.js";
+import { organizationResolver } from "../middleware/organizationResolver.js";
 
 const router = express.Router();
 
@@ -22,8 +23,11 @@ router.get("/organization/:orgId/open-days", verifyToken, scheduleController.get
 router.put("/employee/:employeeId", verifyToken, scheduleController.updateEmployeeSchedule);
 router.get("/employee/:employeeId", verifyToken, scheduleController.getEmployeeSchedule);
 router.get("/employee/:employeeId/available-days", verifyToken, scheduleController.getEmployeeAvailableDays);
-router.get("/employee/:employeeId/exceptions", verifyToken, scheduleController.getEmployeeExceptions);
-router.post("/employee/:employeeId/exceptions", verifyToken, scheduleController.addEmployeeException);
-router.delete("/employee/:employeeId/exceptions/:exceptionId", verifyToken, scheduleController.removeEmployeeException);
+// organizationResolver aquí (además de verifyToken) porque estos endpoints reciben
+// employeeId por parámetro de ruta y deben validar que pertenezca a la organización
+// del solicitante — ver checks de tenant/propiedad dentro del controller.
+router.get("/employee/:employeeId/exceptions", organizationResolver, verifyToken, scheduleController.getEmployeeExceptions);
+router.post("/employee/:employeeId/exceptions", organizationResolver, verifyToken, scheduleController.addEmployeeException);
+router.delete("/employee/:employeeId/exceptions/:exceptionId", organizationResolver, verifyToken, scheduleController.removeEmployeeException);
 
 export default router;

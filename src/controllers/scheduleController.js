@@ -12,6 +12,27 @@ import reservationModel from "../models/reservationModel.js";
 import scheduleService from "../services/scheduleService.js";
 import sendResponse from "../utils/sendResponse.js";
 
+// Valida acceso a las excepciones de horario (bloqueos) de un empleado:
+// 1) el empleado debe pertenecer a la organización resuelta por organizationResolver
+//    (evita que cualquier usuario autenticado toque el bloqueo de otra organización).
+// 2) si quien solicita es un profesional (userType "employee"), solo puede gestionar
+//    su PROPIA agenda — no la de otros compañeros. Solo admins (userType "admin")
+//    pueden operar sobre cualquier empleado de su organización, como ya hacían.
+// Devuelve null si el acceso es válido, o { status, message } si debe rechazarse.
+function checkEmployeeExceptionAccess(req, employee) {
+  const orgId = req.organization?._id?.toString();
+  if (!orgId || employee.organizationId?.toString() !== orgId) {
+    // 404 en vez de 403 para no revelar que el ID pertenece a otra organización
+    return { status: 404, message: "Empleado no encontrado" };
+  }
+
+  if (req.user?.userType === "employee" && req.user.userId !== employee._id.toString()) {
+    return { status: 403, message: "Solo puedes gestionar bloqueos de tu propia agenda." };
+  }
+
+  return null;
+}
+
 const scheduleController = {
   /**
    * Actualizar horario semanal de la organización
@@ -889,6 +910,9 @@ const scheduleController = {
       if (!employee) {
         return sendResponse(res, 404, null, "Empleado no encontrado");
       }
+      const authError = checkEmployeeExceptionAccess(req, employee);
+      if (authError) return sendResponse(res, authError.status, null, authError.message);
+
       return sendResponse(res, 200, employee.scheduleExceptions || [], "Excepciones obtenidas exitosamente");
     } catch (error) {
       return sendResponse(res, 500, null, `Error: ${error.message}`);
@@ -934,6 +958,8 @@ const scheduleController = {
       if (!employee) {
         return sendResponse(res, 404, null, "Empleado no encontrado");
       }
+      const authError = checkEmployeeExceptionAccess(req, employee);
+      if (authError) return sendResponse(res, authError.status, null, authError.message);
 
       const newException = {
         startDate,
@@ -964,6 +990,8 @@ const scheduleController = {
       if (!employee) {
         return sendResponse(res, 404, null, "Empleado no encontrado");
       }
+      const authError = checkEmployeeExceptionAccess(req, employee);
+      if (authError) return sendResponse(res, authError.status, null, authError.message);
 
       const initialLength = employee.scheduleExceptions.length;
       employee.scheduleExceptions = employee.scheduleExceptions.filter(
