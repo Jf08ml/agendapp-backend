@@ -37,6 +37,31 @@ function graphClient() {
   });
 }
 
+function makeClient(token) {
+  return axios.create({ baseURL: GRAPH_URL, params: { access_token: token } });
+}
+
+/**
+ * Si la org tiene metaWabaId (Embedded Signup) y el token primario falla
+ * con código 100 (permiso insuficiente del system user sobre el WABA del cliente),
+ * reintenta con metaAccessToken (token del dueño del negocio, que siempre tiene admin).
+ * Mismo patrón que metaTemplateService.js — necesario porque connectOrgEmbedded
+ * agrega el system user al WABA del cliente de forma best-effort (puede fallar sin bloquear la conexión).
+ */
+async function withOwnerTokenFallback(org, primaryToken, fn) {
+  try {
+    return await fn(primaryToken);
+  } catch (err) {
+    const isPermissionError = err.response?.data?.error?.code === 100;
+    const hasOwnerToken = org.metaWabaId && org.metaAccessToken && org.metaAccessToken !== primaryToken;
+    if (isPermissionError && hasOwnerToken) {
+      console.warn("[metaConnect] System user sin permisos de admin en el WABA del cliente — reintentando con metaAccessToken");
+      return fn(org.metaAccessToken);
+    }
+    throw err;
+  }
+}
+
 /**
  * Paso 1: Agrega el número al WABA de AgenditApp y envía código de verificación.
  *
@@ -161,7 +186,7 @@ export async function activateCoexistence(orgId) {
  */
 export async function activateCloudOnly(orgId, pin) {
   const org = await Organization.findById(orgId)
-    .select("metaPhoneNumberId metaPhone")
+    .select("metaPhoneNumberId metaPhone metaWabaId metaAccessToken")
     .lean();
 
   if (!org?.metaPhoneNumberId) {
@@ -172,12 +197,13 @@ export async function activateCloudOnly(orgId, pin) {
     throw new Error("El PIN debe ser de exactamente 6 dígitos numéricos.");
   }
 
-  const client = graphClient();
   try {
-    await client.post(`/${org.metaPhoneNumberId}/register`, {
-      messaging_product: "whatsapp",
-      pin,
-    });
+    await withOwnerTokenFallback(org, platformToken(), (t) =>
+      makeClient(t).post(`/${org.metaPhoneNumberId}/register`, {
+        messaging_product: "whatsapp",
+        pin,
+      })
+    );
     console.log(`[metaConnect] Cloud-only activado para org ${orgId} — número: ${org.metaPhone}`);
   } catch (err) {
     const code = err.response?.data?.error?.code;
@@ -205,7 +231,7 @@ export async function activateCloudOnly(orgId, pin) {
  */
 export async function getMetaStatus(orgId) {
   const org = await Organization.findById(orgId)
-    .select("waConnectionType metaPhoneNumberId metaPhone metaCoexistenceEnabled")
+    .select("waConnectionType metaPhoneNumberId metaPhone metaCoexistenceEnabled metaWabaId metaAccessToken")
     .lean();
 
   if (!org) throw new Error("Organización no encontrada.");
@@ -229,12 +255,13 @@ export async function getMetaStatus(orgId) {
 
   // Verificar que el número sigue operativo en Meta
   try {
-    const client = graphClient();
-    const res = await client.get(`/${org.metaPhoneNumberId}`, {
-      params: {
-        fields: "id,display_phone_number,verified_name,platform_type,code_verification_status",
-      },
-    });
+    const res = await withOwnerTokenFallback(org, platformToken(), (t) =>
+      makeClient(t).get(`/${org.metaPhoneNumberId}`, {
+        params: {
+          fields: "id,display_phone_number,verified_name,platform_type,code_verification_status",
+        },
+      })
+    );
     return {
       connected: true,
       pending: false,
