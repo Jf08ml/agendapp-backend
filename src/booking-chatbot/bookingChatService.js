@@ -41,6 +41,9 @@ export const processBookingChat = async (organization, messages, options = {}) =
   const systemPrompt = buildBookingSystemPrompt(organization, {
     channel,
     clientPhone: options.clientPhone,
+    // Estado entre turnos (WhatsApp): el historial visible es solo texto, así que
+    // el prompt debe declarar explícitamente que hay una reserva preparada sin confirmar.
+    pendingReservation: isWhatsapp ? options.session?.pendingPayload : null,
   });
   const context = {
     organizationId: organization._id,
@@ -83,25 +86,47 @@ export const processBookingChat = async (organization, messages, options = {}) =
       // (el modelo generó el mensaje del botón en la misma ronda que la tool call),
       // inyectar mensaje genérico de confirmación.
       const rawReply = extractText(response.content);
+      const reservationWasCreated = options.session?.reservationCreated === true;
       const reply =
         rawReply ||
-        (bookingPayload !== null
+        (bookingPayload !== null || (isWhatsapp && reservationWasCreated)
           ? isWhatsapp
-            ? "Tu reserva está lista ✅ ¿La agendo? Responde *sí* para confirmarla."
+            ? reservationWasCreated
+              ? "✅ ¡Listo! Tu reserva quedó agendada. Te esperamos."
+              : "¿Confirmo tu reserva? Responde *sí* para agendarla."
             : "¡Listo! Toca el botón **'Sí, confirmar'** para finalizar tu reserva."
           : "");
 
-      // Guard: el bot dice que la reserva fue confirmada sin haber llamado
-      // prepare_reservation (o, en WhatsApp, confirm_reservation).
-      // Inyecta una corrección y continúa el loop.
-      // En WhatsApp NO aplica si la reserva ya se creó en este turno o si hay un
-      // payload pendiente de un turno anterior (el bot habla de confirmar legítimamente).
-      const reservationWasCreated = options.session?.reservationCreated === true;
-      const hasPendingFromPreviousTurn = isWhatsapp && !!options.session?.pendingPayload;
+      // Guard WhatsApp: el bot anuncia la reserva como creada/agendada sin que
+      // confirm_reservation haya devuelto éxito. Inyecta corrección y continúa.
+      // (Las negaciones — "no pudo ser creada" — son mensajes de error legítimos.)
+      const isNegatedReply = /\bno (pudo|fue|se pudo|logr|qued)/i.test(reply);
       if (
-        bookingPayload === null &&
+        isWhatsapp &&
         !reservationWasCreated &&
-        !hasPendingFromPreviousTurn &&
+        !isNegatedReply &&
+        BOOKING_HALLUCINATION_PATTERN.test(reply) &&
+        round < MAX_TOOL_ROUNDS - 1
+      ) {
+        currentMessages = [
+          ...currentMessages,
+          { role: "assistant", content: response.content },
+          {
+            role: "user",
+            content:
+              options.session?.pendingPayload || bookingPayload
+                ? "[SISTEMA] La reserva AÚN NO fue creada. Llama confirm_reservation AHORA para crearla de verdad antes de anunciarla al cliente."
+                : "[SISTEMA] Aún no llamaste prepare_reservation. Debes llamarla AHORA con todos los datos recopilados (y luego confirm_reservation) antes de dar esa respuesta al cliente.",
+          },
+        ];
+        continue;
+      }
+
+      // Guard web: el bot dice que la reserva fue confirmada sin haber llamado
+      // prepare_reservation. Inyecta una corrección y continúa el loop.
+      if (
+        !isWhatsapp &&
+        bookingPayload === null &&
         BOOKING_HALLUCINATION_PATTERN.test(reply) &&
         round < MAX_TOOL_ROUNDS - 1
       ) {

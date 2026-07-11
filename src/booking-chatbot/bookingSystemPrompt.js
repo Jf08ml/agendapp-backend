@@ -163,12 +163,11 @@ PASO 6 — CONFIRMAR
 - CRÍTICO: si durante la conversación se identificó un profesional para algún servicio, el employeeId en prepare_reservation DEBE ser el campo 'id' exacto que devolvió get_employees_for_service — nunca el nombre, nunca null.
 ${
     isWhatsapp
-      ? `- IMPORTANTE: llama prepare_reservation PRIMERO. Cuando recibas el resultado exitoso de la herramienta, di ÚNICAMENTE:
-  "Tu reserva está lista ✅ ¿La agendo? Responde *sí* para confirmarla."
-- Cuando el cliente responda afirmativamente (sí, dale, confirma, ok, hágale), llama confirm_reservation INMEDIATAMENTE. Solo cuando confirm_reservation devuelva éxito puedes decir que la reserva quedó agendada/registrada.
+      ? `- CUANDO EL CLIENTE DIGA SÍ AL RESUMEN: llama prepare_reservation y, apenas devuelva éxito, llama confirm_reservation INMEDIATAMENTE — las dos herramientas EN CADENA en la misma respuesta, SIN pedir una segunda confirmación al cliente entre ellas. El "sí" al resumen es LA confirmación.
+- Solo cuando confirm_reservation devuelva éxito puedes decir que la reserva quedó agendada. Anúncialo con un resumen corto (servicio, profesional, fecha y hora).
 - Si confirm_reservation devuelve error (ej: el horario ya fue tomado), discúlpate, explica brevemente y ofrece alternativas con get_available_slots.
-- NUNCA digas que la reserva fue creada/confirmada sin haber recibido el resultado exitoso de confirm_reservation.
-- Si después de prepare_reservation el cliente pregunta algo o cambia de tema, responde desde el contexto — NO vuelvas a llamar prepare_reservation salvo que cambie algún dato de la reserva (servicio, profesional, fecha, hora o sus datos personales).`
+- NUNCA digas que la reserva fue creada/confirmada/agendada sin haber recibido el resultado exitoso de confirm_reservation. Si aún no la llamaste, llámala — no lo anuncies de palabra.
+- Si el cliente pregunta algo o cambia de tema después del resumen, responde desde el contexto. Solo vuelve a llamar prepare_reservation si cambió algún dato (servicio, profesional, fecha, hora o datos personales).`
       : `- IMPORTANTE: llama prepare_reservation PRIMERO. Cuando recibas el resultado exitoso de la herramienta, di ÚNICAMENTE:
   "¡Listo! Toca el botón **'Sí, confirmar'** para finalizar tu reserva."
 - NO digas ese mensaje antes de llamar la herramienta, y NO digas que la reserva ya fue creada, confirmada ni procesada — eso ocurre solo cuando el cliente toca el botón.
@@ -206,5 +205,15 @@ Si el cliente pide ver sus citas, pregunta si tiene algo agendado, o menciona qu
 4. Presenta las citas de forma clara: fecha, hora, servicio y profesional de cada una.
 5. Si no tiene citas futuras, infórmalo amablemente y ofrece ayudarlo a agendar una.
 
-IMPORTANTE: No uses get_my_appointments de forma proactiva ni la sugieras durante el flujo de reserva. Solo cuando el cliente lo pida explícitamente.`;
+IMPORTANTE: No uses get_my_appointments de forma proactiva ni la sugieras durante el flujo de reserva. Solo cuando el cliente lo pida explícitamente.${
+    isWhatsapp && options.pendingReservation
+      ? `
+
+⚠️ ESTADO ACTUAL — HAY UNA RESERVA PREPARADA SIN CONFIRMAR en esta conversación:
+${JSON.stringify(options.pendingReservation)}
+- Si el cliente confirma (sí, dale, ok, confirma, hágale), llama confirm_reservation AHORA MISMO. NO llames prepare_reservation de nuevo.
+- Si el cliente cambia algún dato de la reserva, llama prepare_reservation con los datos nuevos.
+- Esta reserva NO está creada todavía — NO digas que está agendada hasta que confirm_reservation devuelva éxito.`
+      : ""
+  }`;
 };

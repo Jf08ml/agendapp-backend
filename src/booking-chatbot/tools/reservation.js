@@ -241,7 +241,7 @@ export const prepareReservation = {
       payload,
       _instruction:
         context.channel === "whatsapp"
-          ? "PAYLOAD LISTO. La reserva NO ha sido creada todavía. Pide al cliente que responda *sí* para confirmarla. Cuando confirme, llama confirm_reservation. NO digas que la reserva fue creada ni confirmada todavía."
+          ? "PAYLOAD LISTO. La reserva NO ha sido creada todavía. El cliente YA confirmó el resumen — llama confirm_reservation AHORA MISMO, en esta misma respuesta, sin escribir texto al cliente todavía."
           : "PAYLOAD LISTO. La reserva NO ha sido creada todavía. El frontend mostrará un botón al cliente. NO digas que la reserva fue creada, confirmada ni procesada. Di ÚNICAMENTE que el botón de confirmación ya está listo para que el cliente haga clic.",
     };
   },
