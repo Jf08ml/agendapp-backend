@@ -1,4 +1,9 @@
 import allTools from "./tools/index.js";
+import { confirmReservation } from "./tools/reservation.js";
+
+// confirm_reservation solo existe en el canal WhatsApp (en la web la reserva
+// la crea el frontend con el botón de confirmación).
+const whatsappTools = [...allTools, confirmReservation];
 
 const buildInputSchema = (parameters) => {
   if (!parameters || Object.keys(parameters).length === 0) {
@@ -18,14 +23,17 @@ const buildInputSchema = (parameters) => {
   return { type: "object", properties, required };
 };
 
-export const bookingClaudeTools = allTools.map((tool) => ({
+const toClaudeTool = (tool) => ({
   name: tool.name,
   description: tool.description,
   input_schema: buildInputSchema(tool.parameters),
-}));
+});
+
+export const bookingClaudeTools = allTools.map(toClaudeTool);
+export const bookingClaudeToolsWhatsapp = whatsappTools.map(toClaudeTool);
 
 export const executeBookingTool = async (name, params, context) => {
-  const tool = allTools.find((t) => t.name === name);
+  const tool = whatsappTools.find((t) => t.name === name);
   if (!tool) throw new Error(`Tool desconocida: ${name}`);
   return tool.handler(params, context);
 };

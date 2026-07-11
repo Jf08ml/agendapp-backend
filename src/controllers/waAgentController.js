@@ -3,9 +3,28 @@ import {
   sanitizePhone,
 } from "../services/waAgentService.js";
 import { processAdminCommand } from "../services/waAgentChatService.js";
+import { processClientBookingMessage } from "../services/waBookingAgentService.js";
 import { validateMetaSignature } from "../services/metaApiService.js";
 import Organization from "../models/organizationModel.js";
 import { disconnectOrg } from "../services/metaConnectService.js";
+
+// Dedupe de webhooks: Meta puede reintentar la entrega del mismo mensaje.
+// Map message.id → timestamp; se poda cada vez que crece.
+const processedMessageIds = new Map();
+const DEDUPE_TTL_MS = 10 * 60 * 1000;
+
+function isDuplicateMessage(messageId) {
+  if (!messageId) return false;
+  const now = Date.now();
+  if (processedMessageIds.size > 1000) {
+    for (const [id, ts] of processedMessageIds.entries()) {
+      if (now - ts > DEDUPE_TTL_MS) processedMessageIds.delete(id);
+    }
+  }
+  if (processedMessageIds.has(messageId)) return true;
+  processedMessageIds.set(messageId, now);
+  return false;
+}
 
 // ─── Meta Webhook ─────────────────────────────────────────────────────────────
 
@@ -93,6 +112,12 @@ export async function handleMetaIncoming(req, res) {
 
   if (!body || !fromPhone) return;
 
+  // Ignorar reintentos de entrega del mismo mensaje
+  if (isDuplicateMessage(message.id)) {
+    console.log(`[WaAgent] Mensaje duplicado ignorado: ${message.id}`);
+    return;
+  }
+
   // Ignorar eco de los propios mensajes salientes de AgenditApp
   if (
     process.env.META_AGENDITAPP_PHONE &&
@@ -126,8 +151,27 @@ export async function handleMetaIncoming(req, res) {
         err,
       ),
     );
+    return;
   }
-  // Mensajes de clientes a números Meta de orgs → no se procesan
+
+  // ── Mensajes de clientes al número Meta de una org ────────────────────────
+  // Solo se procesan si la org activó el agente IA de reservas (default OFF).
+  if (receivingPhoneNumberId) {
+    const org = await Organization.findOne({
+      metaPhoneNumberId: receivingPhoneNumberId,
+      waConnectionType: "meta",
+      waBookingAgentEnabled: true,
+    }).lean();
+
+    if (!org) return; // org sin agente de reservas activo — ignorar como antes
+
+    // Ignorar mensajes del propio número del negocio (evita loops en coexistencia)
+    if (org.metaPhone && fromPhone === org.metaPhone) return;
+
+    processClientBookingMessage(org, fromPhone, body).catch((err) =>
+      console.error("[WaAgent] Error procesando mensaje de cliente (booking):", err),
+    );
+  }
 }
 
 // ─── Baileys Webhook ──────────────────────────────────────────────────────────

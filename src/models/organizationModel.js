@@ -279,6 +279,12 @@ const organizationSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  // Habilita el agente IA de reservas para CLIENTES en el número Meta de la org
+  // (responde mensajes entrantes de clientes y agenda citas por WhatsApp)
+  waBookingAgentEnabled: {
+    type: Boolean,
+    default: false,
+  },
   // Última vez que el admin respondió a AgenditApp vía Meta (ventana de 24h a nivel de org)
   agentAdminLastContactAt: { type: Date, default: null },
   // Tipo de conexión WA activa: 'baileys' | 'meta' | null

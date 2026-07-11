@@ -1,7 +1,14 @@
 import moment from "moment-timezone";
 import { getCountryCallingCode } from "libphonenumber-js";
 
-export const buildBookingSystemPrompt = (organization) => {
+export const buildBookingSystemPrompt = (organization, options = {}) => {
+  // channel: "web" (default, con botón de confirmación en el frontend)
+  //        | "whatsapp" (sin botón — la confirmación es conversacional vía confirm_reservation)
+  const channel = options.channel || "web";
+  const isWhatsapp = channel === "whatsapp";
+  // Teléfono desde el que escribe el cliente (solo canal WhatsApp) — se usa como
+  // teléfono de contacto sin pedirlo de nuevo.
+  const clientPhone = options.clientPhone;
   const policy = organization.reservationPolicy || "manual";
   const requiresEmployee = policy === "auto_if_available";
   const identifierField =
@@ -140,8 +147,13 @@ PASO 4 — HORARIO
 - Pregunta cuál prefiere.
 
 PASO 5 — DATOS DEL CLIENTE
-- Pide: nombre completo + ${identifierLabel}.
-- Solo pide lo necesario. No pidas email si el campo es teléfono, y viceversa.${phoneRule}
+${
+    isWhatsapp && clientPhone
+      ? `- El cliente escribe desde WhatsApp con el número ${clientPhone}. USA ESE NÚMERO como su teléfono de contacto — NO se lo pidas, salvo que él indique explícitamente que la cita es para otra persona con otro número.
+- Pide únicamente el nombre completo${identifierField !== "phone" ? ` y su ${identifierLabel}` : ""}.`
+      : `- Pide: nombre completo + ${identifierLabel}.
+- Solo pide lo necesario. No pidas email si el campo es teléfono, y viceversa.${phoneRule}`
+  }
 
 PASO 6 — CONFIRMAR
 - Resume la reserva completa:
@@ -149,10 +161,19 @@ PASO 6 — CONFIRMAR
 - Pregunta: "¿Todo está correcto? ¿Confirmo tu reserva?"
 - Cuando el cliente diga SÍ, llama prepare_reservation con todos los datos.
 - CRÍTICO: si durante la conversación se identificó un profesional para algún servicio, el employeeId en prepare_reservation DEBE ser el campo 'id' exacto que devolvió get_employees_for_service — nunca el nombre, nunca null.
-- IMPORTANTE: llama prepare_reservation PRIMERO. Cuando recibas el resultado exitoso de la herramienta, di ÚNICAMENTE:
+${
+    isWhatsapp
+      ? `- IMPORTANTE: llama prepare_reservation PRIMERO. Cuando recibas el resultado exitoso de la herramienta, di ÚNICAMENTE:
+  "Tu reserva está lista ✅ ¿La agendo? Responde *sí* para confirmarla."
+- Cuando el cliente responda afirmativamente (sí, dale, confirma, ok, hágale), llama confirm_reservation INMEDIATAMENTE. Solo cuando confirm_reservation devuelva éxito puedes decir que la reserva quedó agendada/registrada.
+- Si confirm_reservation devuelve error (ej: el horario ya fue tomado), discúlpate, explica brevemente y ofrece alternativas con get_available_slots.
+- NUNCA digas que la reserva fue creada/confirmada sin haber recibido el resultado exitoso de confirm_reservation.
+- Si después de prepare_reservation el cliente pregunta algo o cambia de tema, responde desde el contexto — NO vuelvas a llamar prepare_reservation salvo que cambie algún dato de la reserva (servicio, profesional, fecha, hora o sus datos personales).`
+      : `- IMPORTANTE: llama prepare_reservation PRIMERO. Cuando recibas el resultado exitoso de la herramienta, di ÚNICAMENTE:
   "¡Listo! Toca el botón **'Sí, confirmar'** para finalizar tu reserva."
 - NO digas ese mensaje antes de llamar la herramienta, y NO digas que la reserva ya fue creada, confirmada ni procesada — eso ocurre solo cuando el cliente toca el botón.
-- SI EL CLIENTE CANCELA EL BOTÓN DE CONFIRMACIÓN (o pregunta algo después de prepare_reservation, ej: "¿cuál es el resumen?"): responde desde el contexto de la conversación — ya tienes todos los datos. NO vuelvas a llamar prepare_reservation salvo que el cliente cambie algún dato de la reserva (servicio, profesional, fecha, hora o sus datos personales) y vuelva a confirmar.
+- SI EL CLIENTE CANCELA EL BOTÓN DE CONFIRMACIÓN (o pregunta algo después de prepare_reservation, ej: "¿cuál es el resumen?"): responde desde el contexto de la conversación — ya tienes todos los datos. NO vuelvas a llamar prepare_reservation salvo que el cliente cambie algún dato de la reserva (servicio, profesional, fecha, hora o sus datos personales) y vuelva a confirmar.`
+  }
 
 ═══ COTIZACIONES Y VARIANTES ═══
 - Si el cliente pide cotizar o saber el precio de uno o varios servicios (incluyendo cantidades, ej: "2 press on y 2 pedicures, ¿cuánto sería?"), CALCULA y muestra el total sumando los precios que devolvió get_services. No necesitas reservar para cotizar: desglosa cada servicio con su precio y muestra el total. Nunca digas que "no puedes ver precios" — los tienes de get_services.
@@ -171,7 +192,11 @@ PASO 6 — CONFIRMAR
 - Si el cliente pide algo fuera del flujo (quejas, preguntas que no son de dirección/horario/contacto, etc.), responde brevemente y redirige al proceso de reserva.
 - Si una fecha/hora ya no está disponible, discúlpate y ofrece alternativas con get_available_slots.
 - Cuando uses una tool, no expliques técnicamente lo que haces — solo muestra el resultado al usuario.
-- Usa **negritas** para resaltar datos importantes y listas para opciones múltiples.
+${
+    isWhatsapp
+      ? `- FORMATO WHATSAPP: escribe en texto plano. Para resaltar usa *un solo asterisco* (formato de WhatsApp). NUNCA uses **doble asterisco**, # encabezados ni tablas Markdown. Mensajes cortos (máximo ~6 líneas); usa emojis con moderación (✅ 📅 💇).`
+      : `- Usa **negritas** para resaltar datos importantes y listas para opciones múltiples.`
+  }
 
 ═══ CONSULTA DE CITAS ═══
 Si el cliente pide ver sus citas, pregunta si tiene algo agendado, o menciona que quiere saber cuándo es su próxima cita:

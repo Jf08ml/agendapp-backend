@@ -19,6 +19,8 @@ const chatLogSchema = new mongoose.Schema(
     },
     // "admin" = chatbot del staff | "booking" = chatbot público de reserva
     type: { type: String, enum: ["admin", "booking"], required: true },
+    // Canal por el que ocurrió la conversación (booking puede ser web o WhatsApp)
+    channel: { type: String, enum: ["web", "whatsapp"], default: "web" },
     userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
 
     // Conversación: mensajes de texto (sin bloques de tool_use internos)

@@ -176,6 +176,7 @@ const organizationService = {
       termsAndConditions,
       waPhone,
       waAgentEnabled,
+      waBookingAgentEnabled,
       waConnectionType,
       metaPhoneNumberId,
       metaPhone,
@@ -417,6 +418,9 @@ const organizationService = {
         }
       }
     }
+
+    // 🤖 Agente IA de reservas para clientes (número Meta de la org)
+    if (waBookingAgentEnabled !== undefined) organization.waBookingAgentEnabled = !!waBookingAgentEnabled;
 
     // ✅ Auto-marcar asistencia
     if (autoMarkAttended !== undefined) organization.autoMarkAttended = autoMarkAttended;

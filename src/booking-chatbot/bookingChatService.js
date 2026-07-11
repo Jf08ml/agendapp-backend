@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { buildBookingSystemPrompt } from "./bookingSystemPrompt.js";
 import {
   bookingClaudeTools,
+  bookingClaudeToolsWhatsapp,
   executeBookingTool,
 } from "./bookingToolRegistry.js";
 
@@ -22,9 +23,34 @@ const extractText = (content) => {
   return block?.text || "";
 };
 
-export const processBookingChat = async (organization, messages) => {
-  const systemPrompt = buildBookingSystemPrompt(organization);
-  const context = { organizationId: organization._id, organization };
+/**
+ * Loop agéntico del asistente de reservas.
+ *
+ * @param {Object} organization
+ * @param {Array}  messages  - historial [{ role, content }]
+ * @param {Object} [options]
+ * @param {string} [options.channel]     - "web" (default) | "whatsapp"
+ * @param {Object} [options.session]     - sesión mutable (WhatsApp): pendingPayload, reservationCreated
+ * @param {string} [options.sessionId]   - id de sesión (para chatSessionId en la reserva)
+ * @param {string} [options.clientPhone] - teléfono del cliente (WhatsApp) para prellenar
+ */
+export const processBookingChat = async (organization, messages, options = {}) => {
+  const channel = options.channel || "web";
+  const isWhatsapp = channel === "whatsapp";
+
+  const systemPrompt = buildBookingSystemPrompt(organization, {
+    channel,
+    clientPhone: options.clientPhone,
+  });
+  const context = {
+    organizationId: organization._id,
+    organization,
+    channel,
+    session: options.session,
+    sessionId: options.sessionId,
+  };
+
+  const baseTools = isWhatsapp ? bookingClaudeToolsWhatsapp : bookingClaudeTools;
 
   let currentMessages = [...messages];
   let bookingPayload = null;
@@ -33,8 +59,8 @@ export const processBookingChat = async (organization, messages) => {
   let outputTokens = 0;
   let rounds = 0;
 
-  const toolsWithCache = bookingClaudeTools.map((t, i) =>
-    i === bookingClaudeTools.length - 1
+  const toolsWithCache = baseTools.map((t, i) =>
+    i === baseTools.length - 1
       ? { ...t, cache_control: { type: "ephemeral" } }
       : t
   );
@@ -60,13 +86,22 @@ export const processBookingChat = async (organization, messages) => {
       const reply =
         rawReply ||
         (bookingPayload !== null
-          ? "¡Listo! Toca el botón **'Sí, confirmar'** para finalizar tu reserva."
+          ? isWhatsapp
+            ? "Tu reserva está lista ✅ ¿La agendo? Responde *sí* para confirmarla."
+            : "¡Listo! Toca el botón **'Sí, confirmar'** para finalizar tu reserva."
           : "");
 
       // Guard: el bot dice que la reserva fue confirmada sin haber llamado
-      // prepare_reservation. Inyecta una corrección y continúa el loop.
+      // prepare_reservation (o, en WhatsApp, confirm_reservation).
+      // Inyecta una corrección y continúa el loop.
+      // En WhatsApp NO aplica si la reserva ya se creó en este turno o si hay un
+      // payload pendiente de un turno anterior (el bot habla de confirmar legítimamente).
+      const reservationWasCreated = options.session?.reservationCreated === true;
+      const hasPendingFromPreviousTurn = isWhatsapp && !!options.session?.pendingPayload;
       if (
         bookingPayload === null &&
+        !reservationWasCreated &&
+        !hasPendingFromPreviousTurn &&
         BOOKING_HALLUCINATION_PATTERN.test(reply) &&
         round < MAX_TOOL_ROUNDS - 1
       ) {

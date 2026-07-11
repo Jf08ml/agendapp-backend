@@ -230,11 +230,94 @@ export const prepareReservation = {
       organizationId: organizationId.toString(),
     };
 
+    // En canal WhatsApp guardar el payload en la sesión para que confirm_reservation lo use
+    if (context.session) {
+      context.session.pendingPayload = payload;
+    }
+
     return {
       success: true,
       payload,
       _instruction:
-        "PAYLOAD LISTO. La reserva NO ha sido creada todavía. El frontend mostrará un botón al cliente. NO digas que la reserva fue creada, confirmada ni procesada. Di ÚNICAMENTE que el botón de confirmación ya está listo para que el cliente haga clic.",
+        context.channel === "whatsapp"
+          ? "PAYLOAD LISTO. La reserva NO ha sido creada todavía. Pide al cliente que responda *sí* para confirmarla. Cuando confirme, llama confirm_reservation. NO digas que la reserva fue creada ni confirmada todavía."
+          : "PAYLOAD LISTO. La reserva NO ha sido creada todavía. El frontend mostrará un botón al cliente. NO digas que la reserva fue creada, confirmada ni procesada. Di ÚNICAMENTE que el botón de confirmación ya está listo para que el cliente haga clic.",
+    };
+  },
+};
+
+// ── confirm_reservation (SOLO canal WhatsApp) ────────────────────────────────
+// En la web la reserva la crea el frontend al hacer clic en el botón de
+// confirmación. En WhatsApp no hay botón: cuando el cliente confirma por chat,
+// esta tool crea la reserva invocando la misma lógica del endpoint
+// POST /api/reservations/multi (respeta política auto/manual, notificaciones
+// y mensajes de WhatsApp existentes) mediante un req/res simulado.
+
+function makeMockRes() {
+  const res = { statusCode: 200, body: null };
+  res.status = (code) => {
+    res.statusCode = code;
+    return res;
+  };
+  res.json = (obj) => {
+    res.body = obj;
+    return res;
+  };
+  return res;
+}
+
+export const confirmReservation = {
+  name: "confirm_reservation",
+  description:
+    "Crea DEFINITIVAMENTE la reserva preparada previamente con prepare_reservation. Llámala ÚNICAMENTE cuando el cliente acaba de confirmar de forma explícita (sí, dale, confirma, ok) y existe una reserva preparada en esta conversación. No recibe parámetros — usa el payload preparado.",
+  parameters: {},
+  handler: async (_params, context) => {
+    const payload = context.session?.pendingPayload;
+    if (!payload) {
+      return {
+        success: false,
+        error:
+          "No hay ninguna reserva preparada en esta conversación. Llama prepare_reservation primero con todos los datos.",
+      };
+    }
+
+    // Import diferido para evitar ciclo de dependencias en la carga del módulo
+    // (reservationController importa ChatLog y servicios que a su vez son usados aquí).
+    const { default: reservationController } = await import(
+      "../../controllers/reservationController.js"
+    );
+
+    const req = {
+      body: {
+        ...payload,
+        source: "ai_chatbot",
+        chatSessionId: context.sessionId,
+      },
+    };
+    const res = makeMockRes();
+
+    try {
+      await reservationController.createMultipleReservations(req, res);
+    } catch (err) {
+      console.error("[confirm_reservation] Error creando reserva:", err);
+      return { success: false, error: err.message || "Error al crear la reserva." };
+    }
+
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      context.session.pendingPayload = null;
+      context.session.reservationCreated = true;
+      return {
+        success: true,
+        _instruction:
+          "Reserva creada correctamente. Confirma al cliente que su reserva quedó agendada. Si la política del negocio es manual, aclara que el negocio la revisará y le confirmará.",
+      };
+    }
+
+    return {
+      success: false,
+      error: res.body?.message || "No se pudo crear la reserva. El horario pudo haber sido tomado.",
+      _instruction:
+        "La reserva NO se creó. Explica el problema al cliente y ofrece buscar otro horario con get_available_slots.",
     };
   },
 };
