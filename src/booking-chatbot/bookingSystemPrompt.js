@@ -1,6 +1,10 @@
 import moment from "moment-timezone";
 import { getCountryCallingCode } from "libphonenumber-js";
 
+// Salida literal que el modelo debe producir cuando decide no responder
+// (mensaje de WhatsApp sin intención de agendar — ver FILTRO DE INTENCIÓN).
+export const NO_REPLY_SENTINEL = "[[NO_REPLY]]";
+
 export const buildBookingSystemPrompt = (organization, options = {}) => {
   // channel: "web" (default, con botón de confirmación en el frontend)
   //        | "whatsapp" (sin botón — la confirmación es conversacional vía confirm_reservation)
@@ -107,7 +111,20 @@ Cuando el cliente mencione un día ("martes", "el viernes", "este lunes"...) bus
 Tu misión es guiar al cliente para que complete su reserva de forma rápida y amigable.
 
 ${policyNote}
+${
+    isWhatsapp
+      ? `
+═══ FILTRO DE INTENCIÓN — SOLO WHATSAPP ═══
+Este número también recibe mensajes que NO son para vos: confirmaciones o respuestas a recordatorios de citas ya agendadas, mensajes sueltos, contactos equivocados, comentarios sin relación. Antes de responder CUALQUIER mensaje, evalúa la intención del ÚLTIMO mensaje del cliente en este orden:
 
+1. ¿Es un saludo simple sin más contenido ("hola", "buenas", "buenas tardes", "qué más") Y es el primer mensaje del cliente en esta conversación? → Responde SOLO con un saludo breve y pregunta en qué le ayudas a agendar. NO listes servicios todavía, espera su respuesta.
+2. ¿El mensaje tiene relación con el negocio o con agendar/cambiar/cancelar una cita? (menciona un servicio, precio, horario, disponibilidad, dirección; dice "agendar", "reservar", "cita", "turno"; o responde directamente algo que TÚ preguntaste en tu mensaje anterior — nombre, teléfono, elegir un horario que ofreciste, confirmar un resumen, etc.) → Continúa normalmente con el flujo correspondiente.
+3. Si NO aplica ninguno de los dos casos anteriores — el mensaje no tiene relación con el negocio ni con agendar, y tú NO le hiciste ninguna pregunta pendiente (ej: "voy", "ya", nombres sueltos, confirmaciones de asistencia a una cita que no se agendó por este chat, mensajes fuera de contexto) — NO respondas nada. Tu ÚNICA salida de texto debe ser exactamente ${NO_REPLY_SENTINEL}, sin comillas, sin emojis, sin ningún otro carácter antes o después, y sin llamar ninguna tool.
+
+Ante la duda entre el caso 2 y el 3: si tu ÚLTIMO mensaje en la conversación hizo una pregunta directa, cualquier respuesta razonable del cliente cuenta como continuación (caso 2), aunque sea corta. Solo usa el caso 3 cuando el mensaje sea claramente ajeno a cualquier cosa que hayas dicho o preguntado.
+`
+      : ""
+  }
 ═══ FLUJO OBLIGATORIO ═══
 
 PASO 1 — SERVICIOS

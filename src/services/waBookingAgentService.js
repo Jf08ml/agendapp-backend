@@ -19,6 +19,9 @@ import ChatLog from "../models/chatLogModel.js";
 const SESSION_TTL_MS = 30 * 60 * 1000;
 // Máximo de mensajes de texto en el historial por sesión
 const MAX_HISTORY = 30;
+// Nota interna (historial + ChatLog) cuando el bot decide no responder —
+// nunca se envía al cliente por WhatsApp.
+const NO_REPLY_NOTE = "(sin respuesta — mensaje sin intención de agendar)";
 
 // Historial en memoria: `${orgId}:${clientPhone}` →
 // { messages, lastActivity, sessionId, pendingPayload, reservationCreated }
@@ -75,6 +78,7 @@ export async function processClientBookingMessage(org, clientPhone, body) {
   let reply;
   let meta = {};
   let errorMsg = null;
+  let noReply = false;
 
   try {
     const result = await processBookingChat(org, session.messages, {
@@ -83,7 +87,8 @@ export async function processClientBookingMessage(org, clientPhone, body) {
       sessionId: session.sessionId,
       clientPhone,
     });
-    reply = result.reply || "¿En qué puedo ayudarte con tu reserva?";
+    noReply = result.noReply === true;
+    reply = noReply ? NO_REPLY_NOTE : (result.reply || "¿En qué puedo ayudarte con tu reserva?");
     meta = result._meta || {};
   } catch (err) {
     console.error("[WaBookingAgent] Error en processBookingChat:", err);
@@ -97,11 +102,16 @@ export async function processClientBookingMessage(org, clientPhone, body) {
     session.messages = session.messages.slice(-MAX_HISTORY);
   }
 
-  // Enviar la respuesta por el número Meta de la org (routing en sendMessage)
-  try {
-    await whatsappService.sendMessage(orgId, clientPhone, reply);
-  } catch (err) {
-    console.error(`[WaBookingAgent] Error enviando respuesta a ${clientPhone}:`, err.message);
+  // Mensaje sin intención de agendar (ver FILTRO DE INTENCIÓN del prompt) —
+  // no se envía nada al cliente, solo queda registrado en el historial/ChatLog.
+  if (!noReply) {
+    try {
+      await whatsappService.sendMessage(orgId, clientPhone, reply);
+    } catch (err) {
+      console.error(`[WaBookingAgent] Error enviando respuesta a ${clientPhone}:`, err.message);
+    }
+  } else {
+    console.log(`[WaBookingAgent] Sin respuesta (fuera de intención de agendar) — ${clientPhone}`);
   }
 
   // Persistir en ChatLog (mismo esquema que el booking chat web) — fire-and-forget

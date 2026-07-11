@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { buildBookingSystemPrompt } from "./bookingSystemPrompt.js";
+import { buildBookingSystemPrompt, NO_REPLY_SENTINEL } from "./bookingSystemPrompt.js";
 import {
   bookingClaudeTools,
   bookingClaudeToolsWhatsapp,
@@ -142,9 +142,14 @@ export const processBookingChat = async (organization, messages, options = {}) =
         continue;
       }
 
+      // Canal WhatsApp: el modelo puede optar por no responder (mensaje sin
+      // intención de agendar — ver FILTRO DE INTENCIÓN en el prompt).
+      const noReply = isWhatsapp && reply.trim() === NO_REPLY_SENTINEL;
+
       return {
-        reply,
+        reply: noReply ? "" : reply,
         bookingPayload,
+        noReply,
         _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false },
       };
     }
