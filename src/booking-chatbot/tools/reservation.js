@@ -166,7 +166,8 @@ export const prepareReservation = {
       required: false,
     },
   },
-  handler: async (params, { organizationId, organization }) => {
+  handler: async (params, context) => {
+    const { organizationId, organization } = context;
     const {
       services,
       startDate,
