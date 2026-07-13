@@ -15,6 +15,7 @@ import reminderJob from "./cron/reminderJob.js";
 import mpTokenRefreshJob from "./cron/mpTokenRefreshJob.js";
 import orderExpiryJob from "./cron/orderExpiryJob.js";
 import birthdayJob from "./cron/birthdayJob.js";
+import followUpReminderJob from "./cron/followUpReminderJob.js";
 import { dynamicCorsOptions } from "./middleware/corsMiddleware.js";
 
 const app = express();
@@ -148,6 +149,8 @@ dbConnection()
     console.log("⏰ Cron job iniciado: expiración de holds de reserva (cada 5 min)");
     birthdayJob.start();
     console.log("⏰ Cron job iniciado: saludos de cumpleaños (9 AM hora Colombia)");
+    followUpReminderJob.start();
+    console.log("⏰ Cron job iniciado: recordatorios de seguimiento entre servicios (10 AM hora Colombia)");
   })
   .catch((err) => {
     console.error("Failed to connect to the database", err);

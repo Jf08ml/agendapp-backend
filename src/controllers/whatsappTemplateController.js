@@ -45,6 +45,8 @@ const whatsappTemplateController = {
         classReminder: whatsappTemplates.getDefaultTemplate('classReminder'),
         // 🎂 Cumpleaños
         birthdayGreeting: whatsappTemplates.getDefaultTemplate('birthdayGreeting'),
+        // 🔁 Recordatorio de seguimiento entre servicios relacionados
+        followUpReminder: whatsappTemplates.getDefaultTemplate('followUpReminder'),
         // 🛍️ Tienda pública
         paymentReceived: whatsappTemplates.getDefaultTemplate('paymentReceived'),
         // 🔔 Mensajes del sistema (avisos al admin)
@@ -149,6 +151,12 @@ const whatsappTemplateController = {
           isCustom: !!customTemplates.birthdayGreeting,
           variables: ['{{names}}', '{{organization}}', '{{beneficio}}'],
         },
+        // 🔁 Recordatorio de seguimiento entre servicios relacionados
+        followUpReminder: {
+          content: customTemplates.followUpReminder || defaultTemplates.followUpReminder,
+          isCustom: !!customTemplates.followUpReminder,
+          variables: ['{{names}}', '{{organization}}', '{{service}}', '{{originalService}}', '{{days}}'],
+        },
         // 🛍️ Tienda pública
         paymentReceived: {
           content: customTemplates.paymentReceived || defaultTemplates.paymentReceived,
@@ -209,6 +217,7 @@ const whatsappTemplateController = {
         'classEnrollmentCancelled',
         'classReminder',
         'birthdayGreeting',
+        'followUpReminder',
         'paymentReceived',
         'adminPaymentAlert',
         'adminNewOrderAlert',
@@ -285,6 +294,7 @@ const whatsappTemplateController = {
         'classEnrollmentCancelled',
         'classReminder',
         'birthdayGreeting',
+        'followUpReminder',
         'paymentReceived',
         'adminPaymentAlert',
         'adminNewOrderAlert',
@@ -358,6 +368,7 @@ const whatsappTemplateController = {
         'classEnrollmentCancelled',
         'classReminder',
         'birthdayGreeting',
+        'followUpReminder',
         'paymentReceived',
         'adminPaymentAlert',
         'adminNewOrderAlert',
@@ -433,6 +444,9 @@ const whatsappTemplateController = {
         recommendations: `\n\n📝 *Recomendaciones:*\n• Llegar 10 minutos antes\n• Traer el cabello limpio y seco`,
         reward: "1 servicio gratis en tu próxima visita",
         beneficio: "20% de descuento en tu próximo servicio",
+        // 🔁 Recordatorio de seguimiento entre servicios relacionados
+        originalService: "Montura de pestañas pelo a pelo",
+        days: "20",
         // 📚 Módulo de Clases
         className: "Yoga para principiantes",
         startTime: "07:00 AM",
@@ -507,6 +521,7 @@ const whatsappTemplateController = {
           classEnrollmentCancelled: true,
           classReminder: true,
           birthdayGreeting: false,
+          followUpReminder: false,
           paymentReceived: true,
           adminPaymentAlert: true,
           adminNewOrderAlert: true,
@@ -532,6 +547,7 @@ const whatsappTemplateController = {
         classEnrollmentCancelled: true,
         classReminder: true,
         birthdayGreeting: false,
+        followUpReminder: false,
         paymentReceived: true,
         adminPaymentAlert: true,
         adminNewOrderAlert: true,
@@ -576,6 +592,7 @@ const whatsappTemplateController = {
         'classEnrollmentCancelled',
         'classReminder',
         'birthdayGreeting',
+        'followUpReminder',
         'paymentReceived',
         'adminPaymentAlert',
         'adminNewOrderAlert',

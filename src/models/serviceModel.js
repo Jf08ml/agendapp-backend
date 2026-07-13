@@ -24,6 +24,10 @@ const serviceSchema = new Schema({
   recommendations: { type: String, default: null },
   // 💸 Gastos por insumos/materiales (vacío = sin gastos registrados)
   costs: { type: [serviceCostSchema], default: [] },
+  // 🔁 Recordatorio de seguimiento: servicio relacionado a recomendar N días después
+  // (ej: "Montura de pestañas" → "Retoque" a los 20 días). Ambos null = sin seguimiento.
+  followUpServiceId: { type: Types.ObjectId, ref: "Service", default: null },
+  followUpDays: { type: Number, default: null, min: 1 },
 });
 
 export default model("Service", serviceSchema);

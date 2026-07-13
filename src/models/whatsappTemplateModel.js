@@ -88,6 +88,11 @@ const whatsappTemplateSchema = new mongoose.Schema(
           type: Boolean,
           default: false,
         },
+        // 🔁 Recordatorio de seguimiento entre servicios relacionados (desactivado por defecto)
+        followUpReminder: {
+          type: Boolean,
+          default: false,
+        },
         // 🛍️ Pago recibido (tienda pública) — transaccional, activo por defecto
         paymentReceived: {
           type: Boolean,
@@ -122,6 +127,7 @@ const whatsappTemplateSchema = new mongoose.Schema(
         classEnrollmentCancelled: true,
         classReminder: true,
         birthdayGreeting: false,
+        followUpReminder: false,
         paymentReceived: true,
         adminPaymentAlert: true,
         adminNewOrderAlert: true,
@@ -200,6 +206,11 @@ const whatsappTemplateSchema = new mongoose.Schema(
     },
     // 🎂 Saludo de cumpleaños
     birthdayGreeting: {
+      type: String,
+      default: null, // null = usar template por defecto del sistema
+    },
+    // 🔁 Recordatorio de seguimiento entre servicios relacionados
+    followUpReminder: {
       type: String,
       default: null, // null = usar template por defecto del sistema
     },

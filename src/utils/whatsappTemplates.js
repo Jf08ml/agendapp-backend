@@ -234,6 +234,15 @@ De parte de todo el equipo de *{{organization}}*, te deseamos un día lleno de a
 
 ¡Gracias por ser parte de nuestra familia! Te esperamos pronto para celebrarlo. 💖`,
 
+      // 🔁 Recordatorio de seguimiento entre servicios relacionados (ej: retoque)
+      followUpReminder: `✨ ¡Hola, {{names}}!
+
+Ya pasaron {{days}} días desde tu *{{originalService}}* en *{{organization}}*.
+
+Es un buen momento para agendar tu *{{service}}* y mantener tu resultado al día.
+
+Si tienes alguna pregunta o quieres agendar, responde a este mensaje. ¡Te esperamos! 💖`,
+
       // 🛍️ Pago recibido (pedido de la tienda pública)
       paymentReceived: `✅ ¡Hola, {{names}}!
 

@@ -20,6 +20,9 @@
  *   cita_pal        → cita_o_citas
  *   agendada_pal    → agendada_o_agendadas
  *   recommendations → recomendaciones
+ *   days            → dias
+ *   originalService → servicio_original
+ *   service (followUpReminder) → servicio_seguimiento
  */
 
 import { listTemplates, sendTemplateMessage, getOrgPrefix } from "./metaTemplateService.js";
@@ -46,6 +49,8 @@ const META_TEMPLATE_NAMES = {
   classReminder:             "recordatorio_clase",
   // 🎂 Cumpleaños
   birthdayGreeting:          "cumpleanos_cliente",
+  // 🔁 Recordatorio de seguimiento entre servicios relacionados
+  followUpReminder:          "recordatorio_seguimiento",
   // 🛍️ Tienda pública
   paymentReceived:           "pago_recibido",
   // 🔔 Mensajes del sistema (avisos al admin)
@@ -90,6 +95,8 @@ const VARIABLE_ORDER = {
   recordatorio_clase:      ["nombre_cliente", "nombre_clase", "fecha_clase", "hora_inicio", "hora_fin", "nombre_negocio", "direccion"],
   // 🎂 Cumpleaños
   cumpleanos_cliente:      ["nombre_cliente", "nombre_negocio", "beneficio"],
+  // 🔁 Recordatorio de seguimiento entre servicios relacionados
+  recordatorio_seguimiento: ["nombre_cliente", "dias", "servicio_original", "nombre_negocio", "servicio_seguimiento"],
   // 🛍️ Tienda pública
   pago_recibido:           ["nombre_cliente", "nombre_negocio", "monto", "detalle_pedido"],
   // 🔔 Mensajes del sistema (avisos al admin)
@@ -123,6 +130,10 @@ function buildMetaVarMap(data) {
     hora_fin:             data.endTime            ?? "",
     precio:               data.price              ?? "",
     beneficio:            data.beneficio          ?? "",
+    // 🔁 Recordatorio de seguimiento entre servicios relacionados
+    dias:                 String(data.days        ?? ""),
+    servicio_original:    data.originalService    ?? "",
+    servicio_seguimiento: data.service            ?? "",
     // 🛍️ Tienda pública
     monto:                data.monto              ?? "",
     detalle_pedido:       data.detalle            ?? "",
