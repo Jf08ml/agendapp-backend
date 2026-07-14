@@ -23,6 +23,50 @@ const MAX_HISTORY = 30;
 // nunca se envía al cliente por WhatsApp.
 const NO_REPLY_NOTE = "(sin respuesta — mensaje sin intención de agendar)";
 
+// ── Pausa del bot por comando del cliente ────────────────────────────────────
+// Permite que un cliente silencie al bot en su chat (ej: el número también se
+// usa para contactos personales del negocio) y lo reactive cuando quiera agendar.
+const PAUSE_HOURS = 24;
+const PAUSE_TTL_MS = PAUSE_HOURS * 60 * 60 * 1000;
+const PAUSE_COMMANDS = new Set(["pausar", "pausar bot", "pausa", "pausa bot", "detener bot"]);
+const RESUME_COMMANDS = new Set(["agendar", "reservar", "activar bot", "reactivar", "reactivar bot"]);
+const PAUSE_ACK_MESSAGE = `Listo, no te voy a escribir por las próximas ${PAUSE_HOURS} horas 🤫. Si quieres agendar antes, respóndeme *AGENDAR*.`;
+const PAUSE_HINT_SUFFIX = `\n\n_Si no eres cliente o prefieres que no te escriba por un rato, respóndeme *PAUSAR* y no te enviaré mensajes en ${PAUSE_HOURS} horas._`;
+
+// Normaliza para comparar comandos: minúsculas, sin tildes, sin signos.
+function normalizeCommand(text) {
+  return String(text || "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[¡!¿?.,]/g, "")
+    .trim();
+}
+
+// `${orgId}:${clientPhone}` → timestamp (ms) hasta cuándo está pausado.
+// Deliberadamente separado de `sessions`: una pausa de horas debe sobrevivir
+// aunque el cliente no escriba nada en ese tiempo (`sessions` sí expira a los
+// 30 min de inactividad).
+const pausedClients = new Map();
+
+function getPauseUntil(key) {
+  const until = pausedClients.get(key);
+  if (!until) return null;
+  if (Date.now() >= until) {
+    pausedClients.delete(key);
+    return null;
+  }
+  return until;
+}
+
+// Limpieza periódica de pausas expiradas para no acumular memoria.
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, until] of pausedClients.entries()) {
+    if (now >= until) pausedClients.delete(key);
+  }
+}, PAUSE_TTL_MS).unref();
+
 // Historial en memoria: `${orgId}:${clientPhone}` →
 // { messages, lastActivity, sessionId, pendingPayload, reservationCreated }
 const sessions = new Map();
@@ -67,12 +111,31 @@ setInterval(() => {
 export async function processClientBookingMessage(org, clientPhone, body) {
   const orgId = org._id.toString();
   const startedAt = Date.now();
+  const pauseKey = `${orgId}:${clientPhone}`;
+
+  const normalized = normalizeCommand(body);
+  const isPauseCommand = PAUSE_COMMANDS.has(normalized);
+  const isResumeCommand = RESUME_COMMANDS.has(normalized);
+  const pausedUntil = getPauseUntil(pauseKey);
+
+  // El cliente pausó el bot explícitamente — no lo interrumpimos ni gastamos IA,
+  // salvo que este mensaje sea justo el comando de reactivación.
+  if (pausedUntil && !isResumeCommand) {
+    console.log(
+      `[WaBookingAgent] Ignorado (pausado hasta ${new Date(pausedUntil).toISOString()}) — ${clientPhone}`
+    );
+    return;
+  }
+  if (isResumeCommand && pausedUntil) {
+    pausedClients.delete(pauseKey);
+  }
 
   console.log(
     `[WaBookingAgent] Mensaje de cliente — org: ${org.name} — ${clientPhone} — "${body.slice(0, 80)}"`
   );
 
   const session = getOrCreateSession(orgId, clientPhone);
+  const isFirstMessageInSession = session.messages.length === 0;
   session.messages.push({ role: "user", content: body });
 
   let reply;
@@ -80,21 +143,33 @@ export async function processClientBookingMessage(org, clientPhone, body) {
   let errorMsg = null;
   let noReply = false;
 
-  try {
-    const result = await processBookingChat(org, session.messages, {
-      channel: "whatsapp",
-      session,
-      sessionId: session.sessionId,
-      clientPhone,
-    });
-    noReply = result.noReply === true;
-    reply = noReply ? NO_REPLY_NOTE : (result.reply || "¿En qué puedo ayudarte con tu reserva?");
-    meta = result._meta || {};
-  } catch (err) {
-    console.error("[WaBookingAgent] Error en processBookingChat:", err);
-    errorMsg = err.message;
-    reply =
-      "Lo siento, tuve un problema procesando tu mensaje. Intenta de nuevo en un momento.";
+  if (isPauseCommand) {
+    // Comando de pausa: respuesta fija (no depende del modelo) para garantizar
+    // el texto exacto, y sin invocar al asistente en absoluto.
+    reply = PAUSE_ACK_MESSAGE;
+    pausedClients.set(pauseKey, Date.now() + PAUSE_TTL_MS);
+  } else {
+    try {
+      const result = await processBookingChat(org, session.messages, {
+        channel: "whatsapp",
+        session,
+        sessionId: session.sessionId,
+        clientPhone,
+      });
+      noReply = result.noReply === true;
+      reply = noReply ? NO_REPLY_NOTE : (result.reply || "¿En qué puedo ayudarte con tu reserva?");
+      meta = result._meta || {};
+    } catch (err) {
+      console.error("[WaBookingAgent] Error en processBookingChat:", err);
+      errorMsg = err.message;
+      reply =
+        "Lo siento, tuve un problema procesando tu mensaje. Intenta de nuevo en un momento.";
+    }
+
+    // Primer mensaje de la sesión: informar del comando de pausa junto al saludo.
+    if (isFirstMessageInSession && !noReply && reply) {
+      reply += PAUSE_HINT_SUFFIX;
+    }
   }
 
   session.messages.push({ role: "assistant", content: reply });
