@@ -506,6 +506,21 @@ const organizationSchema = new mongoose.Schema({
     },
   },
 
+  // 🛍️ Configuración del formulario de comprador en la tienda pública
+  // (independiente de clientFormConfig: la tienda es para público general,
+  // no necesariamente los mismos clientes/pacientes de las citas)
+  storeFormConfig: {
+    identifierField: {
+      type: String,
+      enum: ['phone', 'email', 'documentId'],
+      default: 'phone',
+    },
+    fields: {
+      type: [ClientFieldConfigSchema],
+      default: [],
+    },
+  },
+
   // 🚫 Política de cancelación de citas
   cancellationPolicy: {
     minHoursBeforeAppointment: {

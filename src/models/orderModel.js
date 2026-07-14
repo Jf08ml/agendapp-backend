@@ -31,11 +31,15 @@ const StoreOrderSchema = new mongoose.Schema(
       name: { type: String },
       phone: { type: String },
       email: { type: String },
+      documentId: { type: String },
     },
     delivery: {
       mode: { type: String, enum: ["pickup", "delivery"] },
       address: { type: String },
       notes: { type: String },
+      // 📍 Punto exacto (opcional) capturado con el mini-mapa en el checkout
+      lat: { type: Number },
+      lng: { type: Number },
     },
     fulfillmentStatus: {
       type: String,

@@ -173,6 +173,7 @@ const organizationService = {
       allowedHolidayDates,
       hasAccessBlocked,
       clientFormConfig,
+      storeFormConfig,
       termsAndConditions,
       waPhone,
       waAgentEnabled,
@@ -391,6 +392,14 @@ const organizationService = {
       organization.clientFormConfig = {
         identifierField: clientFormConfig.identifierField ?? organization.clientFormConfig?.identifierField ?? 'phone',
         fields: Array.isArray(clientFormConfig.fields) ? clientFormConfig.fields : organization.clientFormConfig?.fields ?? [],
+      };
+    }
+
+    // 🛍️ Configuración del formulario de comprador en la tienda pública (independiente de clientFormConfig)
+    if (storeFormConfig !== undefined) {
+      organization.storeFormConfig = {
+        identifierField: storeFormConfig.identifierField ?? organization.storeFormConfig?.identifierField ?? 'phone',
+        fields: Array.isArray(storeFormConfig.fields) ? storeFormConfig.fields : organization.storeFormConfig?.fields ?? [],
       };
     }
 

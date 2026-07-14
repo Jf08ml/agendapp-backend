@@ -207,11 +207,15 @@ export async function createStoreOrder({
         name: customer?.name || "",
         phone: customer?.phone || "",
         email: customer?.email || "",
+        documentId: customer?.documentId || "",
       },
       delivery: {
         mode: delivery?.mode || "pickup",
         address: delivery?.address || "",
         notes: delivery?.notes || "",
+        ...(Number.isFinite(delivery?.lat) && Number.isFinite(delivery?.lng)
+          ? { lat: delivery.lat, lng: delivery.lng }
+          : {}),
       },
       fulfillmentStatus: "pending",
     },

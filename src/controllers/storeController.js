@@ -38,11 +38,43 @@ const COD_METHODS = ["cash", "card", "transfer", "other"];
 // Helpers de validación (compartidos por los 3 checkouts)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Valida y normaliza el snapshot del comprador + la modalidad de entrega. */
-function validateCustomerAndDelivery(customer, delivery) {
-  if (!customer?.name || !customer?.phone) {
-    throw new Error("Faltan los datos del comprador (nombre y teléfono).");
+// Config por defecto cuando la organización no tiene storeFormConfig.fields
+// configurado (equivalente a DEFAULT_STORE_FORM_CONFIG del frontend): mismo
+// comportamiento que existía antes de que el formulario fuera configurable.
+const DEFAULT_STORE_FORM_FIELDS = [
+  { key: "name", enabled: true, required: true },
+  { key: "phone", enabled: true, required: true },
+  { key: "email", enabled: true, required: false },
+  { key: "documentId", enabled: false, required: false },
+];
+
+/**
+ * Valida y normaliza el snapshot del comprador + la modalidad de entrega,
+ * según el `storeFormConfig` de la organización (independiente del
+ * `clientFormConfig` usado para citas — la tienda es para público general).
+ */
+function validateCustomerAndDelivery(customer, delivery, org) {
+  const storeFormConfig = org?.storeFormConfig;
+  const identifierField = storeFormConfig?.identifierField || "phone";
+  const fields = storeFormConfig?.fields?.length ? storeFormConfig.fields : DEFAULT_STORE_FORM_FIELDS;
+  const fieldCfg = (key) => fields.find((f) => f.key === key) ?? { key, enabled: false, required: false };
+
+  if (!customer?.name?.trim()) {
+    throw new Error("Falta el nombre del comprador.");
   }
+  // El teléfono siempre es obligatorio: el negocio necesita poder contactar al comprador.
+  if (!customer?.phone?.trim()) {
+    throw new Error("Falta el teléfono del comprador.");
+  }
+  const emailRequired = fieldCfg("email").required || identifierField === "email";
+  if (emailRequired && !customer?.email?.trim()) {
+    throw new Error("El correo electrónico es obligatorio.");
+  }
+  const documentIdRequired = fieldCfg("documentId").required || identifierField === "documentId";
+  if (documentIdRequired && !customer?.documentId?.trim()) {
+    throw new Error("El número de documento es obligatorio.");
+  }
+
   const mode = delivery?.mode;
   if (!["pickup", "delivery"].includes(mode)) {
     throw new Error("Modalidad de entrega inválida (pickup | delivery).");
@@ -50,16 +82,23 @@ function validateCustomerAndDelivery(customer, delivery) {
   if (mode === "delivery" && !String(delivery?.address || "").trim()) {
     throw new Error("La dirección es obligatoria para entregas a domicilio.");
   }
+
+  const lat = Number(delivery?.lat);
+  const lng = Number(delivery?.lng);
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+
   return {
     customer: {
       name: String(customer.name).trim(),
       phone: String(customer.phone).trim(),
       email: customer.email ? String(customer.email).trim() : "",
+      documentId: customer.documentId ? String(customer.documentId).trim() : "",
     },
     delivery: {
       mode,
       address: String(delivery?.address || "").trim(),
       notes: String(delivery?.notes || "").trim(),
+      ...(hasCoords ? { lat, lng } : {}),
     },
   };
 }
@@ -196,7 +235,7 @@ export const createStoreCheckout = async (req, res) => {
       return sendResponse(res, 400, null, "La organización no tiene Mercado Pago conectado.");
     }
 
-    const buyer = validateCustomerAndDelivery(customer, delivery);
+    const buyer = validateCustomerAndDelivery(customer, delivery, org);
     const validated = await validateStoreItems(org, items);
 
     const order = await orderService.createStoreOrder({
@@ -248,7 +287,7 @@ export const createStoreCodOrder = async (req, res) => {
       return sendResponse(res, 400, null, "La organización no acepta pago contraentrega.");
     }
 
-    const buyer = validateCustomerAndDelivery(customer, delivery);
+    const buyer = validateCustomerAndDelivery(customer, delivery, org);
     const validated = await validateStoreItems(org, items);
 
     const order = await orderService.createStoreOrder({
@@ -297,7 +336,7 @@ export const createReceiptStoreCheckout = async (req, res) => {
       return sendResponse(res, 400, null, "La organización no tiene métodos de pago configurados.");
     }
 
-    const buyer = validateCustomerAndDelivery(customer, delivery);
+    const buyer = validateCustomerAndDelivery(customer, delivery, org);
     const validated = await validateStoreItems(org, items);
 
     const order = await orderService.createStoreOrder({
