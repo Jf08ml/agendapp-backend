@@ -293,6 +293,7 @@ const appointmentService = {
       skipNotification = false, // 🔇 Nueva opción para no enviar WhatsApp
       sharedGroupId = null, // 🔗 GroupId compartido (opcional)
       sharedTokenHash = null, // 🔗 Token hash compartido (opcional)
+      sharedCancellationLink = null, // 🔗 Enlace de cancelación del token compartido (el hash no permite reconstruirlo)
       customDurations = {}, // 🕐 Duraciones personalizadas por servicio (en minutos)
       clientPackageId = null, // 📦 Paquete de sesiones del cliente
       usePackageForServices = {}, // 📦 Mapeo serviceId -> clientPackageId
@@ -346,10 +347,11 @@ const appointmentService = {
       console.log('🔑 Token nuevo generado para grupo:', groupId);
     }
 
-    // Enlace único para confirmar/cancelar el grupo (solo si tenemos el token en texto plano)
+    // Enlace único para confirmar/cancelar el grupo: del token propio, o el que
+    // provee el caller cuando el token compartido se generó afuera (aquí solo llega el hash)
     const groupCancellationLink = groupCancelToken
       ? generateCancellationLink(groupCancelToken, org)
-      : null;
+      : sharedCancellationLink;
 
     try {
       session.startTransaction();
@@ -688,6 +690,7 @@ const appointmentService = {
     // Generar groupId y cancelToken compartidos para todo el conjunto
     const sharedGroupId = new mongoose.Types.ObjectId();
     const { token: cancelToken, hash: cancelTokenHash } = cancellationService.generateCancelToken();
+    const sharedCancellationLink = generateCancellationLink(cancelToken, org);
 
     // Crear citas de cada bloque en secuencia (dentro de una sola operación atómica por bloque)
     const allCreated = [];
@@ -706,6 +709,7 @@ const appointmentService = {
         skipNotification: true,
         sharedGroupId,
         sharedTokenHash: cancelTokenHash,
+        sharedCancellationLink,
         skipConcurrencyCheck,
       });
       allCreated.push(...(created || []));
@@ -715,7 +719,7 @@ const appointmentService = {
     (async () => {
       try {
         const orgTimeFormat = org.timeFormat || '12h';
-        const cancellationLink = generateCancellationLink(cancelToken, org);
+        const cancellationLink = sharedCancellationLink;
 
         const clientDoc = typeof client === 'string'
           ? await clientService.getClientById(client)

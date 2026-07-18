@@ -224,6 +224,7 @@ async function _handleRecurringReservation(req, res, ctx) {
               skipNotification: true,
               sharedGroupId,
               sharedTokenHash,
+              sharedCancellationLink: cancellationLink, // 🔗 Persistir el enlace en las citas (para recordatorios)
               ...(clientPackageId ? { clientPackageId } : {}),
             });
 
@@ -728,6 +729,7 @@ const reservationController = {
           // 3) Generar UN groupId y token compartido para TODAS las citas
           const sharedGroupId = new mongoose.Types.ObjectId();
           const { token: sharedToken, hash: sharedTokenHash } = cancellationService.generateCancelToken();
+          const cancellationLink = generateCancellationLink(sharedToken, org);
           console.log('🔑 Token compartido generado para reserva múltiple:', sharedGroupId);
           
           const allServiceIds = normalized.map(n => n.serviceId);
@@ -754,6 +756,7 @@ const reservationController = {
               skipNotification: true, // 🔇 No enviar mensaje aún
               sharedGroupId, // 🔗 Mismo groupId para todas las citas
               sharedTokenHash, // 🔗 Mismo token hash para todas las citas
+              sharedCancellationLink: cancellationLink, // 🔗 Persistir el enlace en las citas (para recordatorios)
               ...(clientPackageId ? { clientPackageId } : {}), // 📦 Paquete de sesiones
             });
 
@@ -847,9 +850,7 @@ const reservationController = {
               ? fmt(firstStart, timezone)
               : `${fmt(firstStart, timezone)} – ${fmtTime(lastEnd, timezone)}`;
 
-            // Usar el token compartido que ya se generó arriba
-            const cancellationLink = generateCancellationLink(sharedToken, org);
-
+            // cancellationLink ya generado junto con el token compartido (arriba)
             const templateData = {
               names: customerDetails.name || "Estimado cliente",
               dateRange,

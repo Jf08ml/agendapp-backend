@@ -287,6 +287,7 @@ const reservationService = {
                   skipNotification: true, // No notificar individualmente
                   sharedGroupId,
                   sharedTokenHash, // 🔐 Token compartido para cancelar toda la serie
+                  sharedCancellationLink: cancellationLink, // 🔗 Persistir el enlace en las citas (para recordatorios)
                   skipConcurrencyCheck: !!forceApprove,
                   ...(groupClientPackageId ? { clientPackageId: groupClientPackageId } : {}),
                 });
