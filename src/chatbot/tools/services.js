@@ -32,6 +32,7 @@ export default [
       description: { type: "string", description: "Descripción breve del servicio para mostrársela al cliente (opcional)", required: false },
       recommendations: { type: "string", description: "Recomendaciones o instrucciones para el cliente antes de la cita (ej: 'Llegar sin maquillaje', 'No consumir cafeína 2h antes'). Opcional.", required: false },
       maxConcurrentAppointments: { type: "number", description: "Número de clientes que pueden ser atendidos simultáneamente por un profesional para este servicio. Por defecto 1. Útil para clases grupales o consultas múltiples.", required: false },
+      featured: { type: "boolean", description: "Marcar como servicio destacado (⭐): se muestra de primero en la página pública, el wizard de reserva y el chatbot de reservas. Úsalo solo si el usuario lo pide explícitamente.", required: false },
       costs: {
         type: "array",
         description: "Lista de gastos de insumos o materiales que genera este servicio. Cada item tiene 'concept' (descripción del gasto) y 'amount' (valor). Opcional.",
@@ -105,6 +106,7 @@ export default [
         recommendations: params.recommendations || null,
         maxConcurrentAppointments: params.maxConcurrentAppointments ?? 1,
         costs: Array.isArray(params.costs) ? params.costs : [],
+        featured: params.featured === true,
         organizationId: context.organizationId,
       });
       return {
@@ -115,17 +117,21 @@ export default [
           duration: service.duration,
           price: service.price,
           maxConcurrentAppointments: service.maxConcurrentAppointments,
+          featured: service.featured,
         },
       };
     },
   },
   {
     name: "get_services",
-    description: "Obtiene la lista de servicios configurados en la organización.",
+    description: "Obtiene la lista de servicios configurados en la organización (destacados primero).",
     parameters: {},
     handler: async (_params, context) => {
       const services = await Service.find({ organizationId: context.organizationId, isActive: true })
-        .select("name duration price description maxConcurrentAppointments");
+        .select("name duration price description maxConcurrentAppointments featured")
+        .sort({ _id: 1 });
+      // Sort estable en JS: en BSON el campo ausente ordena distinto que false explícito
+      services.sort((a, b) => (b.featured === true ? 1 : 0) - (a.featured === true ? 1 : 0));
       return {
         success: true,
         services: services.map((s) => ({
@@ -134,6 +140,7 @@ export default [
           duration: s.duration,
           price: s.price,
           maxConcurrentAppointments: s.maxConcurrentAppointments,
+          featured: s.featured === true,
         })),
       };
     },
@@ -208,6 +215,7 @@ export default [
             recommendations: item.recommendations || null,
             maxConcurrentAppointments: item.maxConcurrentAppointments ?? 1,
             costs: Array.isArray(item.costs) ? item.costs : [],
+            featured: item.featured === true,
             organizationId: context.organizationId,
           });
           knownNorms.push({ id: doc._id, name: doc.name, norm: normalizeForCompare(doc.name) });

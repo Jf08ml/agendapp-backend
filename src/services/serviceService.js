@@ -3,7 +3,7 @@ import Service from "../models/serviceModel.js";
 const serviceService = {
   // Crear un nuevo servicio
   createService: async (serviceData) => {
-    const { images, name, description, price, duration, type, organizationId, icon } =
+    const { images, name, description, price, duration, type, organizationId, icon, featured } =
       serviceData;
     const newService = new Service({
       images,
@@ -13,7 +13,8 @@ const serviceService = {
       duration,
       type,
       organizationId,
-      icon
+      icon,
+      featured: featured === true,
     });
     return await newService.save();
   },
@@ -24,8 +25,13 @@ const serviceService = {
   },
 
   // Obtener servicios por organizationId
+  // ⭐ Destacados primero. El sort es en JS (estable) y no en Mongo porque en BSON
+  // el campo ausente (docs legacy) ordena distinto que false explícito.
   getServicesByOrganizationId: async (organizationId) => {
-    return await Service.find({ organizationId });
+    const services = await Service.find({ organizationId }).sort({ _id: 1 });
+    return services.sort(
+      (a, b) => (b.featured === true ? 1 : 0) - (a.featured === true ? 1 : 0)
+    );
   },
 
   // Obtener un servicio por ID
@@ -112,6 +118,7 @@ const serviceService = {
           price: price,
           duration: duration,
           hidePrice: row.hidePrice === true || row.hidePrice === 'true' || row.hidePrice === 'Sí' || row.hidePrice === 'Si',
+          featured: row.featured === true || row.featured === 'true' || row.featured === 'Sí' || row.featured === 'Si',
           maxConcurrentAppointments: maxConcurrentAppointments,
           organizationId,
           isActive: isActive,
