@@ -2,6 +2,7 @@ import Organization from "../../models/organizationModel.js";
 import Service from "../../models/serviceModel.js";
 import Employee from "../../models/employeeModel.js";
 import { markOnboardingMilestone } from "../../utils/onboardingMilestones.js";
+import { resolveBaseUrl } from "../../utils/cancellationUtils.js";
 
 const DAY_MAP = { domingo: 0, lunes: 1, martes: 2, miercoles: 3, miércoles: 3, jueves: 4, viernes: 5, sabado: 6, sábado: 6 };
 const DAY_NAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
@@ -35,30 +36,54 @@ export default [
         whatsapp: organization.whatsappUrl || null,
         instagram: organization.instagramUrl || null,
         facebook: organization.facebookUrl || null,
+        // Link público de reservas en línea — es EL link que el negocio comparte
+        // con sus clientes para que reserven solos.
+        bookingUrl: `${resolveBaseUrl(organization)}/online-reservation`,
       };
     },
   },
   {
     name: "get_setup_status",
     description:
-      "Verifica el estado actual de configuración de la organización: cuántos servicios y profesionales tiene, si tiene horario configurado, etc. Úsalo al inicio para saber qué falta configurar.",
+      "Verifica el estado actual de configuración de la organización: qué servicios y profesionales ya existen (con nombres), si el horario y la política de reserva ya están configurados, y el link público de reservas. Úsalo SIEMPRE al inicio del onboarding para saber qué ya está hecho y en qué paso continuar — nunca asumas que se empieza de cero.",
     parameters: {},
     handler: async (_params, context) => {
-      const [servicesCount, employeesCount, org] = await Promise.all([
-        Service.countDocuments({ organizationId: context.organizationId, isActive: true }),
-        Employee.countDocuments({ organizationId: context.organizationId, isActive: true }),
-        Organization.findById(context.organizationId).select("name timezone bookingConfig weeklySchedule setupCompleted"),
+      const [services, employees, org] = await Promise.all([
+        Service.find({ organizationId: context.organizationId, isActive: true })
+          .select("name")
+          .limit(30)
+          .lean(),
+        Employee.find({ organizationId: context.organizationId, isActive: true })
+          .select("names")
+          .limit(30)
+          .lean(),
+        Organization.findById(context.organizationId).select(
+          "name timezone weeklySchedule setupCompleted reservationPolicy branding domains slug"
+        ),
       ]);
+
+      // weeklySchedule es un objeto { enabled, schedule: [], stepMinutes } —
+      // el horario cuenta como configurado solo si está habilitado y tiene días.
+      const hasSchedule = !!(org?.weeklySchedule?.enabled && org?.weeklySchedule?.schedule?.length);
+      const scheduleLines = hasSchedule ? formatWeeklySchedule(org.weeklySchedule) : null;
 
       return {
         success: true,
         status: {
           organizationName: org?.name,
-          servicesCount,
-          employeesCount,
-          hasSchedule: !!(org?.weeklySchedule?.length),
-          bookingIntervalMinutes: org?.bookingConfig?.slotDuration || null,
+          servicesCount: services.length,
+          serviceNames: services.map((s) => s.name),
+          employeesCount: employees.length,
+          employeeNames: employees.map((e) => e.names),
+          hasSchedule,
+          schedule: scheduleLines,
+          bookingIntervalMinutes: org?.weeklySchedule?.stepMinutes || null,
+          // "manual" es también el valor por defecto — si el usuario aún no eligió,
+          // trátalo como paso pendiente salvo que la conversación diga lo contrario.
+          reservationPolicy: org?.reservationPolicy || "manual",
+          primaryColor: org?.branding?.primaryColor || null,
           setupCompleted: org?.setupCompleted || false,
+          bookingUrl: `${resolveBaseUrl(org)}/online-reservation`,
         },
       };
     },

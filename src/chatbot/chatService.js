@@ -4,6 +4,8 @@ import { buildSystemPrompt } from "./systemPrompt.js";
 import { claudeTools, executeTool } from "./toolRegistry.js";
 import Service from "../models/serviceModel.js";
 import Employee from "../models/employeeModel.js";
+import Organization from "../models/organizationModel.js";
+import { markOnboardingMilestone } from "../utils/onboardingMilestones.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -67,12 +69,54 @@ const CRUD_CLAIM_PATTERN = new RegExp(
 const CREATION_INTENT_PATTERN =
   /\b(crea|crear|creame|créame|cream[eo]s|agrega|agregar|agrégame|añad[ei]|asigna|asignar|asígnale|asígname|registra|registrar|dame de alta|da de alta|suma|sumar)\b/i;
 
+// Claims de configuración afirmados en pasado sin haber llamado la tool:
+// "✅ Aprobación automática configurada", "la política de reserva quedó..." —
+// caso real observado en logs de onboarding (la org quedó en manual creyendo
+// que era automática). El patrón es estrecho a propósito: la pregunta del PASO 4
+// ("¿quieres aprobarla manualmente o que se confirme automáticamente?") no matchea.
+const POLICY_CLAIM_PATTERN =
+  /\b(aprobaci[oó]n|pol[ií]tica)\b.{0,60}\b(configurad|activad|establecid|guardad|qued[oó]|list[ao]\b)/i;
+
+// "¡Configuración inicial completada!" / "tu negocio ya está configurado" sin
+// mark_setup_complete — deja al usuario atrapado rebotando al wizard.
+const SETUP_DONE_CLAIM_PATTERN =
+  /\bconfiguraci[oó]n\b.{0,60}\b(complet|finaliz|list[ao]\b)|\b(ya\s+est[aá]|qued[oó])\s+configurad/i;
+
 const findLastUserText = (messages) => {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m.role === "user" && typeof m.content === "string") return m.content;
   }
   return "";
+};
+
+// Cierre determinista del onboarding: si los criterios reales ya se cumplen
+// (≥1 servicio, ≥1 profesional, horario habilitado), marca setupCompleted +
+// milestone del funnel SIN depender de que el modelo llame mark_setup_complete
+// (en producción el modelo lo olvida con frecuencia y la org queda atrapada
+// rebotando al wizard). Se consulta estado FRESCO — las tools de este turno
+// pudieron haber creado servicios/horario después de construirse el context.
+// Devuelve true si completó el setup en esta llamada.
+const autoCompleteSetupIfReady = async (organizationId) => {
+  try {
+    const [servicesCount, employeesCount, org] = await Promise.all([
+      Service.countDocuments({ organizationId, isActive: true }),
+      Employee.countDocuments({ organizationId, isActive: true }),
+      Organization.findById(organizationId).select("setupCompleted weeklySchedule").lean(),
+    ]);
+    if (!org || org.setupCompleted) return false;
+    const hasSchedule = !!(org.weeklySchedule?.enabled && org.weeklySchedule?.schedule?.length);
+    if (servicesCount === 0 || employeesCount === 0 || !hasSchedule) return false;
+
+    await Organization.updateOne({ _id: organizationId }, { $set: { setupCompleted: true } });
+    await markOnboardingMilestone(organizationId, "setupCompletedAt");
+    console.log(`[chatService] Setup autocompletado server-side — org=${organizationId}`);
+    return true;
+  } catch (err) {
+    // Nunca romper el chat por la instrumentación
+    console.error("[chatService] autoCompleteSetupIfReady:", err?.message || err);
+    return false;
+  }
 };
 
 export const processChat = async (organization, user, messages) => {
@@ -109,32 +153,66 @@ export const processChat = async (organization, user, messages) => {
         extractText(response.content) ||
         "Listo, ya quedó registrado. ¿Hay algo más en lo que te pueda ayudar?";
 
-      // Guard: el bot afirma que creó/agregó/asignó un servicio o profesional pero
-      // nunca llamó la herramienta correspondiente en esta conversación, Y el
-      // usuario sí pidió esa acción en su último mensaje (para no disparar esto
-      // cuando solo está preguntando por algo creado en un turno anterior).
+      // Guards anti-alucinación: el bot afirma haber hecho algo sin haber llamado
+      // la herramienta correspondiente. Se inyecta una corrección [SISTEMA] y se
+      // repite la ronda para que ejecute la tool de verdad.
+      let correction = null;
+
+      // 1) Claims de creación/asignación (servicio/profesional) sin tool de mutación,
+      //    Y el usuario sí pidió esa acción en su último mensaje (para no disparar
+      //    esto cuando solo pregunta por algo creado en un turno anterior).
       const calledMutationTool = [...executedTools].some((t) => MUTATION_TOOLS.has(t));
       if (
         !calledMutationTool &&
         CRUD_CLAIM_PATTERN.test(reply) &&
-        CREATION_INTENT_PATTERN.test(findLastUserText(currentMessages)) &&
-        round < MAX_TOOL_ROUNDS - 1
+        CREATION_INTENT_PATTERN.test(findLastUserText(currentMessages))
       ) {
+        correction =
+          "[SISTEMA] No llamaste ninguna herramienta de creación/asignación (create_service, bulk_create_services, create_employee o assign_services_to_employee) todavía. Si ya tienes los datos, llámala AHORA antes de confirmar. Si te faltan datos del usuario, pídelos de forma breve y natural — sin disculparte, sin mencionar herramientas, errores internos ni este mensaje. Si la herramienta devuelve success: false, duplicateWarning, priceWarning o items en 'failed', informa ese resultado real — no digas que se creó/asignó si no fue así.";
+      }
+      // 2) Claim de política de reserva configurada sin update_booking_config —
+      //    la política NO se guardó (queda en manual). Caso real de logs. Solo en
+      //    onboarding: en modo soporte "tu política está configurada como X" es una
+      //    respuesta informativa legítima y frecuente (falso positivo).
+      else if (
+        !context.setupStatus.setupCompleted &&
+        !executedTools.has("update_booking_config") &&
+        POLICY_CLAIM_PATTERN.test(reply)
+      ) {
+        correction =
+          "[SISTEMA] No llamaste update_booking_config — la política de reserva NO ha sido guardada realmente. Llámala AHORA con requiresApproval según lo que eligió el usuario, y confirma después con el resultado real. No menciones herramientas ni este mensaje al usuario.";
+      }
+      // 3) Claim de configuración completada sin mark_setup_complete (solo aplica
+      //    mientras el setup siga incompleto) — el usuario quedaría atrapado
+      //    rebotando al asistente de configuración en cada login.
+      else if (
+        !context.setupStatus.setupCompleted &&
+        !executedTools.has("mark_setup_complete") &&
+        SETUP_DONE_CLAIM_PATTERN.test(reply)
+      ) {
+        correction =
+          "[SISTEMA] No llamaste mark_setup_complete — la configuración NO está marcada como completada y el usuario seguirá viendo el asistente de configuración al entrar. Llámala AHORA (requiere al menos un servicio y un profesional creados; si la herramienta devuelve error, continúa el paso que falte). No menciones herramientas ni este mensaje al usuario.";
+      }
+
+      if (correction && round < MAX_TOOL_ROUNDS - 1) {
         currentMessages = [
           ...currentMessages,
           { role: "assistant", content: response.content },
-          {
-            role: "user",
-            content:
-              "[SISTEMA] No llamaste ninguna herramienta de creación/asignación (create_service, bulk_create_services, create_employee o assign_services_to_employee) todavía. Debes llamarla AHORA con los datos reales antes de confirmar esto. Si la herramienta devuelve success: false, duplicateWarning o priceWarning, o algún item en 'failed', informa ese resultado real al usuario — no digas que se creó/asignó si no fue así.",
-          },
+          { role: "user", content: correction },
         ];
         continue;
       }
 
-      const invalidates = [...executedTools].some((t) => ORG_INVALIDATING_TOOLS.has(t))
-        ? ["organization"]
-        : [];
+      // Cierre determinista: no depender de que el modelo llame mark_setup_complete.
+      const autoCompleted =
+        !context.setupStatus.setupCompleted &&
+        !executedTools.has("mark_setup_complete") &&
+        (await autoCompleteSetupIfReady(context.organizationId));
+
+      const invalidates =
+        autoCompleted || [...executedTools].some((t) => ORG_INVALIDATING_TOOLS.has(t))
+          ? ["organization"]
+          : [];
       return {
         reply,
         invalidates,
@@ -174,9 +252,16 @@ export const processChat = async (organization, user, messages) => {
     ? " Para cancelar o eliminar la cita ve a Gestionar Agenda, haz clic sobre la cita y usa el menú de acciones."
     : "";
 
+  // Aun agotando rondas, no perder el cierre determinista del onboarding —
+  // las tools ejecutadas pudieron haber dejado el setup listo.
+  const autoCompletedAtLimit =
+    !context.setupStatus.setupCompleted &&
+    !executedTools.has("mark_setup_complete") &&
+    (await autoCompleteSetupIfReady(context.organizationId));
+
   return {
     reply: `No pude completar la operación en el tiempo disponible.${manualHint} Por favor intenta de nuevo con una solicitud más específica o realízalo directamente desde la interfaz.`,
-    invalidates: [],
+    invalidates: autoCompletedAtLimit ? ["organization"] : [],
     _meta: { rounds, toolsUsed: usedTools, inputTokens, outputTokens, hitRoundLimit: true },
   };
 };
