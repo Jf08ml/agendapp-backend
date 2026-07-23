@@ -44,6 +44,9 @@ export const processBookingChat = async (organization, messages, options = {}) =
     // Estado entre turnos (WhatsApp): el historial visible es solo texto, así que
     // el prompt debe declarar explícitamente que hay una reserva preparada sin confirmar.
     pendingReservation: isWhatsapp ? options.session?.pendingPayload : null,
+    // Señal persistente (no one-shot, a diferencia de session.reservationCreated):
+    // ya se confirmó una reserva en algún turno anterior de esta misma conversación.
+    hasConfirmedBooking: isWhatsapp && options.session?.hasConfirmedBookingThisSession === true,
   });
   const context = {
     organizationId: organization._id,

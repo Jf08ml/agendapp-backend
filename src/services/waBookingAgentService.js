@@ -85,6 +85,12 @@ function getOrCreateSession(orgId, clientPhone) {
       sessionId: randomUUID(),
       pendingPayload: null,
       reservationCreated: false,
+      // A diferencia de reservationCreated (one-shot, se resetea tras loguear
+      // cada turno), este flag persiste toda la sesión: le indica al prompt
+      // que ya se confirmó al menos una reserva en esta conversación, para
+      // que turnos posteriores no vuelvan a intentar recolectar los mismos
+      // datos en bucle si el cliente sigue chateando.
+      hasConfirmedBookingThisSession: false,
     });
   }
   const session = sessions.get(key);

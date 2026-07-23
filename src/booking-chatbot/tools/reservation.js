@@ -120,7 +120,8 @@ async function autoAssignAvailableEmployees(resolved, startDate, organization, o
 export const prepareReservation = {
   name: "prepare_reservation",
   description:
-    "Llama esto cuando tengas TODA la información necesaria y el usuario haya dicho que sí al resumen. Prepara el payload final para que el frontend cree la reserva al hacer clic en el botón de confirmación.",
+    "Llama esto cuando tengas TODA la información necesaria y el usuario haya dicho que sí al resumen, para crear una reserva NUEVA. Prepara el payload final para que el frontend cree la reserva al hacer clic en el botón de confirmación. " +
+    "NO la uses para mover una cita que el cliente ya tiene agendada — eso crearía una cita duplicada. Para reprogramar una cita existente usa reschedule_appointment.",
   parameters: {
     services: {
       type: "array",
@@ -307,6 +308,7 @@ export const confirmReservation = {
     if (res.statusCode >= 200 && res.statusCode < 300) {
       context.session.pendingPayload = null;
       context.session.reservationCreated = true;
+      context.session.hasConfirmedBookingThisSession = true;
       return {
         success: true,
         _instruction:
