@@ -63,6 +63,19 @@ const serviceController = {
     }
   },
 
+  // Obtener un servicio por ID — versión pública (vista de detalle compartible)
+  getPublicServiceById: async (req, res) => {
+    try {
+      const service = await serviceService.getPublicServiceById(
+        req.params.id,
+        req.query.organizationId
+      );
+      sendResponse(res, 200, service, "Servicio encontrado");
+    } catch (error) {
+      sendResponse(res, 404, null, error.message);
+    }
+  },
+
   // Actualizar un servicio
   updateService: async (req, res) => {
     try {

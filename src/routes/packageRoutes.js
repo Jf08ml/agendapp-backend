@@ -47,6 +47,16 @@ router.get(
 router.get("/:id", verifyToken, packageController.getServicePackageById);
 router.put("/:id", verifyToken, packageController.updateServicePackage);
 router.delete("/:id", verifyToken, packageController.deleteServicePackage);
+router.delete(
+  "/:id/permanent",
+  verifyToken,
+  packageController.permanentlyDeleteServicePackage
+);
+router.delete(
+  "/:id/force",
+  verifyToken,
+  packageController.forceDeleteServicePackage
+);
 
 // Asignación, cancelación y consulta de paquetes de clientes
 router.post("/assign", verifyToken, packageController.assignPackageToClient);

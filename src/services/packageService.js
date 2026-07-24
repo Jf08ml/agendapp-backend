@@ -1,6 +1,10 @@
 import ServicePackage from "../models/servicePackageModel.js";
 import ClientPackage from "../models/clientPackageModel.js";
 import Class from "../models/classModel.js";
+import Order from "../models/orderModel.js";
+import Appointment from "../models/appointmentModel.js";
+import Enrollment from "../models/enrollmentModel.js";
+import Reservation from "../models/reservationModel.js";
 import serviceService from "./serviceService.js";
 import mongoose from "mongoose";
 
@@ -84,7 +88,7 @@ const packageService = {
     return await ServicePackage.findOneAndUpdate(
       { _id: id, organizationId },
       { $set: data },
-      { new: true }
+      { new: true, runValidators: true }
     )
       .populate("services.serviceId", "name price duration")
       .populate("classes.classId", "name color pricePerPerson duration");
@@ -96,6 +100,89 @@ const packageService = {
       { $set: { isActive: false } },
       { new: true }
     );
+  },
+
+  // Borrado permanente. Solo se permite si el paquete nunca se vendió (sin
+  // ClientPackage ni Order pagada asociada) — en ese caso también limpia en
+  // cascada los checkouts abandonados/pendientes/expirados ligados a él.
+  permanentlyDeleteServicePackage: async (id, organizationId) => {
+    const servicePackage = await ServicePackage.findOne({ _id: id, organizationId });
+    if (!servicePackage) {
+      throw new Error("Paquete no encontrado");
+    }
+
+    const soldCount = await ClientPackage.countDocuments({
+      servicePackageId: id,
+      organizationId,
+    });
+    if (soldCount > 0) {
+      throw new Error(
+        `No se puede eliminar: este paquete ya fue vendido/asignado a ${soldCount} cliente(s). Puedes desactivarlo en su lugar.`
+      );
+    }
+
+    const paidOrders = await Order.countDocuments({
+      organizationId,
+      type: "package",
+      refId: id,
+      status: "paid",
+    });
+    if (paidOrders > 0) {
+      throw new Error(
+        "No se puede eliminar: este paquete tiene pagos registrados. Puedes desactivarlo en su lugar."
+      );
+    }
+
+    await Order.deleteMany({ organizationId, type: "package", refId: id });
+    await ServicePackage.deleteOne({ _id: id, organizationId });
+
+    return { message: "Paquete eliminado permanentemente" };
+  },
+
+  // Borrado forzado: ignora las ventas/asignaciones existentes y elimina en
+  // cascada TODO lo relacionado con el paquete — incluye las citas y
+  // clases (Appointment/Enrollment/Reservation) pagadas con esas sesiones,
+  // no solo el registro de compra. Irreversible, uso explícito ("force").
+  forceDeleteServicePackage: async (id, organizationId) => {
+    const servicePackage = await ServicePackage.findOne({ _id: id, organizationId });
+    if (!servicePackage) {
+      throw new Error("Paquete no encontrado");
+    }
+
+    const clientPackages = await ClientPackage.find({
+      servicePackageId: id,
+      organizationId,
+    }).select("_id");
+    const clientPackageIds = clientPackages.map((cp) => cp._id);
+
+    const deleted = {
+      clientPackages: 0,
+      appointments: 0,
+      enrollments: 0,
+      reservations: 0,
+      orders: 0,
+    };
+
+    if (clientPackageIds.length > 0) {
+      const [apptResult, enrollResult, reservationResult] = await Promise.all([
+        Appointment.deleteMany({ organizationId, clientPackageId: { $in: clientPackageIds } }),
+        Enrollment.deleteMany({ organizationId, clientPackageId: { $in: clientPackageIds } }),
+        Reservation.deleteMany({ organizationId, clientPackageId: { $in: clientPackageIds } }),
+      ]);
+      deleted.appointments = apptResult.deletedCount;
+      deleted.enrollments = enrollResult.deletedCount;
+      deleted.reservations = reservationResult.deletedCount;
+
+      const cpResult = await ClientPackage.deleteMany({ _id: { $in: clientPackageIds } });
+      deleted.clientPackages = cpResult.deletedCount;
+    }
+
+    const orderResult = await Order.deleteMany({ organizationId, type: "package", refId: id });
+    deleted.orders = orderResult.deletedCount;
+
+    await ServicePackage.deleteOne({ _id: id, organizationId });
+
+    return { message: "Paquete eliminado permanentemente (forzado)", deleted };
   },
 
   // =============================================
@@ -113,6 +200,26 @@ const packageService = {
       throw new Error("Paquete no encontrado o inactivo");
     }
 
+    // Paquete con niveles (ej: x4/x8/x12): las sesiones y el precio salen
+    // del nivel elegido, no de la raíz del ServicePackage. Aplican de forma
+    // uniforme a todos los servicios/clases incluidos.
+    const isTiered = (servicePackage.tiers || []).length > 0;
+    let sessionsPerItem = null;
+    let courtesyPerItem = 0;
+    let totalPrice = servicePackage.price;
+    let tierLabel = null;
+
+    if (isTiered) {
+      const tier = servicePackage.tiers.id(paymentInfo.tierId);
+      if (!tier) {
+        throw new Error("Este paquete tiene niveles — indica cuál (ej: x4, x8, x12).");
+      }
+      sessionsPerItem = tier.sessionsIncluded;
+      courtesyPerItem = tier.courtesySessions || 0;
+      totalPrice = tier.price;
+      tierLabel = tier.label;
+    }
+
     const purchaseDate = paymentInfo.purchaseDate
       ? new Date(paymentInfo.purchaseDate)
       : new Date();
@@ -124,22 +231,31 @@ const packageService = {
       clientId,
       servicePackageId,
       organizationId,
-      services: servicePackage.services.map((svc) => ({
-        serviceId: svc.serviceId,
-        sessionsIncluded: svc.sessionsIncluded,
-        sessionsUsed: 0,
-        sessionsRemaining: svc.sessionsIncluded,
-      })),
-      classes: (servicePackage.classes || []).map((cls) => ({
-        classId: cls.classId,
-        sessionsIncluded: cls.sessionsIncluded,
-        sessionsUsed: 0,
-        sessionsRemaining: cls.sessionsIncluded,
-      })),
+      services: servicePackage.services.map((svc) => {
+        const total = isTiered ? sessionsPerItem + courtesyPerItem : svc.sessionsIncluded;
+        return {
+          serviceId: svc.serviceId,
+          sessionsIncluded: total,
+          sessionsUsed: 0,
+          sessionsRemaining: total,
+          courtesySessions: isTiered ? courtesyPerItem : 0,
+        };
+      }),
+      classes: (servicePackage.classes || []).map((cls) => {
+        const total = isTiered ? sessionsPerItem + courtesyPerItem : cls.sessionsIncluded;
+        return {
+          classId: cls.classId,
+          sessionsIncluded: total,
+          sessionsUsed: 0,
+          sessionsRemaining: total,
+          courtesySessions: isTiered ? courtesyPerItem : 0,
+        };
+      }),
+      tierLabel,
       purchaseDate,
       expirationDate,
       status: "active",
-      totalPrice: servicePackage.price,
+      totalPrice,
       paymentMethod: paymentInfo.paymentMethod || "",
       paymentNotes: paymentInfo.paymentNotes || "",
     });

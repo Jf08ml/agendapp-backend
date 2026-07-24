@@ -77,18 +77,44 @@ const packageController = {
     }
   },
 
+  permanentlyDeleteServicePackage: async (req, res) => {
+    try {
+      const { organizationId } = req.body;
+      const result = await packageService.permanentlyDeleteServicePackage(
+        req.params.id,
+        organizationId
+      );
+      sendResponse(res, 200, null, result.message);
+    } catch (error) {
+      sendResponse(res, 400, null, error.message);
+    }
+  },
+
+  forceDeleteServicePackage: async (req, res) => {
+    try {
+      const { organizationId } = req.body;
+      const result = await packageService.forceDeleteServicePackage(
+        req.params.id,
+        organizationId
+      );
+      sendResponse(res, 200, result.deleted, result.message);
+    } catch (error) {
+      sendResponse(res, 400, null, error.message);
+    }
+  },
+
   // =============================================
   // ClientPackage (asignación y consulta)
   // =============================================
 
   assignPackageToClient: async (req, res) => {
     try {
-      const { servicePackageId, clientId, organizationId, paymentMethod, paymentNotes, purchaseDate } = req.body;
+      const { servicePackageId, clientId, organizationId, paymentMethod, paymentNotes, purchaseDate, tierId } = req.body;
       const result = await packageService.assignPackageToClient(
         servicePackageId,
         clientId,
         organizationId,
-        { paymentMethod, paymentNotes, purchaseDate }
+        { paymentMethod, paymentNotes, purchaseDate, tierId }
       );
       sendResponse(res, 201, result, "Paquete asignado al cliente exitosamente");
     } catch (error) {

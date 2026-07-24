@@ -340,7 +340,7 @@ export const listPublicPackages = async (req, res) => {
 // Order (type package), la preference de MP y devuelve el checkout. El
 // ClientPackage se crea cuando el webhook confirma el pago.
 export const createPackageCheckout = async (req, res) => {
-  const { servicePackageId, customerDetails, organizationId } = req.body;
+  const { servicePackageId, customerDetails, organizationId, tierId } = req.body;
 
   if (!servicePackageId || !customerDetails?.name || !customerDetails?.phone || !organizationId) {
     return sendResponse(res, 400, null, "Datos incompletos para la compra del paquete.");
@@ -360,7 +360,15 @@ export const createPackageCheckout = async (req, res) => {
     });
     if (!pkg) return sendResponse(res, 404, null, "Paquete no encontrado o inactivo.");
 
-    const amount = orderService.roundForCurrency(Number(pkg.price || 0), org.currency);
+    // Paquete con niveles (x4/x8/x12): el precio sale del nivel elegido.
+    let tier = null;
+    if ((pkg.tiers || []).length > 0) {
+      tier = pkg.tiers.id(tierId);
+      if (!tier) return sendResponse(res, 400, null, "Selecciona un nivel válido de este paquete.");
+    }
+    const rawAmount = tier ? tier.price : pkg.price;
+
+    const amount = orderService.roundForCurrency(Number(rawAmount || 0), org.currency);
     if (amount <= 0) return sendResponse(res, 400, null, "El paquete no tiene un precio válido.");
 
     // Crear/ubicar el cliente comprador.
@@ -383,12 +391,13 @@ export const createPackageCheckout = async (req, res) => {
       currency: String(org.currency || "COP").toUpperCase(),
       marketplaceFee: 0,
       expiresAt,
+      tierId: tier ? tier._id : null,
     });
 
     const pref = await buildAndAttachCheckout({
       org,
       order,
-      title: `Paquete — ${pkg.name}`,
+      title: tier ? `Paquete — ${pkg.name} (${tier.label})` : `Paquete — ${pkg.name}`,
       expiresAt,
     });
 

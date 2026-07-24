@@ -82,15 +82,24 @@ async function fulfillClassOrder(order) {
 async function fulfillPackageOrder(order) {
   const servicePackageId = order.metadata?.servicePackageId || order.refId;
   const clientId = order.metadata?.clientId;
+  const tierId = order.metadata?.tierId || null;
   if (!servicePackageId || !clientId) {
     throw new Error("Order de paquete sin servicePackageId/clientId en metadata.");
   }
 
+  // Igual que fulfillReservationOrder: reflejar el provider real del pago,
+  // no asumir siempre Mercado Pago (antes quedaba hardcodeado incluso para
+  // compras pagadas por comprobante/transferencia).
+  const isReceipt = order.provider === "receipt";
   await packageService.assignPackageToClient(
     servicePackageId,
     clientId,
     order.organizationId,
-    { paymentMethod: "mercadopago", paymentNotes: "Compra online (Mercado Pago)" }
+    {
+      paymentMethod: isReceipt ? "transfer" : "mercadopago",
+      paymentNotes: isReceipt ? "Compra online (comprobante)" : "Compra online (Mercado Pago)",
+      tierId,
+    }
   );
 }
 

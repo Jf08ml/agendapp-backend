@@ -258,7 +258,7 @@ export const createReceiptClassCheckout = async (req, res) => {
 
 // POST /collection/receipt/package
 export const createReceiptPackageCheckout = async (req, res) => {
-  const { servicePackageId, customerDetails, organizationId } = req.body;
+  const { servicePackageId, customerDetails, organizationId, tierId } = req.body;
 
   if (!servicePackageId || !customerDetails?.name || !customerDetails?.phone || !organizationId) {
     return sendResponse(res, 400, null, "Datos incompletos para la compra del paquete.");
@@ -274,7 +274,15 @@ export const createReceiptPackageCheckout = async (req, res) => {
     const pkg = await ServicePackage.findOne({ _id: servicePackageId, organizationId, isActive: true });
     if (!pkg) return sendResponse(res, 404, null, "Paquete no encontrado o inactivo.");
 
-    const amount = orderService.roundForCurrency(Number(pkg.price || 0), org.currency);
+    // Paquete con niveles (x4/x8/x12): el precio sale del nivel elegido.
+    let tier = null;
+    if ((pkg.tiers || []).length > 0) {
+      tier = pkg.tiers.id(tierId);
+      if (!tier) return sendResponse(res, 400, null, "Selecciona un nivel válido de este paquete.");
+    }
+    const rawAmount = tier ? tier.price : pkg.price;
+
+    const amount = orderService.roundForCurrency(Number(rawAmount || 0), org.currency);
     if (amount <= 0) return sendResponse(res, 400, null, "El paquete no tiene un precio válido.");
 
     const customer = await reservationService.ensureClientExists({
@@ -296,6 +304,7 @@ export const createReceiptPackageCheckout = async (req, res) => {
       currency: String(org.currency || "COP").toUpperCase(),
       provider: "receipt",
       expiresAt,
+      tierId: tier ? tier._id : null,
     });
 
     return sendResponse(

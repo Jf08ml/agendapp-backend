@@ -29,6 +29,13 @@ const clientPackageServiceSchema = new mongoose.Schema({
     required: true,
     min: 0,
   },
+  // Cuántas de sessionsIncluded fueron de cortesía (informativo — ya están
+  // sumadas en sessionsIncluded/sessionsRemaining, no se trackean aparte).
+  courtesySessions: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
 });
 
 // 📚 Créditos de clase del paquete del cliente
@@ -51,6 +58,11 @@ const clientPackageClassSchema = new mongoose.Schema({
   sessionsRemaining: {
     type: Number,
     required: true,
+    min: 0,
+  },
+  courtesySessions: {
+    type: Number,
+    default: 0,
     min: 0,
   },
 });
@@ -110,6 +122,12 @@ const clientPackageSchema = new mongoose.Schema(
     services: [clientPackageServiceSchema],
     // 📚 Créditos de clase
     classes: [clientPackageClassSchema],
+    // Snapshot del nivel comprado, si el ServicePackage tenía tiers (ej: "x8").
+    // null en paquetes sin niveles.
+    tierLabel: {
+      type: String,
+      default: null,
+    },
     purchaseDate: {
       type: Date,
       default: Date.now,

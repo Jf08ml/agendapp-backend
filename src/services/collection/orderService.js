@@ -149,6 +149,7 @@ export async function createPackageOrder({
   marketplaceFee = 0,
   expiresAt = null,
   provider = "mercadopago",
+  tierId = null,
 }) {
   const order = await Order.create({
     organizationId,
@@ -163,6 +164,9 @@ export async function createPackageOrder({
     metadata: {
       servicePackageId: String(servicePackageId),
       clientId: clientId ? String(clientId) : null,
+      // Nivel elegido (ej: "x8") cuando el paquete tiene tiers — null en
+      // paquetes simples.
+      tierId: tierId ? String(tierId) : null,
     },
   });
 

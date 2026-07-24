@@ -4,7 +4,42 @@ import Service from "../../models/serviceModel.js";
 import Employee from "../../models/employeeModel.js";
 import Appointment from "../../models/appointmentModel.js";
 import scheduleService from "../../services/scheduleService.js";
+import packageService from "../../services/packageService.js";
 import { normalizePhoneNumber } from "../../utils/phoneUtils.js";
+
+// Busca un paquete de sesiones activo del cliente que cubra TODOS los
+// servicios solicitados (con sesiones disponibles en cada uno). El endpoint
+// de reserva solo admite un clientPackageId por reserva, aplicado a todos los
+// servicios del batch — por eso exigimos cobertura total: aplicar un paquete
+// que solo cubre parte de los servicios dejaría sesiones/servicios sin cobrar
+// mal descontados a $0. Si no hay cobertura total, no se aplica ningún
+// paquete y la reserva sigue el flujo de pago normal.
+async function findCoveringPackage(phone_e164, serviceIds, organizationId) {
+  if (!phone_e164) return null;
+  try {
+    const { packages } = await packageService.checkClientPackagesByPhone(
+      phone_e164,
+      serviceIds,
+      organizationId
+    );
+    const covering = (packages || []).find((pkg) =>
+      serviceIds.every((sid) =>
+        (pkg.services || []).some((svc) => {
+          const svcId = (svc.serviceId?._id || svc.serviceId)?.toString();
+          return svcId === sid && svc.sessionsRemaining > 0;
+        })
+      )
+    );
+    if (!covering) return null;
+    return {
+      clientPackageId: covering._id.toString(),
+      packageName: covering.servicePackageId?.name || "tu paquete de sesiones",
+    };
+  } catch (err) {
+    console.error("[booking-chatbot] Error verificando paquetes del cliente:", err);
+    return null;
+  }
+}
 
 // Resuelve un servicio: acepta ObjectId válido o nombre parcial. Devuelve el doc completo.
 async function resolveService(value, organizationId) {
@@ -218,6 +253,16 @@ export const prepareReservation = {
       if (!isNaN(d.getTime())) parsedBirthDate = d.toISOString();
     }
 
+    // 📦 Detectar paquete de sesiones que cubra TODOS los servicios pedidos —
+    // si existe, la reserva se paga con el paquete (precio $0, no se cobra
+    // depósito) en vez del flujo de pago normal.
+    const requestedServiceIds = resolved.map((r) => r.serviceId);
+    const coveringPackage = await findCoveringPackage(
+      normalizedPhone,
+      requestedServiceIds,
+      organizationId
+    );
+
     const payload = {
       services: resolved.map(({ serviceId, employeeId }) => ({ serviceId, employeeId })),
       startDate,
@@ -230,6 +275,7 @@ export const prepareReservation = {
         birthDate: parsedBirthDate,
       },
       organizationId: organizationId.toString(),
+      ...(coveringPackage ? { clientPackageId: coveringPackage.clientPackageId } : {}),
     };
 
     // En canal WhatsApp guardar el payload en la sesión para que confirm_reservation lo use
@@ -237,13 +283,20 @@ export const prepareReservation = {
       context.session.pendingPayload = payload;
     }
 
+    const packageNote = coveringPackage
+      ? ` Esta reserva se paga con ${coveringPackage.packageName} del cliente — el costo es $0, NO menciones un precio a pagar ni pidas depósito, solo confirma que se descuenta de su paquete.`
+      : "";
+
     return {
       success: true,
       payload,
+      usingPackage: !!coveringPackage,
+      packageName: coveringPackage?.packageName || null,
       _instruction:
-        context.channel === "whatsapp"
+        (context.channel === "whatsapp"
           ? "PAYLOAD LISTO. La reserva NO ha sido creada todavía. El cliente YA confirmó el resumen — llama confirm_reservation AHORA MISMO, en esta misma respuesta, sin escribir texto al cliente todavía."
-          : "PAYLOAD LISTO. La reserva NO ha sido creada todavía. El frontend mostrará un botón al cliente. NO digas que la reserva fue creada, confirmada ni procesada. Di ÚNICAMENTE que el botón de confirmación ya está listo para que el cliente haga clic.",
+          : "PAYLOAD LISTO. La reserva NO ha sido creada todavía. El frontend mostrará un botón al cliente. NO digas que la reserva fue creada, confirmada ni procesada. Di ÚNICAMENTE que el botón de confirmación ya está listo para que el cliente haga clic.") +
+        packageNote,
     };
   },
 };
@@ -306,13 +359,17 @@ export const confirmReservation = {
     }
 
     if (res.statusCode >= 200 && res.statusCode < 300) {
+      const usedPackage = !!payload.clientPackageId;
       context.session.pendingPayload = null;
       context.session.reservationCreated = true;
       context.session.hasConfirmedBookingThisSession = true;
       return {
         success: true,
         _instruction:
-          "Reserva creada correctamente. Confirma al cliente que su reserva quedó agendada. Si la política del negocio es manual, aclara que el negocio la revisará y le confirmará.",
+          "Reserva creada correctamente. Confirma al cliente que su reserva quedó agendada. Si la política del negocio es manual, aclara que el negocio la revisará y le confirmará." +
+          (usedPackage
+            ? " Recuérdale que esta sesión se descontó de su paquete y que no debe pagar nada por ella."
+            : ""),
       };
     }
 

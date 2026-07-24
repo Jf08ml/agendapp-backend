@@ -43,6 +43,24 @@ const serviceService = {
     return service;
   },
 
+  // Obtener un servicio por ID — versión pública (landing/vista de detalle
+  // compartible). Exige organizationId explícito para no filtrar datos de
+  // otro tenant, y excluye servicios inactivos/eliminados de la vista pública.
+  getPublicServiceById: async (id, organizationId) => {
+    if (!organizationId) {
+      throw new Error("Falta organizationId");
+    }
+    const service = await Service.findOne({
+      _id: id,
+      organizationId,
+      isActive: { $ne: false },
+    });
+    if (!service) {
+      throw new Error("Servicio no encontrado");
+    }
+    return service;
+  },
+
   // Actualizar un servicio
   updateService: async (id, updatedData) => {
     const service = await Service.findById(id);

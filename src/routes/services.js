@@ -9,6 +9,9 @@ router.get(
   "/organization/:organizationId",
   serviceController.getServicesByOrganizationId
 );
+// Vista de detalle de un servicio, pública y compartible (organizationId por
+// query string, ya que este router no pasa por organizationResolver).
+router.get("/public/:id", serviceController.getPublicServiceById);
 
 // 🔒 Rutas PROTEGIDAS (requieren autenticación)
 router.post("/", verifyToken, serviceController.createService);
