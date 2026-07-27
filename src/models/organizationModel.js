@@ -413,6 +413,12 @@ const organizationSchema = new mongoose.Schema({
     min: 0,
     max: 100,
   },
+  // 🎓 Política de aprobación para inscripción a CLASES (config propia, independiente de reservationPolicy)
+  classReservationPolicy: {
+    type: String,
+    enum: ["manual", "auto_if_available"],
+    default: "manual",
+  },
   // 🎓 Depósito para inscripción a CLASES (config propia, independiente de las reservas)
   requireClassDeposit: {
     type: Boolean,

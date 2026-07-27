@@ -328,7 +328,10 @@ const sessionService = {
    * @returns {{ created: Object[], skipped: Object[] }}
    */
   async bulkCreate(organizationId, data) {
-    const { classId, employeeId, roomId, weekdays, time, periodStart, periodEnd, timezone, capacity, notes } = data;
+    const {
+      classId, employeeId, roomId, weekdays, startTime, endTime, breakMinutes,
+      periodStart, periodEnd, timezone, capacity, notes,
+    } = data;
 
     if (!weekdays?.length) throw new Error("Debes seleccionar al menos un día de la semana");
 
@@ -341,9 +344,23 @@ const sessionService = {
     // El cupo no puede superar la capacidad física del salón (una sola vez)
     await assertCapacityFitsRoom(roomId, sessionCapacity);
 
-    // Parsear hora "HH:MM"
-    const [startHour, startMinute] = time.split(":").map(Number);
+    // Parsear ventana horaria "HH:MM". Si no viene endTime, la "ventana" es de
+    // una sola sesión (comportamiento anterior: una sesión por día).
+    const [startHour, startMinute] = startTime.split(":").map(Number);
     if (isNaN(startHour) || isNaN(startMinute)) throw new Error('Formato de hora inválido. Use "HH:MM"');
+
+    const hasWindow = !!endTime;
+    let endHour = startHour, endMinute = startMinute;
+    if (hasWindow) {
+      [endHour, endMinute] = endTime.split(":").map(Number);
+      if (isNaN(endHour) || isNaN(endMinute)) throw new Error('Formato de hora de fin inválido. Use "HH:MM"');
+      if (endHour * 60 + endMinute <= startHour * 60 + startMinute) {
+        throw new Error("La hora de fin debe ser posterior a la hora de inicio");
+      }
+    }
+
+    // Descanso opcional entre sesiones consecutivas dentro de la misma ventana
+    const gapMin = Math.max(0, Number(breakMinutes) || 0);
 
     // Construir lista de fechas candidatas en el período
     // Trabajamos en la timezone de la organización usando offsets manuales
@@ -355,22 +372,35 @@ const sessionService = {
 
     if (end.isBefore(start)) throw new Error("La fecha de fin debe ser posterior a la de inicio");
 
-    const MAX_SESSIONS = 366; // límite de seguridad
+    const MAX_SESSIONS = 2000; // límite de seguridad (antes 366; una ventana con varias sesiones por día lo alcanza más rápido)
     const candidates = [];
     const cursor = start.clone();
 
     while (cursor.isSameOrBefore(end) && candidates.length < MAX_SESSIONS) {
       // moment: 0=Dom, 1=Lun … 6=Sáb (igual que Date.getDay())
       if (weekdays.includes(cursor.day())) {
-        const sessionStart = cursor.clone().hour(startHour).minute(startMinute).second(0).millisecond(0);
-        const sessionEnd   = sessionStart.clone().add(durationMin, "minutes");
-        candidates.push({ startDate: sessionStart.toDate(), endDate: sessionEnd.toDate() });
+        let slotStart = cursor.clone().hour(startHour).minute(startMinute).second(0).millisecond(0);
+        const windowEnd = hasWindow
+          ? cursor.clone().hour(endHour).minute(endMinute).second(0).millisecond(0)
+          : slotStart.clone().add(durationMin, "minutes");
+
+        // Rellenar la ventana con sesiones consecutivas de la duración de la clase
+        while (candidates.length < MAX_SESSIONS) {
+          const slotEnd = slotStart.clone().add(durationMin, "minutes");
+          if (slotEnd.isAfter(windowEnd)) break;
+          candidates.push({ startDate: slotStart.toDate(), endDate: slotEnd.toDate() });
+          slotStart = slotEnd.clone().add(gapMin, "minutes");
+        }
       }
       cursor.add(1, "day");
     }
 
     if (candidates.length === 0) {
-      throw new Error("No se encontraron fechas válidas para el patrón indicado en el período seleccionado");
+      throw new Error(
+        hasWindow
+          ? "La ventana horaria no alcanza para ninguna sesión de la duración de la clase, o no hay fechas válidas en el período"
+          : "No se encontraron fechas válidas para el patrón indicado en el período seleccionado"
+      );
     }
 
     const created = [];

@@ -216,7 +216,7 @@ async function createPublicEnrollments({ organizationId, sessionId, attendee, co
 
   // 4. Determinar modo de aprobación de la organización
   const org = await Organization.findById(organizationId);
-  const approvalMode = org?.reservationPolicy?.autoApprove ? "auto" : "manual";
+  const approvalMode = org?.classReservationPolicy === "auto_if_available" ? "auto" : "manual";
   const initialStatus = approvalMode === "auto" ? "confirmed" : "pending";
 
   // 5. groupId compartido si hay acompañante
@@ -746,7 +746,7 @@ async function holdEnrollmentsForPayment({ organizationId, sessionId, attendee, 
   const totalPricePerPerson = computeTotalPrice(classDoc.pricePerPerson, discountPercent);
 
   const org = await Organization.findById(organizationId);
-  const approvalMode = org?.reservationPolicy?.autoApprove ? "auto" : "manual";
+  const approvalMode = org?.classReservationPolicy === "auto_if_available" ? "auto" : "manual";
 
   // groupId SIEMPRE (referenciamos el grupo desde el Order, aunque sea 1 persona)
   const groupId = new Types.ObjectId();

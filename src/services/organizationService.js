@@ -150,6 +150,7 @@ const organizationService = {
       domain,
       domains,
       reservationPolicy,
+      classReservationPolicy,
       showLoyaltyProgram,
       enableOnlineBooking,
       enableClassBooking,
@@ -270,6 +271,13 @@ const organizationService = {
         throw new Error("reservationPolicy inválida");
       }
       organization.reservationPolicy = reservationPolicy;
+    }
+
+    if (classReservationPolicy !== undefined) {
+      if (!["manual", "auto_if_available"].includes(classReservationPolicy)) {
+        throw new Error("classReservationPolicy inválida");
+      }
+      organization.classReservationPolicy = classReservationPolicy;
     }
 
     if (showLoyaltyProgram !== undefined) {
