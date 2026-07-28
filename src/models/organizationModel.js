@@ -391,6 +391,16 @@ const organizationSchema = new mongoose.Schema({
     whatsappConnectedAt: { type: Date, default: null }, // conectó WhatsApp por primera vez
     firstAutoMessageAt:  { type: Date, default: null }, // se envió el primer mensaje automático
   },
+
+  // ── Retargeting de activación (services/retargetingService.js) ──────────
+  // Marca el envío (una sola vez) de cada plantilla de WhatsApp de seguimiento
+  // a dueños de org estancados en el funnel. El aviso de trial por vencer
+  // reusa Membership.notifications.threeDaysSent/oneDaySent, no vive aquí.
+  retargeting: {
+    setupNudgeSentAt:           { type: Date, default: null }, // nunca completó la configuración inicial
+    firstAppointmentNudgeSentAt: { type: Date, default: null }, // completó setup pero nunca creó su primera cita
+    whatsappNudgeSentAt:         { type: Date, default: null }, // completó setup pero nunca conectó WhatsApp
+  },
   blockHolidaysForReservations: {
     type: Boolean,
     default: false,

@@ -3,6 +3,7 @@ import cron from "node-cron";
 import membershipService from "../services/membershipService.js";
 import appointmentService from "../services/appointmentService.js";
 import Organization from "../models/organizationModel.js";
+import { sendTrialEndingNudge } from "../services/retargetingService.js";
 
 /**
  * Job que corre diariamente para verificar el estado de las membresías
@@ -34,6 +35,9 @@ const membershipCheckJob = cron.schedule(
               daysLeft,
               membership,
             });
+            if (membership.status === "trial") {
+              await sendTrialEndingNudge(membership, daysLeft);
+            }
             console.log(`  ✓ Notificación enviada a ${membership.organizationId.name}`);
           } catch (err) {
             console.error(`  ✗ Error notificando organización ${membership.organizationId._id}:`, err.message);
@@ -53,6 +57,9 @@ const membershipCheckJob = cron.schedule(
               daysLeft,
               membership,
             });
+            if (membership.status === "trial") {
+              await sendTrialEndingNudge(membership, daysLeft);
+            }
             console.log(`  ✓ Notificación enviada a ${membership.organizationId.name}`);
           } catch (err) {
             console.error(`  ✗ Error notificando organización ${membership.organizationId._id}:`, err.message);
@@ -182,22 +189,30 @@ export const runMembershipCheck = async () => {
     let totalNotifications = 0;
 
     for (const membership of results.threeDays) {
+      const daysLeft = membership.daysUntilExpiration();
       await membershipService.createMembershipNotification({
         organizationId: membership.organizationId._id,
         type: "3_days_warning",
-        daysLeft: membership.daysUntilExpiration(),
+        daysLeft,
         membership,
       });
+      if (membership.status === "trial") {
+        await sendTrialEndingNudge(membership, daysLeft);
+      }
       totalNotifications++;
     }
 
     for (const membership of results.oneDay) {
+      const daysLeft = membership.daysUntilExpiration();
       await membershipService.createMembershipNotification({
         organizationId: membership.organizationId._id,
         type: "1_day_warning",
-        daysLeft: membership.daysUntilExpiration(),
+        daysLeft,
         membership,
       });
+      if (membership.status === "trial") {
+        await sendTrialEndingNudge(membership, daysLeft);
+      }
       totalNotifications++;
     }
 
