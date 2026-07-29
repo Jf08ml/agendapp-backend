@@ -134,7 +134,7 @@ const registrationController = {
         await membershipService.createMembership({
           organizationId: savedOrg._id,
           planId: trialPlan._id,
-          trialDays: referringAgent?.trialDays ?? 30,
+          trialDays: referringAgent?.trialDays ?? 7,
         });
       }
 
