@@ -105,6 +105,7 @@ export async function handleMetaIncoming(req, res) {
   const statuses = change?.statuses;
   if (statuses?.length) {
     for (const s of statuses) {
+      console.log(`[WaAgent] Status recibido de Meta: ${s.status} — ${s.id} (recipient ${s.recipient_id})`);
       updateMessageStatus({ metaMessageId: s.id, status: s.status }).catch((err) =>
         console.error("[WaAgent] Error actualizando status de mensaje:", err.message)
       );
