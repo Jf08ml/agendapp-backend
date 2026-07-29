@@ -40,6 +40,31 @@ export async function sendTextMessage(toPhone, text) {
 }
 
 /**
+ * Marca un mensaje entrante como leído en WhatsApp. La Cloud API NO hace esto
+ * automático al recibir el webhook — sin esta llamada explícita, el remitente
+ * nunca ve el doble check azul aunque el equipo ya haya leído/procesado el mensaje.
+ * @param {string} messageId - wamid del mensaje entrante (message.id del webhook)
+ */
+export async function markMessageAsRead(messageId) {
+  const { phoneNumberId, accessToken } = getConfig();
+
+  await axios.post(
+    `${GRAPH_URL}/${phoneNumberId}/messages`,
+    {
+      messaging_product: "whatsapp",
+      status: "read",
+      message_id: messageId,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+    }
+  );
+}
+
+/**
  * Envía un mensaje de plantilla aprobada por Meta.
  * @param {string} toPhone - Número E.164 del destinatario
  * @param {string} templateName - Nombre exacto de la plantilla en Meta Business

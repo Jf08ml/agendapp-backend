@@ -1,6 +1,6 @@
 import PlatformWaMessage from "../models/platformWaMessageModel.js";
 import Organization from "../models/organizationModel.js";
-import { sendTextMessage } from "./metaApiService.js";
+import { sendTextMessage, markMessageAsRead } from "./metaApiService.js";
 
 const REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -121,8 +121,25 @@ export async function getConversationMessages(phone) {
   return PlatformWaMessage.find({ phone: cleanPhone }).sort({ createdAt: 1 }).lean();
 }
 
+/** Marca leídos en nuestro inbox Y le confirma a Meta que se leyeron (para que el
+ * cliente vea su propio check azul) — recién ahora, cuando un humano de verdad
+ * abre la conversación, no antes. */
 export async function markConversationRead(phone) {
   const cleanPhone = normalizePhone(phone);
+
+  const unread = await PlatformWaMessage.find({
+    phone: cleanPhone,
+    direction: "inbound",
+    read: false,
+  }).select("metaMessageId");
+
+  for (const msg of unread) {
+    if (!msg.metaMessageId) continue;
+    markMessageAsRead(msg.metaMessageId).catch((err) =>
+      console.error("[platformInbox] Error marcando como leído en Meta:", err.response?.data || err.message)
+    );
+  }
+
   await PlatformWaMessage.updateMany(
     { phone: cleanPhone, direction: "inbound", read: false },
     { $set: { read: true } }
