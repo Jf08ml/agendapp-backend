@@ -1,6 +1,7 @@
 import Organization from "../models/organizationModel.js";
 import { sendPlatformTemplate } from "./metaApiService.js";
 import { logOutboundMessage } from "./platformInboxService.js";
+import { renderPlatformTemplate } from "./platformTemplateCatalog.js";
 
 /**
  * Retargeting por WhatsApp a dueños de organizaciones estancados en el funnel
@@ -33,20 +34,21 @@ function ownerName(org) {
   return org.ownerName || org.name;
 }
 
-// Representación legible del envío para el inbox de superadmin — no es el texto
-// exacto aprobado por Meta (esa copia vive solo en Meta Business Manager), pero
-// deja claro qué plantilla se disparó y con qué variables.
+// Texto tal como lo ve el cliente, reconstruido desde el catálogo de plantillas
+// aprobadas (platformTemplateCatalog.js). Si la plantilla no está catalogada,
+// cae de vuelta al preview genérico anterior.
 function templatePreview(templateName, params) {
-  return `[Plantilla: ${templateName}] ${params.join(" · ")}`;
+  return renderPlatformTemplate(templateName, params) || `[Plantilla: ${templateName}] ${params.join(" · ")}`;
 }
 
-function logRetargetingSend(org, templateName, params) {
+function logRetargetingSend(org, templateName, params, metaMessageId) {
   logOutboundMessage({
     phone: org.phoneNumber,
     organizationId: org._id,
     body: templatePreview(templateName, params),
     source: "retargeting",
     templateName,
+    metaMessageId,
   }).catch((err) => console.error(`[retargeting] Error guardando envío en el inbox (${templateName}):`, err.message));
 }
 
@@ -65,8 +67,8 @@ export async function sendSetupNudges() {
 
     try {
       const params = [ownerName(org), org.name, link];
-      await sendPlatformTemplate(org.phoneNumber, "activa_tu_cuenta", params);
-      logRetargetingSend(org, "activa_tu_cuenta", params);
+      const { messageId } = await sendPlatformTemplate(org.phoneNumber, "activa_tu_cuenta", params);
+      logRetargetingSend(org, "activa_tu_cuenta", params, messageId);
       org.retargeting.setupNudgeSentAt = new Date();
       await org.save();
       sent++;
@@ -93,8 +95,8 @@ export async function sendFirstAppointmentNudges() {
 
     try {
       const params = [ownerName(org), org.name, link];
-      await sendPlatformTemplate(org.phoneNumber, "agenda_tu_primera_cita", params);
-      logRetargetingSend(org, "agenda_tu_primera_cita", params);
+      const { messageId } = await sendPlatformTemplate(org.phoneNumber, "agenda_tu_primera_cita", params);
+      logRetargetingSend(org, "agenda_tu_primera_cita", params, messageId);
       org.retargeting.firstAppointmentNudgeSentAt = new Date();
       await org.save();
       sent++;
@@ -121,8 +123,8 @@ export async function sendWhatsappConnectNudges() {
 
     try {
       const params = [ownerName(org), org.name, link];
-      await sendPlatformTemplate(org.phoneNumber, "conecta_tu_whatsapp", params);
-      logRetargetingSend(org, "conecta_tu_whatsapp", params);
+      const { messageId } = await sendPlatformTemplate(org.phoneNumber, "conecta_tu_whatsapp", params);
+      logRetargetingSend(org, "conecta_tu_whatsapp", params, messageId);
       org.retargeting.whatsappNudgeSentAt = new Date();
       await org.save();
       sent++;
@@ -150,8 +152,8 @@ export async function sendTrialEndingNudge(membership, daysLeft) {
 
   try {
     const params = [ownerName(org), org.name, String(daysLeft), link];
-    await sendPlatformTemplate(org.phoneNumber, "trial_por_vencer", params);
-    logRetargetingSend(org, "trial_por_vencer", params);
+    const { messageId } = await sendPlatformTemplate(org.phoneNumber, "trial_por_vencer", params);
+    logRetargetingSend(org, "trial_por_vencer", params, messageId);
   } catch (err) {
     console.error(`[retargeting] Error enviando trial_por_vencer a ${org._id}:`, err.response?.data || err.message);
   }

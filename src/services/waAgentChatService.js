@@ -182,13 +182,14 @@ export async function processAdminCommand(org, messageBody) {
   );
 
   try {
-    await sendTextMessage(adminPhone, toWhatsAppFormat(finalReply));
+    const { messageId } = await sendTextMessage(adminPhone, toWhatsAppFormat(finalReply));
     console.log(`[WaAgentChat] Respuesta enviada — org: ${org.name}: "${finalReply.slice(0, 80)}"`);
     logOutboundMessage({
       phone: adminPhone,
       organizationId: org._id,
       body: finalReply,
       source: "ai_agent",
+      metaMessageId: messageId,
     }).catch((err) => console.error("[WaAgentChat] Error guardando respuesta en el inbox:", err.message));
   } catch (err) {
     console.error(`[WaAgentChat] Error enviando respuesta — org: ${org.name}:`, err.message);

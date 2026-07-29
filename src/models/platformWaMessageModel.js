@@ -23,8 +23,12 @@ const platformWaMessageSchema = new mongoose.Schema(
     },
     body: { type: String, required: true },
     templateName: { type: String, default: null },
-    metaMessageId: { type: String, default: null },
+    metaMessageId: { type: String, default: null, index: true },
     read: { type: Boolean, default: false }, // solo relevante para direction: "inbound"
+    // Solo relevante para direction: "outbound" — ticks de WhatsApp (sent/delivered/read)
+    // que llegan por el webhook de Meta como eventos "statuses", matcheados por metaMessageId.
+    status: { type: String, enum: ["sent", "delivered", "read", "failed"], default: null },
+    statusUpdatedAt: { type: Date, default: null },
     repliedByAdminId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "AdminUser",

@@ -32,7 +32,7 @@ export async function logInboundMessage({ phone, organizationId, body, metaMessa
   });
 }
 
-export async function logOutboundMessage({ phone, organizationId, body, source, templateName, repliedByAdminId }) {
+export async function logOutboundMessage({ phone, organizationId, body, source, templateName, repliedByAdminId, metaMessageId }) {
   return PlatformWaMessage.create({
     phone: normalizePhone(phone),
     organizationId: organizationId || null,
@@ -41,7 +41,28 @@ export async function logOutboundMessage({ phone, organizationId, body, source, 
     body,
     templateName: templateName || null,
     repliedByAdminId: repliedByAdminId || null,
+    metaMessageId: metaMessageId || null,
   });
+}
+
+// Orden de progreso de los ticks de WhatsApp — usado para no pisar un status más
+// avanzado si un webhook llega tarde o fuera de orden (Meta no garantiza el orden).
+const STATUS_RANK = { failed: 1, sent: 1, delivered: 2, read: 3 };
+
+/** Actualiza el status (ticks) de un mensaje saliente a partir del webhook de Meta.
+ * No hace nada si el metaMessageId no corresponde a ningún mensaje logueado
+ * (ej. mensajes de un número Meta de una org, que no pasan por este inbox). */
+export async function updateMessageStatus({ metaMessageId, status }) {
+  if (!metaMessageId || !STATUS_RANK[status]) return;
+
+  const existing = await PlatformWaMessage.findOne({ metaMessageId }).select("status").lean();
+  if (!existing) return;
+  if (existing.status && STATUS_RANK[status] < STATUS_RANK[existing.status]) return;
+
+  await PlatformWaMessage.updateOne(
+    { metaMessageId },
+    { $set: { status, statusUpdatedAt: new Date() } }
+  );
 }
 
 /** Lista conversaciones (agrupadas por teléfono) ordenadas por última actividad. */
@@ -117,7 +138,7 @@ export async function replyToConversation({ phone, body, adminId }) {
     .select("organizationId")
     .lean();
 
-  await sendTextMessage(`+${cleanPhone}`, body);
+  const { messageId } = await sendTextMessage(`+${cleanPhone}`, body);
 
   return logOutboundMessage({
     phone: cleanPhone,
@@ -125,5 +146,6 @@ export async function replyToConversation({ phone, body, adminId }) {
     body,
     source: "manual",
     repliedByAdminId: adminId || null,
+    metaMessageId: messageId,
   });
 }

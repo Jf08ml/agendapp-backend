@@ -7,7 +7,11 @@ import { processClientBookingMessage } from "../services/waBookingAgentService.j
 import { validateMetaSignature } from "../services/metaApiService.js";
 import Organization from "../models/organizationModel.js";
 import { disconnectOrg } from "../services/metaConnectService.js";
-import { logInboundMessage, findOrganizationByPhone } from "../services/platformInboxService.js";
+import {
+  logInboundMessage,
+  findOrganizationByPhone,
+  updateMessageStatus,
+} from "../services/platformInboxService.js";
 
 // Dedupe de webhooks: Meta puede reintentar la entrega del mismo mensaje.
 // Map message.id → timestamp; se poda cada vez que crece.
@@ -96,7 +100,18 @@ export async function handleMetaIncoming(req, res) {
     return;
   }
 
-  // Solo procesar texto e interactivos (botones de template); ignorar estados, imágenes, etc.
+  // Eventos de status (ticks: sent/delivered/read/failed) de mensajes salientes —
+  // llegan en un payload separado, sin "messages". Actualiza el inbox de superadmin.
+  const statuses = change?.statuses;
+  if (statuses?.length) {
+    for (const s of statuses) {
+      updateMessageStatus({ metaMessageId: s.id, status: s.status }).catch((err) =>
+        console.error("[WaAgent] Error actualizando status de mensaje:", err.message)
+      );
+    }
+  }
+
+  // Solo procesar texto e interactivos (botones de template); ignorar imágenes, etc.
   if (!message || (message.type !== "text" && message.type !== "interactive"))
     return;
 
