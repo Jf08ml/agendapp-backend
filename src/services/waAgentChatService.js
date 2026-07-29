@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { sendTextMessage } from "./metaApiService.js";
 import { claudeTools, executeTool } from "../chatbot/toolRegistry.js";
 import WaBotMessage from "../models/waBotMessageModel.js";
+import { logOutboundMessage } from "./platformInboxService.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -183,6 +184,12 @@ export async function processAdminCommand(org, messageBody) {
   try {
     await sendTextMessage(adminPhone, toWhatsAppFormat(finalReply));
     console.log(`[WaAgentChat] Respuesta enviada — org: ${org.name}: "${finalReply.slice(0, 80)}"`);
+    logOutboundMessage({
+      phone: adminPhone,
+      organizationId: org._id,
+      body: finalReply,
+      source: "ai_agent",
+    }).catch((err) => console.error("[WaAgentChat] Error guardando respuesta en el inbox:", err.message));
   } catch (err) {
     console.error(`[WaAgentChat] Error enviando respuesta — org: ${org.name}:`, err.message);
   }

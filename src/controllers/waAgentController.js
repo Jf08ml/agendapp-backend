@@ -7,6 +7,7 @@ import { processClientBookingMessage } from "../services/waBookingAgentService.j
 import { validateMetaSignature } from "../services/metaApiService.js";
 import Organization from "../models/organizationModel.js";
 import { disconnectOrg } from "../services/metaConnectService.js";
+import { logInboundMessage, findOrganizationByPhone } from "../services/platformInboxService.js";
 
 // Dedupe de webhooks: Meta puede reintentar la entrega del mismo mensaje.
 // Map message.id → timestamp; se poda cada vez que crece.
@@ -128,20 +129,27 @@ export async function handleMetaIncoming(req, res) {
 
   // ── Routing ──────────────────────────────────────────────────────────────────
   if (receivingPhoneNumberId === process.env.META_PLATFORM_PHONE_NUMBER_ID) {
-    // El admin escribió al número de AgenditApp → comando directo al bot
-    const phoneVariants = [fromPhone, fromPhone.replace(/^\+/, "")];
-    const org = await Organization.findOne({
-      $or: [
-        { phoneNumber: { $in: phoneVariants } },
-        { waPhone: { $in: phoneVariants } },
-      ],
-      waAgentEnabled: true,
-    }).lean();
+    // Alguien escribió al número de AgenditApp (dueño de org o respuesta a un
+    // mensaje de retargeting). Se persiste SIEMPRE para el inbox de superadmin,
+    // sin importar si la org tiene el agente IA activado.
+    const org = await findOrganizationByPhone(fromPhone);
+
+    logInboundMessage({
+      phone: fromPhone,
+      organizationId: org?._id || null,
+      body,
+      metaMessageId: message.id,
+    }).catch((err) => console.error("[WaAgent] Error guardando mensaje entrante en el inbox:", err.message));
 
     if (!org) {
       console.warn(
-        `[WaAgent] Mensaje al número de AgenditApp desde teléfono no registrado como admin: ${fromPhone}`,
+        `[WaAgent] Mensaje al número de AgenditApp desde teléfono no reconocido: ${fromPhone}`,
       );
+      return;
+    }
+
+    if (!org.waAgentEnabled) {
+      // Sin agente IA activo — queda pendiente en el inbox de superadmin para respuesta manual
       return;
     }
 

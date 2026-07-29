@@ -35,6 +35,7 @@ import productRoutes from "./productRoutes.js";
 import registrationRoutes from "./registrationRoutes.js";
 import adminRoutes from "./adminRoutes.js";
 import agentRoutes from "./agentRoutes.js";
+import platformInboxRoutes from "./platformInboxRoutes.js";
 import auditLogRoutes from "./auditLog.js";
 import announcementRoutes from "./announcementRoutes.js";
 import announcementAdminRoutes from "./announcementAdminRoutes.js";
@@ -172,6 +173,9 @@ router.use(adminRoutes);
 
 // Gestión de agentes/referidores externos (superadmin only)
 router.use("/admin/agents", agentRoutes);
+
+// Inbox del número de WhatsApp de plataforma: retargeting + respuestas (superadmin only)
+router.use("/admin/wa-inbox", platformInboxRoutes);
 
 // ═══════════════════════════════════════════════════
 // 2. SEMI-PÚBLICAS (manejan auth internamente)
