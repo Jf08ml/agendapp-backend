@@ -30,6 +30,9 @@ const serviceSchema = new Schema({
   // (ej: "Montura de pestañas" → "Retoque" a los 20 días). Ambos null = sin seguimiento.
   followUpServiceId: { type: Types.ObjectId, ref: "Service", default: null },
   followUpDays: { type: Number, default: null, min: 1 },
+  // 📄 Material adicional mostrado en el detalle público del servicio
+  pdfUrl: { type: String, default: null },
+  videoUrl: { type: String, default: null },
 });
 
 export default model("Service", serviceSchema);
