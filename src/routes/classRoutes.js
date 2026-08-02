@@ -134,8 +134,11 @@ router.patch(
 // IMPORTANTE: /:id va al final para no capturar /sessions ni /rooms
 // ════════════════════════════════════════════════
 
-// 🌐 Público: clases activas de una organización (para landing/reserva online)
-router.get("/organization/:organizationId", classController.getByOrganization);
+// 🌐 Público: clases activas Y públicas de una organización (landing/reserva online)
+router.get("/organization/:organizationId", classController.getPublicByOrganization);
+
+// 🌐 Público: detalle de un programa/clase (vista compartible, organizationId por query)
+router.get("/public/:id", classController.getPublicClassById);
 
 // 🔒 Protegido: CRUD de tipos de clase
 router.post(

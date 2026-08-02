@@ -82,9 +82,33 @@ const classController = {
     }
   },
 
+  // 🌐 Público: clases activas Y públicas (landing/catálogo de programas/reserva)
+  getPublicByOrganization: async (req, res) => {
+    try {
+      const organizationId = req.params.organizationId;
+      const classes = await classTypeService.getPublicByOrganization(organizationId);
+      sendResponse(res, 200, classes, "Clases obtenidas exitosamente");
+    } catch (error) {
+      sendResponse(res, 500, null, error.message);
+    }
+  },
+
   getById: async (req, res) => {
     try {
       const classDoc = await classTypeService.getById(req.params.id);
+      sendResponse(res, 200, classDoc, "Clase encontrada");
+    } catch (error) {
+      sendResponse(res, 404, null, error.message);
+    }
+  },
+
+  // 🌐 Público: detalle de un programa/clase (vista compartible)
+  getPublicClassById: async (req, res) => {
+    try {
+      const classDoc = await classTypeService.getPublicClassById(
+        req.params.id,
+        req.query.organizationId
+      );
       sendResponse(res, 200, classDoc, "Clase encontrada");
     } catch (error) {
       sendResponse(res, 404, null, error.message);

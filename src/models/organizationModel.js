@@ -474,7 +474,7 @@ const organizationSchema = new mongoose.Schema({
   },
   homeLayout: {
     type: String,
-    enum: ["modern", "minimal", "cards", "landing"],
+    enum: ["modern", "minimal", "cards", "landing", "academy"],
     default: "modern",
   },
   reminderSettings: {

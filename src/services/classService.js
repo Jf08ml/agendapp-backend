@@ -59,15 +59,46 @@ const classTypeService = {
     return classDoc.save();
   },
 
+  // 🔒 Admin: todas las clases (para gestión y para el selector de paquetes) —
+  // NO filtra por isPublic, solo por isActive según includeInactive.
   async getByOrganization(organizationId, { includeInactive = false } = {}) {
     const filter = { organizationId };
     if (!includeInactive) filter.isActive = true;
     return Class.find(filter).sort({ name: 1 });
   },
 
+  // 🌐 Público: solo clases activas Y marcadas como públicas (landing,
+  // catálogo de programas, reserva de clases). isPublic ausente = pública
+  // (compatibilidad con clases creadas antes de este campo).
+  async getPublicByOrganization(organizationId) {
+    return Class.find({
+      organizationId,
+      isActive: true,
+      isPublic: { $ne: false },
+    }).sort({ name: 1 });
+  },
+
   async getById(id) {
     const classDoc = await Class.findById(id);
     if (!classDoc) throw new Error("Clase no encontrada");
+    return classDoc;
+  },
+
+  // 🌐 Público: detalle de un programa/clase, compartible (organizationId
+  // viaja por query string ya que este endpoint no pasa por organizationResolver).
+  async getPublicClassById(id, organizationId) {
+    if (!organizationId) {
+      throw new Error("Falta organizationId");
+    }
+    const classDoc = await Class.findOne({
+      _id: id,
+      organizationId,
+      isActive: { $ne: false },
+      isPublic: { $ne: false },
+    });
+    if (!classDoc) {
+      throw new Error("Clase no encontrada");
+    }
     return classDoc;
   },
 

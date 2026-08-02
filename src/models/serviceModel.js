@@ -33,6 +33,10 @@ const serviceSchema = new Schema({
   // 📄 Material adicional mostrado en el detalle público del servicio
   pdfUrl: { type: String, default: null },
   videoUrl: { type: String, default: null },
+  // 💬 CTA del servicio: reserva normal o abre WhatsApp para cotizar
+  // (ej: servicios "a medida" sin precio fijo, como cotizaciones).
+  ctaMode: { type: String, enum: ["booking", "whatsapp_quote"], default: "booking" },
+  whatsappQuoteMessage: { type: String, default: null },
 });
 
 export default model("Service", serviceSchema);
