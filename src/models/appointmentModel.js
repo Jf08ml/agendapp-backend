@@ -81,6 +81,13 @@ const appointmentModelSchema = new mongoose.Schema(
       enum: ["customer", "admin"],
       required: false,
     },
+    // 📝 Registro de lo hecho en la sesión (concepto genérico: sirve como nota
+    // de servicio, seguimiento de progreso, historia clínica básica, etc.
+    // según el rubro del negocio). Visible en el historial de citas del cliente.
+    sessionNotes: {
+      type: String,
+      default: "",
+    },
     reminderSent: { type: Boolean, default: false },
     reminderBulkId: { type: String },
     secondReminderSent: { type: Boolean, default: false },

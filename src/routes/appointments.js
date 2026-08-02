@@ -39,6 +39,9 @@ router.get("/:id", appointmentController.getAppointmentById);
 // Actualizar una cita específica por ID
 router.put("/:id", appointmentController.updateAppointment);
 
+// 📝 Actualizar solo las notas de la sesión (no reprograma ni recalcula la cita)
+router.patch("/:id/notes", appointmentController.updateSessionNotes);
+
 // Marcar asistencia (attended / no_show)
 router.patch("/:appointmentId/attendance", appointmentController.markAttendance);
 

@@ -197,6 +197,18 @@ const appointmentController = {
     }
   },
 
+  // 📝 Actualizar solo las notas de la sesión (registro genérico de lo hecho en la cita)
+  updateSessionNotes: async (req, res) => {
+    const { id } = req.params;
+    const { sessionNotes } = req.body;
+    try {
+      const updatedAppointment = await appointmentService.updateSessionNotes(id, sessionNotes);
+      sendResponse(res, 200, updatedAppointment, "Notas de la sesión guardadas exitosamente");
+    } catch (error) {
+      sendResponse(res, 500, null, error.message);
+    }
+  },
+
   // Controlador para actualizar una cita
   updateAppointment: async (req, res) => {
     const { id } = req.params;

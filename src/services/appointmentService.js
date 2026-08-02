@@ -968,6 +968,20 @@ const appointmentService = {
       .exec();
   },
 
+  // 📝 Actualizar solo el registro de la sesión (notas de lo hecho en la
+  // cita). Deliberadamente separado de updateAppointment: ese reprograma y
+  // recalcula precio/servicio/disponibilidad — no es lo que queremos disparar
+  // solo por guardar una nota.
+  updateSessionNotes: async (id, sessionNotes) => {
+    const appt = await appointmentModel
+      .findByIdAndUpdate(id, { sessionNotes: sessionNotes || "" }, { new: true })
+      .populate("service")
+      .populate("employee")
+      .populate("client");
+    if (!appt) throw new Error("Cita no encontrada");
+    return appt;
+  },
+
   // Reemplaza tu updateAppointment por este
   updateAppointment: async (id, updatedData) => {
     const appt = await appointmentModel.findById(id);
