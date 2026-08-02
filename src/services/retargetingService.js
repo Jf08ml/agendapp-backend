@@ -65,15 +65,25 @@ export async function sendSetupNudges() {
     const link = orgLink(org, "/login-admin");
     if (!link) continue;
 
+    // Reclamo atómico antes de enviar: si otro proceso (ej. otra instancia
+    // del backend corriendo el mismo cron) ya marcó este envío entre el
+    // find() de arriba y este punto, claimed viene null y no se envía —
+    // evita duplicados por condición de carrera.
+    const claimed = await Organization.findOneAndUpdate(
+      { _id: org._id, "retargeting.setupNudgeSentAt": null },
+      { $set: { "retargeting.setupNudgeSentAt": new Date() } }
+    );
+    if (!claimed) continue;
+
     try {
       const params = [ownerName(org), org.name, link];
       const { messageId } = await sendPlatformTemplate(org.phoneNumber, "activa_tu_cuenta", params);
       logRetargetingSend(org, "activa_tu_cuenta", params, messageId);
-      org.retargeting.setupNudgeSentAt = new Date();
-      await org.save();
       sent++;
     } catch (err) {
       console.error(`[retargeting] Error enviando activa_tu_cuenta a ${org._id}:`, err.response?.data || err.message);
+      // El envío falló: liberar el reclamo para reintentar en la próxima corrida.
+      await Organization.updateOne({ _id: org._id }, { $set: { "retargeting.setupNudgeSentAt": null } });
     }
   }
   return sent;
@@ -93,15 +103,20 @@ export async function sendFirstAppointmentNudges() {
     const link = orgLink(org, "/gestionar-agenda");
     if (!link) continue;
 
+    const claimed = await Organization.findOneAndUpdate(
+      { _id: org._id, "retargeting.firstAppointmentNudgeSentAt": null },
+      { $set: { "retargeting.firstAppointmentNudgeSentAt": new Date() } }
+    );
+    if (!claimed) continue;
+
     try {
       const params = [ownerName(org), org.name, link];
       const { messageId } = await sendPlatformTemplate(org.phoneNumber, "agenda_tu_primera_cita", params);
       logRetargetingSend(org, "agenda_tu_primera_cita", params, messageId);
-      org.retargeting.firstAppointmentNudgeSentAt = new Date();
-      await org.save();
       sent++;
     } catch (err) {
       console.error(`[retargeting] Error enviando agenda_tu_primera_cita a ${org._id}:`, err.response?.data || err.message);
+      await Organization.updateOne({ _id: org._id }, { $set: { "retargeting.firstAppointmentNudgeSentAt": null } });
     }
   }
   return sent;
@@ -121,15 +136,20 @@ export async function sendWhatsappConnectNudges() {
     const link = orgLink(org, "/gestionar-whatsapp");
     if (!link) continue;
 
+    const claimed = await Organization.findOneAndUpdate(
+      { _id: org._id, "retargeting.whatsappNudgeSentAt": null },
+      { $set: { "retargeting.whatsappNudgeSentAt": new Date() } }
+    );
+    if (!claimed) continue;
+
     try {
       const params = [ownerName(org), org.name, link];
       const { messageId } = await sendPlatformTemplate(org.phoneNumber, "conecta_tu_whatsapp", params);
       logRetargetingSend(org, "conecta_tu_whatsapp", params, messageId);
-      org.retargeting.whatsappNudgeSentAt = new Date();
-      await org.save();
       sent++;
     } catch (err) {
       console.error(`[retargeting] Error enviando conecta_tu_whatsapp a ${org._id}:`, err.response?.data || err.message);
+      await Organization.updateOne({ _id: org._id }, { $set: { "retargeting.whatsappNudgeSentAt": null } });
     }
   }
   return sent;

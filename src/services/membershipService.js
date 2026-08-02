@@ -222,16 +222,31 @@ const membershipService = {
       const isTrial = membership.status === "trial";
       const isTrialPlan = membership.planId?.slug === "plan-demo";
 
-      // 3 días antes de vencer — notificación con tono diferente si es trial
+      // 3 días antes de vencer — notificación con tono diferente si es trial.
+      // Reclamo atómico antes de encolar el envío: si otro proceso ya
+      // marcó threeDaysSent entre el find() de arriba y este punto, claimed
+      // viene null y no se duplica el mensaje de retargeting trial_por_vencer.
       if (daysLeft <= 3 && daysLeft > 1 && !membership.notifications.threeDaysSent) {
-        results.threeDays.push(membership);
-        membership.notifications.threeDaysSent = true;
+        const claimed = await membershipModel.findOneAndUpdate(
+          { _id: membership._id, "notifications.threeDaysSent": { $ne: true } },
+          { $set: { "notifications.threeDaysSent": true } }
+        );
+        if (claimed) {
+          results.threeDays.push(membership);
+          membership.notifications.threeDaysSent = true;
+        }
       }
 
       // 1 día antes de vencer
       if (daysLeft <= 1 && daysLeft > 0 && !membership.notifications.oneDaySent) {
-        results.oneDay.push(membership);
-        membership.notifications.oneDaySent = true;
+        const claimed = await membershipModel.findOneAndUpdate(
+          { _id: membership._id, "notifications.oneDaySent": { $ne: true } },
+          { $set: { "notifications.oneDaySent": true } }
+        );
+        if (claimed) {
+          results.oneDay.push(membership);
+          membership.notifications.oneDaySent = true;
+        }
       }
 
       // Trial de plan-demo vencido → convertir a plan gratuito (sin importar cuántos días hace)
