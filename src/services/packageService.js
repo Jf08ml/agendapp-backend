@@ -674,6 +674,65 @@ const packageService = {
     return pkg;
   },
 
+  // ✏️ Editar paquete de cliente: extender fecha de vencimiento y/o añadir
+  // sesiones por servicio/clase. Solo suma (no permite quitar sesiones ya
+  // otorgadas — eso se maneja cancelando/reasignando).
+  editClientPackage: async (clientPackageId, organizationId, {
+    expirationDate,
+    serviceAdjustments = [],
+    classAdjustments = [],
+  } = {}) => {
+    const pkg = await ClientPackage.findOne({ _id: clientPackageId, organizationId });
+    if (!pkg) {
+      throw new Error("Paquete no encontrado");
+    }
+    if (pkg.status === "cancelled") {
+      throw new Error("No se puede editar un paquete cancelado");
+    }
+
+    if (expirationDate) {
+      const newDate = new Date(expirationDate);
+      if (isNaN(newDate.getTime())) {
+        throw new Error("Fecha de vencimiento inválida");
+      }
+      pkg.expirationDate = newDate;
+    }
+
+    for (const adj of serviceAdjustments) {
+      if (!adj.sessionsToAdd || adj.sessionsToAdd <= 0) continue;
+      const svc = pkg.services.find((s) => s.serviceId.toString() === adj.serviceId);
+      if (!svc) {
+        throw new Error("Servicio no encontrado en este paquete");
+      }
+      svc.sessionsIncluded += adj.sessionsToAdd;
+      svc.sessionsRemaining += adj.sessionsToAdd;
+    }
+
+    for (const adj of classAdjustments) {
+      if (!adj.sessionsToAdd || adj.sessionsToAdd <= 0) continue;
+      const cls = pkg.classes.find((c) => c.classId.toString() === adj.classId);
+      if (!cls) {
+        throw new Error("Clase no encontrada en este paquete");
+      }
+      cls.sessionsIncluded += adj.sessionsToAdd;
+      cls.sessionsRemaining += adj.sessionsToAdd;
+    }
+
+    // Recalcular status según el estado resultante (independiente de cuál
+    // combinación de cambios se aplicó).
+    const hasRemaining =
+      pkg.services.some((s) => s.sessionsRemaining > 0) ||
+      (pkg.classes || []).some((c) => c.sessionsRemaining > 0);
+    pkg.status = !hasRemaining ? "exhausted" : pkg.expirationDate <= new Date() ? "expired" : "active";
+
+    await pkg.save();
+    return ClientPackage.findById(pkg._id)
+      .populate("clientId", "name phoneNumber")
+      .populate("servicePackageId", "name description")
+      .populate("services.serviceId", "name price duration")
+      .populate("classes.classId", "name color pricePerPerson duration");
+  },
+
   deleteClientPackage: async (clientPackageId, organizationId) => {
     const pkg = await ClientPackage.findOneAndDelete({
       _id: clientPackageId,

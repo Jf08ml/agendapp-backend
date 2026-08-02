@@ -175,6 +175,21 @@ const packageController = {
     }
   },
 
+  editClientPackage: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { organizationId, expirationDate, serviceAdjustments, classAdjustments } = req.body;
+      const result = await packageService.editClientPackage(id, organizationId, {
+        expirationDate,
+        serviceAdjustments,
+        classAdjustments,
+      });
+      sendResponse(res, 200, result, "Paquete actualizado exitosamente");
+    } catch (error) {
+      sendResponse(res, error.statusCode || 500, null, error.message);
+    }
+  },
+
   deleteClientPackage: async (req, res) => {
     try {
       const { id } = req.params;
