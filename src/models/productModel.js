@@ -44,6 +44,24 @@ const productSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    // 🖼️ Galería adicional para el detalle público del producto (imageUrl sigue
+    // siendo la portada mostrada en la card/miniatura del catálogo y el admin).
+    images: {
+      type: [String],
+      default: [],
+    },
+    // 📋 Modo de uso / instrucciones mostradas en el detalle público
+    // (ej: "Aplicar sobre cabello húmedo, dejar actuar 5 min").
+    usageInstructions: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    // ⭐ Producto destacado: se muestra primero en la tienda pública
+    featured: {
+      type: Boolean,
+      default: false,
+    },
     costPrice: {
       type: Number,
       min: 0,

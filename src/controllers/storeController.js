@@ -189,9 +189,13 @@ export const getStoreCatalog = async (req, res) => {
       active: true,
       visibleInStore: true,
     })
-      .select("name brand category description imageUrl salePrice trackStock stockQuantity")
+      .select("name brand category description imageUrl salePrice trackStock stockQuantity featured")
       .sort({ name: 1 })
       .lean();
+
+    // ⭐ Destacados primero (sort estable en JS, igual que Service — ver
+    // getServicesByOrganizationId). Docs legacy sin el campo → featured false.
+    docs.sort((a, b) => (b.featured === true ? 1 : 0) - (a.featured === true ? 1 : 0));
 
     // Campos públicos: el stock exacto NO se expone, solo "agotado".
     const products = docs.map((p) => ({
@@ -203,6 +207,7 @@ export const getStoreCatalog = async (req, res) => {
       imageUrl: p.imageUrl || "",
       salePrice: p.salePrice,
       outOfStock: !!(p.trackStock && p.stockQuantity <= 0),
+      featured: !!p.featured,
     }));
 
     return sendResponse(
@@ -217,6 +222,49 @@ export const getStoreCatalog = async (req, res) => {
         products,
       },
       "Catálogo de la tienda."
+    );
+  } catch (err) {
+    return sendResponse(res, 400, null, err.message);
+  }
+};
+
+// GET /store/product/:id  (organizationResolver; acepta ?org= como fallback)
+// Detalle público de un producto — vista compartible, análoga a
+// getPublicServiceById. Mismo whitelist de campos públicos que el catálogo
+// (jamás costPrice, comisiones, sku/barcode ni stock exacto).
+export const getStoreProductDetail = async (req, res) => {
+  try {
+    const organizationId = req.query.org || req.organization?._id;
+    if (!organizationId) return sendResponse(res, 400, null, "Falta la organización.");
+
+    const p = await Product.findOne({
+      _id: req.params.id,
+      organizationId,
+      active: true,
+      visibleInStore: true,
+    })
+      .select("name brand category description usageInstructions imageUrl images salePrice trackStock stockQuantity featured")
+      .lean();
+
+    if (!p) return sendResponse(res, 404, null, "Producto no encontrado.");
+
+    return sendResponse(
+      res,
+      200,
+      {
+        _id: p._id,
+        name: p.name,
+        brand: p.brand,
+        category: p.category,
+        description: p.description,
+        usageInstructions: p.usageInstructions,
+        imageUrl: p.imageUrl || "",
+        images: p.images || [],
+        salePrice: p.salePrice,
+        outOfStock: !!(p.trackStock && p.stockQuantity <= 0),
+        featured: !!p.featured,
+      },
+      "Producto encontrado."
     );
   } catch (err) {
     return sendResponse(res, 400, null, err.message);

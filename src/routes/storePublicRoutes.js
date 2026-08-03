@@ -2,6 +2,7 @@ import express from "express";
 import { organizationResolver } from "../middleware/organizationResolver.js";
 import {
   getStoreCatalog,
+  getStoreProductDetail,
   createStoreCheckout,
   createStoreCodOrder,
 } from "../controllers/storeController.js";
@@ -14,6 +15,7 @@ import {
 const router = express.Router();
 
 router.get("/catalog", organizationResolver, getStoreCatalog);
+router.get("/product/:id", organizationResolver, getStoreProductDetail);
 router.post("/checkout", createStoreCheckout); // Mercado Pago
 router.post("/cod", createStoreCodOrder); // contraentrega
 
