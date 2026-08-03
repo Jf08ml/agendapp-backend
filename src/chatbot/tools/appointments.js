@@ -1116,4 +1116,116 @@ Busca la cita por cliente, fecha, servicio o profesional — igual que cancel_or
       };
     },
   },
+
+  {
+    name: "mark_appointment_attendance",
+    description: `Marca si un cliente asistió o no asistió a una cita.
+Busca la cita por cliente, fecha, servicio o profesional — igual que register_payment. Si encuentra más de una, devuelve la lista para que el usuario especifique.
+Úsalo cuando el usuario diga "asistió", "no vino", "no se presentó", "faltó a la cita", etc.`,
+    parameters: {
+      clientName: { type: "string", description: "Nombre parcial del cliente de la cita.", required: false },
+      clientPhone: { type: "string", description: "Teléfono del cliente (con código de país). Prioridad sobre clientName.", required: false },
+      date: { type: "string", description: 'Fecha de la cita en formato YYYY-MM-DD o preset (today, tomorrow, this_week). Opcional, ayuda a afinar.', required: false },
+      serviceName: { type: "string", description: "Nombre parcial del servicio para afinar la búsqueda (opcional).", required: false },
+      employeeName: { type: "string", description: "Nombre parcial del profesional para afinar la búsqueda (opcional).", required: false },
+      appointmentId: { type: "string", description: "ID de la cita si ya se conoce. Si se da, se omite la búsqueda por los demás criterios.", required: false },
+      status: { type: "string", description: '"attended" si asistió, "no_show" si no asistió.', required: true },
+      notifyClient: { type: "boolean", description: "Si true, envía un WhatsApp automático al cliente (solo aplica para no_show, según la plantilla configurada). Por defecto false.", required: false },
+    },
+    handler: async (params, context) => {
+      const { organizationId, organization } = context;
+      const timezone = organization.timezone || "America/Bogota";
+
+      if (!["attended", "no_show"].includes(params.status)) {
+        return { success: false, error: 'El estado debe ser "attended" o "no_show".' };
+      }
+
+      let appt;
+
+      if (params.appointmentId) {
+        appt = await Appointment.findOne({ _id: params.appointmentId, organizationId })
+          .populate("client", "name")
+          .populate("service", "name")
+          .populate("employee", "names");
+        if (!appt) return { success: false, error: "No se encontró ninguna cita con ese ID." };
+      } else {
+        const filter = { organizationId, status: { $nin: CANCELLED_STATUSES } };
+
+        if (params.clientPhone || params.clientName) {
+          const clients = params.clientPhone
+            ? await findClientsByPhone(organizationId, params.clientPhone)
+            : await findClientsByName(organizationId, params.clientName);
+          if (clients.length === 0) {
+            const term = params.clientPhone || params.clientName;
+            return { success: false, error: `No se encontró ningún cliente con "${term}".` };
+          }
+          filter.client = { $in: clients.map((c) => c._id) };
+        }
+
+        if (params.date) {
+          const now = moment.tz(timezone);
+          const presets = {
+            today: [now.clone().startOf("day"), now.clone().endOf("day")],
+            tomorrow: [now.clone().add(1, "day").startOf("day"), now.clone().add(1, "day").endOf("day")],
+            this_week: [now.clone().startOf("isoWeek"), now.clone().endOf("isoWeek")],
+          };
+          const range = presets[params.date] || (() => {
+            const d = moment.tz(params.date, "YYYY-MM-DD", timezone);
+            return d.isValid() ? [d.startOf("day"), d.clone().endOf("day")] : null;
+          })();
+          if (!range) return { success: false, error: `Fecha inválida: "${params.date}".` };
+          filter.startDate = { $gte: range[0].toDate(), $lte: range[1].toDate() };
+        }
+
+        if (params.serviceName) {
+          const svc = await findServiceByName(organizationId, params.serviceName);
+          if (!svc) return { success: false, error: `No se encontró el servicio "${params.serviceName}".` };
+          filter.service = svc._id;
+        }
+
+        if (params.employeeName) {
+          const emps = await findEmployeesByName(organizationId, params.employeeName);
+          if (emps.length === 0) return { success: false, error: `No se encontró el profesional "${params.employeeName}".` };
+          filter.employee = { $in: emps.map((e) => e._id) };
+        }
+
+        const appointments = await Appointment.find(filter)
+          .populate("client", "name")
+          .populate("service", "name")
+          .populate("employee", "names")
+          .sort({ startDate: -1 })
+          .limit(10);
+
+        if (appointments.length === 0) {
+          return { success: false, error: "No se encontraron citas con esos criterios. Intenta con más detalles." };
+        }
+        if (appointments.length > 1) {
+          const lista = appointments.map((a) => {
+            const fecha = moment(a.startDate).tz(timezone).format("DD/MM/YYYY [a las] HH:mm");
+            return `• ${a.client?.name || "?"} — ${a.service?.name || "?"} con ${a.employee?.names || "?"} el ${fecha} (ID: ${a._id})`;
+          });
+          return {
+            success: false,
+            multipleFound: true,
+            message: `Encontré ${appointments.length} citas. ¿A cuál te refieres? (vuelve a llamar con appointmentId)`,
+            citas: lista,
+          };
+        }
+        appt = appointments[0];
+      }
+
+      try {
+        await appointmentService.markAttendance(appt._id.toString(), params.status, organizationId, params.notifyClient ?? false);
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+
+      const fecha = moment(appt.startDate).tz(timezone).format("DD/MM/YYYY [a las] HH:mm");
+      return {
+        success: true,
+        resumen: `${appt.service?.name || "?"} de ${appt.client?.name || "?"} con ${appt.employee?.names || "?"} el ${fecha}`,
+        estado: params.status === "attended" ? "Asistió" : "No asistió",
+      };
+    },
+  },
 ];

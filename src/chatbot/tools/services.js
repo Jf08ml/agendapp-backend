@@ -8,6 +8,8 @@ const LARGE_DENOMINATION_CURRENCIES = new Set([
   "COP", "CLP", "CRC", "PYG", "ARS", "HUF", "KRW", "IDR", "VND", "UYU", "NIO",
 ]);
 
+const escapeRegex = (str) => String(str || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 // Quita acentos, pasa a minúsculas y deja solo letras/números/espacios — para
 // detectar duplicados con variaciones de tildes o mayúsculas ("Manicure básica" vs "Manicure Basico")
 const normalizeForCompare = (str) =>
@@ -236,6 +238,54 @@ export default [
           skippedDuplicates.length > 0 || priceWarnings.length > 0
             ? "Dile al usuario cuántos servicios se crearon. Para los de skippedDuplicates y priceWarnings, muéstraselos puntualmente y pregunta si quiere crearlos igual — si confirma, reintenta bulk_create_services SOLO con esos items y force: true. No repitas la lista completa del lote."
             : "Confirma al usuario cuántos servicios se crearon exitosamente, con un resumen breve (no hace falta listar los 50 uno por uno si son muchos).",
+      };
+    },
+  },
+  {
+    name: "update_service",
+    description:
+      "Edita un servicio existente: nombre, tipo, duración, precio, descripción, recomendaciones o si está activo/inactivo. Solo actualiza los campos que se indiquen. Confirma con el usuario los cambios antes de aplicarlos si no está completamente claro qué quiere cambiar.",
+    parameters: {
+      serviceName: { type: "string", description: "Nombre (parcial) del servicio a editar.", required: true },
+      name: { type: "string", description: "Nuevo nombre (opcional).", required: false },
+      type: { type: "string", description: "Nueva categoría/tipo (opcional).", required: false },
+      duration: { type: "number", description: "Nueva duración en minutos (opcional).", required: false },
+      price: { type: "number", description: "Nuevo precio (opcional). Mismo criterio que create_service para interpretar 'mil'/'millón'.", required: false },
+      description: { type: "string", description: "Nueva descripción (opcional).", required: false },
+      recommendations: { type: "string", description: "Nuevas recomendaciones (opcional).", required: false },
+      isActive: { type: "boolean", description: "true para activar el servicio, false para desactivarlo (deja de mostrarse para reservar). Opcional.", required: false },
+    },
+    handler: async (params, context) => {
+      const service = await Service.findOne({
+        organizationId: context.organizationId,
+        name: { $regex: escapeRegex(params.serviceName), $options: "i" },
+      });
+      if (!service) {
+        return { success: false, error: `No se encontró un servicio llamado "${params.serviceName}".` };
+      }
+
+      const update = {};
+      for (const key of ["name", "type", "duration", "price", "description", "recommendations", "isActive"]) {
+        if (params[key] !== undefined) update[key] = params[key];
+      }
+      if (Object.keys(update).length === 0) {
+        return { success: false, error: "No se indicó ningún campo para actualizar." };
+      }
+
+      service.set(update);
+      await service.save();
+
+      return {
+        success: true,
+        service: {
+          id: service._id,
+          name: service.name,
+          type: service.type,
+          duration: service.duration,
+          price: service.price,
+          isActive: service.isActive,
+        },
+        actualizados: Object.keys(update),
       };
     },
   },

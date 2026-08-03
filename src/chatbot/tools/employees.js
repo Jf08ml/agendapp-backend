@@ -1,5 +1,6 @@
 import Employee from "../../models/employeeModel.js";
 import Service from "../../models/serviceModel.js";
+import employeeService from "../../services/employeeService.js";
 import bcrypt from "bcryptjs";
 
 const generateTempPassword = () => Math.random().toString(36).slice(-8) + "A1!";
@@ -96,6 +97,57 @@ export default [
       await Employee.findByIdAndUpdate(employee._id, { $addToSet: { services: { $each: services.map((s) => s._id) } } });
 
       return { success: true, employee: employee.names, assigned: services.map((s) => s.name) };
+    },
+  },
+  {
+    name: "update_employee",
+    description:
+      "Edita los datos de un profesional existente: nombre, cargo, teléfono, comisión, o si está activo/inactivo. NO permite cambiar el correo (es su usuario de acceso — eso se hace desde Gestionar Profesionales). Solo actualiza los campos indicados.",
+    parameters: {
+      employeeId: { type: "string", description: "ID o nombre (parcial) del profesional a editar.", required: true },
+      names: { type: "string", description: "Nuevo nombre completo (opcional).", required: false },
+      position: { type: "string", description: "Nuevo cargo/especialidad (opcional).", required: false },
+      phoneNumber: { type: "string", description: "Nuevo teléfono (opcional).", required: false },
+      commissionType: { type: "string", description: "Nuevo tipo de comisión: 'percentage' o 'fixed' (opcional).", required: false },
+      commissionValue: { type: "number", description: "Nuevo valor de comisión (opcional).", required: false },
+      isActive: { type: "boolean", description: "true para activar, false para desactivar al profesional. Opcional.", required: false },
+    },
+    handler: async (params, context) => {
+      let employee = null;
+      if (/^[a-f\d]{24}$/i.test(params.employeeId)) {
+        employee = await Employee.findOne({ _id: params.employeeId, organizationId: context.organizationId });
+      }
+      if (!employee) {
+        employee = await Employee.findOne({
+          organizationId: context.organizationId,
+          names: { $regex: params.employeeId, $options: "i" },
+        });
+      }
+      if (!employee) {
+        return { success: false, error: `No se encontró el profesional "${params.employeeId}". Verifica el nombre.` };
+      }
+
+      const update = {};
+      for (const key of ["names", "position", "phoneNumber", "commissionType", "commissionValue", "isActive"]) {
+        if (params[key] !== undefined) update[key] = params[key];
+      }
+      if (Object.keys(update).length === 0) {
+        return { success: false, error: "No se indicó ningún campo para actualizar." };
+      }
+
+      const updated = await employeeService.updateEmployee(employee._id.toString(), update);
+
+      return {
+        success: true,
+        employee: {
+          id: updated._id,
+          names: updated.names,
+          position: updated.position,
+          phoneNumber: updated.phoneNumber,
+          isActive: updated.isActive,
+        },
+        actualizados: Object.keys(update),
+      };
     },
   },
 ];
