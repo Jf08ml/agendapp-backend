@@ -140,29 +140,3 @@ export const requireSuperAdmin = (req, res, next) => {
 
   next();
 };
-
-/**
- * Middleware para verificar que el usuario pertenece a la organización
- * Debe usarse DESPUÉS de verifyToken y organizationResolver
- */
-export const requireOrganizationAccess = (req, res, next) => {
-  if (!req.user) {
-    return res.status(401).json({ 
-      result: "error",
-      message: "Autenticación requerida" 
-    });
-  }
-
-  // Si hay un organizationId en el request, verificar que coincida
-  const requestOrgId = req.organization?._id?.toString() || req.params.organizationId;
-  
-  if (requestOrgId && req.user.organizationId && 
-      requestOrgId !== req.user.organizationId.toString()) {
-    return res.status(403).json({ 
-      result: "error",
-      message: "No tienes acceso a esta organización" 
-    });
-  }
-
-  next();
-};

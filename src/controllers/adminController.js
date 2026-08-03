@@ -36,6 +36,7 @@ import {
   getPlatformOverview,
   getPlatformTimeSeries,
   getOrganizationRanking,
+  getOrganizationsActivityOverview,
 } from "../services/platformAnalyticsService.js";
 import { listImpactReports } from "../services/impactReportService.js";
 
@@ -355,6 +356,23 @@ const adminController = {
     } catch (error) {
       console.error("[admin/getOrganizationRanking] Error:", error);
       sendResponse(res, 500, null, "Error al obtener ranking de organizaciones");
+    }
+  },
+
+  /**
+   * GET /api/admin/analytics/organizations-activity
+   * Foto histórica completa (sin rango de fecha ni límite) de actividad por
+   * organización: última cita agendada, total histórico, citas en 30 días.
+   * A diferencia del ranking, incluye orgs sin citas recientes — son las que
+   * el superadmin quiere identificar como inactivas.
+   */
+  getOrganizationsActivityOverview: async (req, res) => {
+    try {
+      const data = await getOrganizationsActivityOverview();
+      sendResponse(res, 200, data);
+    } catch (error) {
+      console.error("[admin/getOrganizationsActivityOverview] Error:", error);
+      sendResponse(res, 500, null, "Error al obtener la actividad de organizaciones");
     }
   },
 

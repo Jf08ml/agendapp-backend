@@ -83,6 +83,13 @@ router.get(
   adminController.getOrganizationRanking
 );
 
+router.get(
+  "/admin/analytics/organizations-activity",
+  verifyToken,
+  requireSuperAdmin,
+  adminController.getOrganizationsActivityOverview
+);
+
 // ─── Funnel de onboarding / activación (solo superadmins) ───────────────────
 
 router.get(

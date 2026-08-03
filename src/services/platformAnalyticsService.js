@@ -249,4 +249,35 @@ export async function getOrganizationRanking({ startDate, endDate, sortBy = "cit
   return ranking;
 }
 
-export default { getPlatformOverview, getPlatformTimeSeries, getOrganizationRanking };
+/**
+ * Foto histórica completa de actividad por organización (sin ventana de fecha
+ * ni límite): última cita agendada, total histórico, y citas en los últimos
+ * 30 días. A diferencia de getOrganizationRanking (acotado a un rango y a un
+ * top-N), esta función SÍ incluye organizaciones sin citas recientes — son
+ * justamente las que se quieren identificar como inactivas.
+ */
+export async function getOrganizationsActivityOverview() {
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+  const activity = await Appointment.aggregate([
+    {
+      $group: {
+        _id: "$organizationId",
+        totalAppointments: { $sum: 1 },
+        lastAppointmentAt: { $max: "$createdAt" },
+        appointmentsLast30d: {
+          $sum: { $cond: [{ $gte: ["$createdAt", thirtyDaysAgo] }, 1, 0] },
+        },
+      },
+    },
+  ]);
+
+  return activity.map((a) => ({
+    organizationId: String(a._id),
+    totalAppointments: a.totalAppointments,
+    lastAppointmentAt: a.lastAppointmentAt,
+    appointmentsLast30d: a.appointmentsLast30d,
+  }));
+}
+
+export default { getPlatformOverview, getPlatformTimeSeries, getOrganizationRanking, getOrganizationsActivityOverview };

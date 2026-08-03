@@ -1,7 +1,7 @@
 // routes/membershipRoutes.js
 import { Router } from "express";
 import membershipController from "../controllers/membershipController.js";
-import { verifyToken } from "../middleware/authMiddleware.js";
+import { verifyToken, requireSuperAdmin } from "../middleware/authMiddleware.js";
 import { organizationResolver } from "../middleware/organizationResolver.js";
 
 const router = Router();
@@ -21,7 +21,7 @@ router.put("/:membershipId/plan", verifyToken, membershipController.changePlan);
 router.get("/", verifyToken, membershipController.getAllMemberships);
 
 // Rutas de superadmin
-router.patch("/superadmin/:membershipId", verifyToken, membershipController.updateMembership);
-router.post("/superadmin/:membershipId/activate", verifyToken, membershipController.activatePlan);
+router.patch("/superadmin/:membershipId", verifyToken, requireSuperAdmin, membershipController.updateMembership);
+router.post("/superadmin/:membershipId/activate", verifyToken, requireSuperAdmin, membershipController.activatePlan);
 
 export default router;
