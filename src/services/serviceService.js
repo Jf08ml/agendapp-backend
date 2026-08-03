@@ -1,4 +1,5 @@
 import Service from "../models/serviceModel.js";
+import Appointment from "../models/appointmentModel.js";
 
 const serviceService = {
   // Crear un nuevo servicio
@@ -77,6 +78,14 @@ const serviceService = {
     if (!service) {
       throw new Error("Servicio no encontrado");
     }
+
+    const appointmentCount = await Appointment.countDocuments({ service: id });
+    if (appointmentCount > 0) {
+      throw new Error(
+        `No se puede eliminar: este servicio ya tiene ${appointmentCount} cita(s) asociada(s) (pasadas o futuras). Puedes desactivarlo en su lugar para que deje de ofrecerse sin romper el historial ni las citas agendadas.`
+      );
+    }
+
     await service.deleteOne();
     return { message: "Servicio eliminado correctamente" };
   },
