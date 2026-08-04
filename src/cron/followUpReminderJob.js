@@ -6,6 +6,8 @@ import Service from "../models/serviceModel.js";
 import Appointment from "../models/appointmentModel.js";
 import WhatsappTemplate from "../models/whatsappTemplateModel.js";
 import whatsappService from "../services/sendWhatsappService.js";
+import whatsappTemplates from "../utils/whatsappTemplates.js";
+import { waBulkSend, waBulkOptIn } from "../services/waHttpService.js";
 
 /**
  * 🔁 Job de recordatorios de seguimiento entre servicios relacionados
@@ -16,20 +18,44 @@ import whatsappService from "../services/sendWhatsappService.js";
  * `followUpDays` (ej: "Montura de pestañas" → "Retoque" a los 20 días).
  *
  * Para cada cliente cuya última cita "attended" del servicio gatillo ya superó
- * los N días configurados, y que NO tiene ninguna cita (pasada ni futura) del
- * servicio de seguimiento posterior a esa fecha, se envía un WhatsApp automático.
+ * los N días configurados (y no más de MAX_OVERDUE_DAYS extra — evita disparar
+ * sobre historial de hace meses/años la primera vez que se activa el feature),
+ * y que NO tiene ninguna cita (pasada ni futura) del servicio de seguimiento
+ * posterior a esa fecha, se envía un WhatsApp automático.
  *
- * Idempotencia: se marca `followUpReminderSent` en la cita gatillo tras enviar
- * (o al detectar que el seguimiento ya fue resuelto), igual que `reminderSent`.
+ * Un cliente recibe COMO MÁXIMO un mensaje por corrida, aunque matchee varias
+ * reglas distintas (ej. varios estilos de pestañas, cada uno con su propio
+ * seguimiento) — se elige la cita gatillo más reciente entre todas las reglas.
+ *
+ * Envío: igual que sendDailyReminders (appointmentService.js) — Meta manda
+ * uno por uno con una pausa fija; Baileys arma un solo paquete y el
+ * microservicio externo distribuye el envío con delays aleatorios, evitando
+ * ráfagas de decenas/cientos de mensajes en el mismo minuto.
+ *
+ * Idempotencia: se marca `followUpReminderSent` en la cita gatillo ANTES de
+ * enviar (evita reenvíos si el proceso se interrumpe a mitad de una tanda),
+ * igual que `reminderSent`.
  */
 
 const ACTIVE_STATUSES = ["active", "trial"];
 const CANCELLED_STATUSES = ["cancelled", "cancelled_by_customer", "cancelled_by_admin"];
 
+// Si la cita gatillo superó followUpDays + este margen sin resolverse, se
+// abandona sin enviar (se marca igual, para no volver a evaluarla mañana).
+// Evita que activar el feature dispare sobre citas de hace meses/años.
+const MAX_OVERDUE_DAYS = 30;
+
+// Pausa entre envíos individuales (solo canal Meta, uno por uno vía Graph API).
+const SEND_DELAY_MS = 200;
+
 function orgCanSendWhatsapp(org) {
   if (!org) return false;
   if (org.waConnectionType === "meta") return true;
   return !!org.clientIdWhatsapp;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export async function runFollowUpReminders() {
@@ -62,14 +88,25 @@ export async function runFollowUpReminders() {
 
       if (!rules.length) continue;
 
-      const tz = org.timezone || "America/Bogota";
-      let orgSent = 0;
+      const followUpServiceIds = [...new Set(rules.map((r) => String(r.followUpServiceId)))];
+      const followUpServices = await Service.find({ _id: { $in: followUpServiceIds } }).lean();
+      const followUpServiceById = new Map(followUpServices.map((s) => [String(s._id), s]));
 
+      const tz = org.timezone || "America/Bogota";
+
+      // Recolectar candidatos de TODAS las reglas antes de decidir qué enviar
+      // — así, si un cliente matchea varias reglas (ej. distintos estilos de
+      // pestañas), se evalúa una sola vez con su cita gatillo más reciente,
+      // en vez de la primera regla que se procese por orden arbitrario.
+      const allCandidates = [];
       for (const rule of rules) {
-        const followUpService = await Service.findById(rule.followUpServiceId).lean();
-        if (!followUpService) continue;
+        if (!followUpServiceById.has(String(rule.followUpServiceId))) continue;
 
         const cutoff = moment.tz(tz).subtract(rule.followUpDays, "days").toDate();
+        const tooOldCutoff = moment
+          .tz(tz)
+          .subtract(rule.followUpDays + MAX_OVERDUE_DAYS, "days")
+          .toDate();
 
         const candidates = await Appointment.find({
           organizationId: org._id,
@@ -80,94 +117,134 @@ export async function runFollowUpReminders() {
           // filtro estricto `false` no matchea documentos donde el campo
           // está ausente — quedaban invisibles para este cron para siempre.
           followUpReminderSent: { $ne: true },
-          startDate: { $lte: cutoff },
+          startDate: { $lte: cutoff, $gt: tooOldCutoff },
         })
           .populate("client")
           .lean();
 
-        if (!candidates.length) continue;
-
-        // Un cliente puede tener varias citas gatillo vencidas: nos quedamos
-        // solo con la más reciente para evaluar/enviar, y marcamos las demás
-        // como resueltas (sin enviar) para no duplicar mensajes el mismo día.
-        const latestByClient = new Map();
         for (const appt of candidates) {
-          const clientId = String(appt.client?._id || appt.client || "");
-          if (!clientId) continue;
-          const existing = latestByClient.get(clientId);
-          if (!existing || new Date(appt.startDate) > new Date(existing.startDate)) {
-            latestByClient.set(clientId, appt);
-          }
-        }
-
-        const latestIds = new Set([...latestByClient.values()].map((a) => String(a._id)));
-        const staleIds = candidates
-          .filter((a) => a.client?._id && !latestIds.has(String(a._id)))
-          .map((a) => a._id);
-        if (staleIds.length) {
-          await Appointment.updateMany(
-            { _id: { $in: staleIds } },
-            { $set: { followUpReminderSent: true } }
-          );
-        }
-
-        for (const appt of latestByClient.values()) {
-          try {
-            const client = appt.client;
-            if (!client || !client.phone_e164) {
-              await Appointment.updateOne(
-                { _id: appt._id },
-                { $set: { followUpReminderSent: true } }
-              );
-              continue;
-            }
-
-            // ¿Ya tiene una cita del servicio de seguimiento posterior a la gatillo?
-            const alreadyFollowedUp = await Appointment.exists({
-              organizationId: org._id,
-              service: rule.followUpServiceId,
-              client: client._id,
-              startDate: { $gt: appt.startDate },
-              status: { $nin: CANCELLED_STATUSES },
-            });
-
-            if (alreadyFollowedUp) {
-              await Appointment.updateOne(
-                { _id: appt._id },
-                { $set: { followUpReminderSent: true } }
-              );
-              continue;
-            }
-
-            await whatsappService.sendNotification(
-              org._id.toString(),
-              client.phone_e164,
-              "followUpReminder",
-              {
-                names: client.name,
-                organization: org.name,
-                service: followUpService.name,
-                originalService: rule.name,
-                days: String(rule.followUpDays),
-              }
-            );
-
-            await Appointment.updateOne(
-              { _id: appt._id },
-              { $set: { followUpReminderSent: true } }
-            );
-
-            orgSent += 1;
-            totalSent += 1;
-          } catch (err) {
-            console.error(
-              `🔁 [followUpReminderJob] Error con cita ${appt._id} (${org._id}):`,
-              err?.message || err
-            );
-          }
+          allCandidates.push({ appt, rule });
         }
       }
 
+      if (!allCandidates.length) continue;
+
+      // Más reciente por cliente, entre TODAS las reglas que matchearon.
+      const latestByClient = new Map();
+      for (const c of allCandidates) {
+        const clientId = String(c.appt.client?._id || c.appt.client || "");
+        if (!clientId) continue;
+        const existing = latestByClient.get(clientId);
+        if (!existing || new Date(c.appt.startDate) > new Date(existing.appt.startDate)) {
+          latestByClient.set(clientId, c);
+        }
+      }
+
+      // El resto (mismo cliente con citas más viejas, o sin client._id) se
+      // marca resuelto sin enviar — no duplicar mensajes el mismo día.
+      const chosenApptIds = new Set([...latestByClient.values()].map((c) => String(c.appt._id)));
+      const staleIds = allCandidates
+        .filter((c) => !chosenApptIds.has(String(c.appt._id)))
+        .map((c) => c.appt._id);
+      if (staleIds.length) {
+        await Appointment.updateMany({ _id: { $in: staleIds } }, { $set: { followUpReminderSent: true } });
+      }
+
+      const toSend = [];
+      const resolvedOnlyIds = [];
+
+      for (const { appt, rule } of latestByClient.values()) {
+        const client = appt.client;
+        if (!client || !client.phone_e164) {
+          resolvedOnlyIds.push(appt._id);
+          continue;
+        }
+
+        // ¿Ya tiene una cita del servicio de seguimiento posterior a la gatillo?
+        const alreadyFollowedUp = await Appointment.exists({
+          organizationId: org._id,
+          service: rule.followUpServiceId,
+          client: client._id,
+          startDate: { $gt: appt.startDate },
+          status: { $nin: CANCELLED_STATUSES },
+        });
+
+        if (alreadyFollowedUp) {
+          resolvedOnlyIds.push(appt._id);
+          continue;
+        }
+
+        const followUpService = followUpServiceById.get(String(rule.followUpServiceId));
+        toSend.push({
+          apptId: appt._id,
+          phone: client.phone_e164,
+          vars: {
+            names: client.name,
+            organization: org.name,
+            service: followUpService.name,
+            originalService: rule.name,
+            days: String(rule.followUpDays),
+          },
+        });
+      }
+
+      if (resolvedOnlyIds.length) {
+        await Appointment.updateMany({ _id: { $in: resolvedOnlyIds } }, { $set: { followUpReminderSent: true } });
+      }
+
+      if (!toSend.length) continue;
+
+      // Marcar ANTES de enviar — evita reenvíos si el proceso se interrumpe
+      // a mitad de la tanda (mismo patrón que sendDailyReminders).
+      await Appointment.updateMany(
+        { _id: { $in: toSend.map((s) => s.apptId) } },
+        { $set: { followUpReminderSent: true } }
+      );
+
+      let orgSent = 0;
+      const isMeta = org.waConnectionType === "meta";
+
+      if (isMeta) {
+        for (const item of toSend) {
+          try {
+            await whatsappService.sendNotification(org._id.toString(), item.phone, "followUpReminder", item.vars);
+            orgSent++;
+          } catch (err) {
+            console.error(
+              `🔁 [followUpReminderJob] Error enviando a ${item.phone} (${org._id}):`,
+              err?.message || err
+            );
+          }
+          await sleep(SEND_DELAY_MS);
+        }
+      } else {
+        // Baileys: un solo paquete — el microservicio externo distribuye el
+        // envío con delays aleatorios (mismo mecanismo que sendDailyReminders).
+        try {
+          await waBulkOptIn(toSend.map((s) => s.phone));
+        } catch (e) {
+          console.warn(`🔁 [followUpReminderJob] [${org.name}] OptIn falló: ${e?.message || e}`);
+        }
+
+        try {
+          const messageTpl = templateDoc?.followUpReminder || whatsappTemplates.getDefaultTemplate("followUpReminder");
+          const result = await waBulkSend({
+            clientId: org.clientIdWhatsapp,
+            title: `Seguimiento ${moment.tz(tz).format("YYYY-MM-DD")} (${org.name})`,
+            items: toSend.map((s) => ({ phone: s.phone, vars: s.vars })),
+            messageTpl,
+            dryRun: false,
+          });
+          orgSent = toSend.length;
+          console.log(
+            `🔁 [followUpReminderJob] [${org.name}] Paquete enviado: ${toSend.length} mensajes (bulkId: ${result.bulkId})`
+          );
+        } catch (err) {
+          console.error(`🔁 [followUpReminderJob] Error enviando paquete (${org._id}):`, err?.message || err);
+        }
+      }
+
+      totalSent += orgSent;
       if (orgSent > 0) totalOrgs += 1;
     }
 
