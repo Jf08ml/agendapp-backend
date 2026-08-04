@@ -398,8 +398,11 @@ const organizationSchema = new mongoose.Schema({
   // reusa Membership.notifications.threeDaysSent/oneDaySent, no vive aquí.
   retargeting: {
     setupNudgeSentAt:           { type: Date, default: null }, // nunca completó la configuración inicial
+    setupNudgeAttempts:         { type: Number, default: 0 }, // intentos fallidos — tope en MAX_NUDGE_ATTEMPTS (retargetingService.js)
     firstAppointmentNudgeSentAt: { type: Date, default: null }, // completó setup pero nunca creó su primera cita
+    firstAppointmentNudgeAttempts: { type: Number, default: 0 },
     whatsappNudgeSentAt:         { type: Date, default: null }, // completó setup pero nunca conectó WhatsApp
+    whatsappNudgeAttempts:       { type: Number, default: 0 },
   },
   blockHolidaysForReservations: {
     type: Boolean,
