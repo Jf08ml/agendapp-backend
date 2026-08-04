@@ -1177,8 +1177,9 @@ const appointmentService = {
       // Como reminderSent NO se marca, el catch-up la retoma en una pasada
       // posterior una vez vencida la gracia (si la cita aún no empezó); si la
       // cita empieza antes de vencer la gracia, la confirmación fue suficiente.
-      const REMINDER_GRACE_HOURS = 4;
-      const REMINDER_GRACE_MS = REMINDER_GRACE_HOURS * 60 * 60 * 1000;
+      // Configurable por org (reminderSettings.graceHours, 3 opciones en el
+      // front: 0/2/4h) — este valor es solo el default para orgs sin el campo.
+      const DEFAULT_REMINDER_GRACE_HOURS = 4;
 
       /**
        * Procesa una pasada de recordatorio para una organización.
@@ -1252,18 +1253,20 @@ const appointmentService = {
         // confirmación acaba de salir). Solo filtra qué citas DISPARAN el envío:
         // si el mismo cliente tiene otra cita elegible, la recién creada entra
         // igual al mensaje consolidado (mejor un mensaje con todo que dos).
+        const graceHours = org.reminderSettings?.graceHours ?? DEFAULT_REMINDER_GRACE_HOURS;
+        const graceMs = graceHours * 60 * 60 * 1000;
         const nowMs = Date.now();
         const eligibleTriggers = allAppointmentsInWindow.filter((appt) => {
           const createdMs = appt.createdAt
             ? new Date(appt.createdAt).getTime()
             : appt._id.getTimestamp().getTime();
-          return nowMs - createdMs >= REMINDER_GRACE_MS;
+          return nowMs - createdMs >= graceMs;
         });
 
         const inGraceCount = allAppointmentsInWindow.length - eligibleTriggers.length;
         if (inGraceCount > 0) {
           console.log(
-            `[${org.name}] [${label}] ${inGraceCount} cita(s) en periodo de gracia post-creación (<${REMINDER_GRACE_HOURS}h) — se difieren a una pasada posterior`
+            `[${org.name}] [${label}] ${inGraceCount} cita(s) en periodo de gracia post-creación (<${graceHours}h) — se difieren a una pasada posterior`
           );
         }
 

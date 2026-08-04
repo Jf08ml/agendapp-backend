@@ -491,6 +491,16 @@ const organizationSchema = new mongoose.Schema({
       min: 1,
       max: 72, // Máximo 3 días antes
     },
+    // Periodo de gracia post-creación: una cita creada dentro de este margen
+    // no dispara su recordatorio de inmediato (evita mandar confirmación +
+    // recordatorio casi seguidos) — se reintenta en pasadas posteriores del
+    // cron hasta que se cumpla. 3 opciones fijas en el front para evitar que
+    // el admin ponga un valor mayor que hoursBefore y bloquee recordatorios.
+    graceHours: {
+      type: Number,
+      enum: [0, 2, 4],
+      default: 4,
+    },
     sendTimeStart: {
       type: String,
       default: "07:00", // Hora inicio para enviar (formato HH:mm)
