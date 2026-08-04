@@ -75,7 +75,11 @@ export async function runFollowUpReminders() {
           organizationId: org._id,
           service: rule._id,
           status: "attended",
-          followUpReminderSent: false,
+          // $ne (no === false): las citas creadas antes de que este campo
+          // existiera en el esquema no lo tienen guardado en absoluto, y un
+          // filtro estricto `false` no matchea documentos donde el campo
+          // está ausente — quedaban invisibles para este cron para siempre.
+          followUpReminderSent: { $ne: true },
           startDate: { $lte: cutoff },
         })
           .populate("client")
