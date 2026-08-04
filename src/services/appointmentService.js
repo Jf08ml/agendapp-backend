@@ -1708,6 +1708,9 @@ const appointmentService = {
   /**
    * Auto-marca como attended las citas confirmed pasadas de una organización.
    * Se ejecuta desde el cronjob nocturno solo si org.autoMarkAttended === true.
+   * Cada cita marcada registra también el servicio para el conteo de fidelidad
+   * (equivalente a lo que haría un admin manualmente en Gestión de clientes),
+   * ya que aquí nadie hace ese registro manual.
    */
   autoMarkAttendedAppointments: async (organizationId) => {
     try {
@@ -1717,14 +1720,34 @@ const appointmentService = {
       const timezone = organization.timezone || 'America/Bogota';
       const endOfYesterday = moment.tz(timezone).startOf('day').toDate();
 
-      const result = await appointmentModel.updateMany(
-        {
+      const appointmentsToMark = await appointmentModel
+        .find({
           organizationId,
           status: 'confirmed',
           startDate: { $lt: endOfYesterday },
-        },
+        })
+        .select('_id client');
+
+      if (appointmentsToMark.length === 0) {
+        return { updated: 0 };
+      }
+
+      const result = await appointmentModel.updateMany(
+        { _id: { $in: appointmentsToMark.map((a) => a._id) } },
         { $set: { status: 'attended' } }
       );
+
+      for (const appt of appointmentsToMark) {
+        if (!appt.client) continue;
+        try {
+          await clientService.registerService(appt.client, organization);
+        } catch (err) {
+          console.error(
+            `[autoMarkAttendedAppointments] Error registrando servicio de fidelidad (cliente ${appt.client}):`,
+            err.message
+          );
+        }
+      }
 
       return { updated: result.modifiedCount };
     } catch (error) {
