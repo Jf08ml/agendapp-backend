@@ -164,6 +164,7 @@ const organizationService = {
       reservationDepositPercentage,
       requireClassDeposit,
       classDepositPercentage,
+      allowCompanionInClassBooking,
       depositPreferredMethod,
       default_country,
       timezone,
@@ -343,6 +344,10 @@ const organizationService = {
 
     if (classDepositPercentage !== undefined) {
       organization.classDepositPercentage = classDepositPercentage;
+    }
+
+    if (allowCompanionInClassBooking !== undefined) {
+      organization.allowCompanionInClassBooking = allowCompanionInClassBooking;
     }
 
     // 🌍 Actualizar país por defecto

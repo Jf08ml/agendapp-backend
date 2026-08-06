@@ -443,6 +443,12 @@ const organizationSchema = new mongoose.Schema({
     min: 0,
     max: 100,
   },
+  // 🎓 Permite que el cliente agregue un acompañante al reservar una clase
+  // (ver StepAttendees.tsx). Default true = comportamiento histórico (siempre visible).
+  allowCompanionInClassBooking: {
+    type: Boolean,
+    default: true,
+  },
   // 💳 Cobros cliente→org vía Mercado Pago (ver MpCollectSchema arriba)
   mpCollect: {
     type: MpCollectSchema,

@@ -674,9 +674,13 @@ const packageService = {
     return pkg;
   },
 
-  // ✏️ Editar paquete de cliente: extender fecha de vencimiento y/o añadir
-  // sesiones por servicio/clase. Solo suma (no permite quitar sesiones ya
-  // otorgadas — eso se maneja cancelando/reasignando).
+  // ✏️ Editar paquete de cliente: extender fecha de vencimiento y/o corregir
+  // manualmente, por servicio/clase, el total de sesiones incluidas
+  // (sessionsIncluded) y/o cuántas ya se usaron (sessionsUsed) — ambos como
+  // valores absolutos, subibles o bajables. Existe para cargar/corregir
+  // paquetes que un admin manejaba fuera del sistema (ej. en papel/Excel) y
+  // que ya tenían sesiones descontadas o un total distinto al registrarlos —
+  // no hay citas/consumptionHistory reales detrás de este tipo de ajuste.
   editClientPackage: async (clientPackageId, organizationId, {
     expirationDate,
     serviceAdjustments = [],
@@ -698,24 +702,46 @@ const packageService = {
       pkg.expirationDate = newDate;
     }
 
+    // Aplica un ajuste absoluto de sessionsIncluded/sessionsUsed a un item
+    // (service o class embebido). Ambos son opcionales e independientes;
+    // el que no se envíe conserva su valor actual.
+    const applySessionAdjustment = (item, adj, itemLabel) => {
+      const nextIncluded = adj.sessionsIncluded !== undefined && adj.sessionsIncluded !== null
+        ? Number(adj.sessionsIncluded)
+        : item.sessionsIncluded;
+      const nextUsed = adj.sessionsUsed !== undefined && adj.sessionsUsed !== null
+        ? Number(adj.sessionsUsed)
+        : item.sessionsUsed;
+
+      if (!Number.isInteger(nextIncluded) || nextIncluded < 0) {
+        throw new Error(`Las sesiones incluidas de ${itemLabel} deben ser un número entero mayor o igual a 0`);
+      }
+      if (!Number.isInteger(nextUsed) || nextUsed < 0) {
+        throw new Error(`Las sesiones usadas de ${itemLabel} deben ser un número entero mayor o igual a 0`);
+      }
+      if (nextUsed > nextIncluded) {
+        throw new Error(`Las sesiones usadas de ${itemLabel} no pueden superar el total incluido`);
+      }
+
+      item.sessionsIncluded = nextIncluded;
+      item.sessionsUsed = nextUsed;
+      item.sessionsRemaining = nextIncluded - nextUsed;
+    };
+
     for (const adj of serviceAdjustments) {
-      if (!adj.sessionsToAdd || adj.sessionsToAdd <= 0) continue;
       const svc = pkg.services.find((s) => s.serviceId.toString() === adj.serviceId);
       if (!svc) {
         throw new Error("Servicio no encontrado en este paquete");
       }
-      svc.sessionsIncluded += adj.sessionsToAdd;
-      svc.sessionsRemaining += adj.sessionsToAdd;
+      applySessionAdjustment(svc, adj, "el servicio");
     }
 
     for (const adj of classAdjustments) {
-      if (!adj.sessionsToAdd || adj.sessionsToAdd <= 0) continue;
       const cls = pkg.classes.find((c) => c.classId.toString() === adj.classId);
       if (!cls) {
         throw new Error("Clase no encontrada en este paquete");
       }
-      cls.sessionsIncluded += adj.sessionsToAdd;
-      cls.sessionsRemaining += adj.sessionsToAdd;
+      applySessionAdjustment(cls, adj, "la clase");
     }
 
     // Recalcular status según el estado resultante (independiente de cuál
