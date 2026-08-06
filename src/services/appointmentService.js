@@ -63,6 +63,27 @@ const fmtTime = (d, tz = "America/Bogota", timeFormat = '12h') =>
     timeZone: tz,
   }).format(new Date(d));
 
+// 📨 Persiste el resultado del intento de envío de confirmación (fire-and-forget,
+// no debe tumbar el flujo que la llama). Ver enum en appointmentModel.js.
+async function recordConfirmationOutcome(appointmentIds, status, errorMessage) {
+  const ids = Array.isArray(appointmentIds) ? appointmentIds : [appointmentIds];
+  if (ids.length === 0) return;
+  try {
+    await appointmentModel.updateMany(
+      { _id: { $in: ids } },
+      {
+        $set: {
+          waConfirmationStatus: status,
+          waConfirmationSentAt: new Date(),
+          waConfirmationError: errorMessage ? String(errorMessage).slice(0, 500) : undefined,
+        },
+      }
+    );
+  } catch (err) {
+    console.error("[recordConfirmationOutcome] Error guardando estado de confirmación:", err.message);
+  }
+}
+
 const appointmentService = {
   // Crear una nueva cita
   createAppointment: async (appointmentData) => {
@@ -189,11 +210,15 @@ const appointmentService = {
     };
 
     // Enviar confirmación por WhatsApp (solo si está habilitado)
+    // 📨 waConfirmationStatus se asigna aquí y se guarda junto con la cita más abajo.
     try {
       // Verificar si el plan permite confirmaciones automáticas
       const planLimits = await membershipService.getPlanLimits(organizationId);
       if (planLimits && planLimits.autoConfirmations === false) {
         console.log(`⏭️  Confirmación bloqueada por plan para org ${organizationId}`);
+        newAppointment.waConfirmationStatus = "blocked";
+        newAppointment.waConfirmationSentAt = new Date();
+        newAppointment.waConfirmationError = "Bloqueada por límite del plan (autoConfirmations)";
       } else {
       // 🆕 Verificar si el envío de confirmación está habilitado
       const whatsappTemplate = await WhatsappTemplate.findOne({ organizationId });
@@ -209,17 +234,29 @@ const appointmentService = {
           templateData,
           ...(fallbackMessage ? [{ fallbackMessage }] : [])
         );
+        newAppointment.waConfirmationSentAt = new Date();
         if (notifyResult?.blocked) {
           console.warn(`⏭️  Confirmación NO enviada (bloqueada por plan: ${notifyResult.reason}) para cita ${newAppointment._id}`);
+          newAppointment.waConfirmationStatus = "blocked";
+          newAppointment.waConfirmationError = notifyResult.reason || "Bloqueada por plan";
         } else if (!notifyResult) {
           console.warn(`⚠️  Confirmación NO enviada para cita ${newAppointment._id} — sin template aprobado ni canal disponible`);
+          newAppointment.waConfirmationStatus = "failed";
+          newAppointment.waConfirmationError = "Sin template aprobado ni canal disponible (Meta)";
         } else {
           console.log(`✅ Confirmación enviada para cita ${newAppointment._id} — messageId: ${notifyResult?.messageId || notifyResult?.id || "?"}`);
+          newAppointment.waConfirmationStatus = "sent";
         }
       } else if (!isConfirmationEnabled) {
         console.log(`⏭️  Confirmación deshabilitada (enabledTypes.scheduleAppointment) para cita ${newAppointment._id}`);
+        newAppointment.waConfirmationStatus = "blocked";
+        newAppointment.waConfirmationSentAt = new Date();
+        newAppointment.waConfirmationError = "Deshabilitada en plantillas de WhatsApp (enabledTypes.scheduleAppointment)";
       } else {
         console.warn(`⚠️  Confirmación NO enviada para cita ${newAppointment._id} — el cliente no tiene teléfono registrado`);
+        newAppointment.waConfirmationStatus = "skipped";
+        newAppointment.waConfirmationSentAt = new Date();
+        newAppointment.waConfirmationError = "Cliente sin teléfono utilizable";
       }
       } // cierre del else (planLimits check)
     } catch (error) {
@@ -227,6 +264,9 @@ const appointmentService = {
         `Error enviando la confirmación para ${client?.phoneNumber}:`,
         error.message
       );
+      newAppointment.waConfirmationStatus = "failed";
+      newAppointment.waConfirmationSentAt = new Date();
+      newAppointment.waConfirmationError = error.message;
     }
 
     // Guardar la cita en la base de datos
@@ -598,10 +638,13 @@ const appointmentService = {
           end: fmtTime(c.end, timezone, orgTimeFormat),
         }));
 
+        const groupApptIds = allGroupAppointments.map((c) => c.saved._id);
+
         // 🔗 Enlace de confirmación/cancelación ya generado (solo disponible si hubo token en texto plano)
         if (!groupCancellationLink) {
           console.warn('⚠️ Usando token compartido de reservas. No se puede generar link sin token en texto plano.');
           console.warn('⚠️ El mensaje debe enviarse desde donde se tiene el token original.');
+          await recordConfirmationOutcome(groupApptIds, "skipped", "Token compartido sin texto plano disponible para generar el enlace");
           return created.map(c => c.saved);
         }
 
@@ -622,6 +665,7 @@ const appointmentService = {
           console.warn(
             "Cliente sin teléfono utilizable; no se enviará WhatsApp."
           );
+          await recordConfirmationOutcome(groupApptIds, "skipped", "Cliente sin teléfono utilizable");
           return created.map((c) => c.saved);
         }
 
@@ -647,8 +691,14 @@ const appointmentService = {
         if (planAllowsConfirmations && isBatchConfirmationEnabled) {
           await whatsappService.sendNotification(organizationId, phoneE164, 'scheduleAppointmentBatch', templateData);
           console.log(`✅ Confirmación batch enviada (${allGroupAppointments.length} citas)`);
+          await recordConfirmationOutcome(groupApptIds, "sent");
         } else {
           console.log(`⏭️  Confirmación batch deshabilitada`);
+          await recordConfirmationOutcome(
+            groupApptIds,
+            "blocked",
+            !planAllowsConfirmations ? "Bloqueada por límite del plan (autoConfirmations)" : "Deshabilitada en plantillas de WhatsApp (enabledTypes.scheduleAppointmentBatch)"
+          );
         }
       }
     } catch (error) {
@@ -656,6 +706,9 @@ const appointmentService = {
         `Error enviando la confirmación batch a ${client?.phoneNumber}:`,
         error?.message || error
       );
+      if (created.length > 0 && !skipNotification) {
+        await recordConfirmationOutcome(created.map((c) => c.saved._id), "failed", error?.message || String(error));
+      }
     }
     })(); // fin fire-and-forget
 
@@ -715,6 +768,8 @@ const appointmentService = {
       allCreated.push(...(created || []));
     }
 
+    const allCreatedIds = allCreated.map((a) => a._id);
+
     // Envío del mensaje WA unificado (fire-and-forget)
     (async () => {
       try {
@@ -726,7 +781,10 @@ const appointmentService = {
           : client;
 
         const phoneE164 = clientDoc?.phone_e164 || clientDoc?.phoneNumber;
-        if (!phoneE164) return;
+        if (!phoneE164) {
+          await recordConfirmationOutcome(allCreatedIds, "skipped", "Cliente sin teléfono utilizable");
+          return;
+        }
 
         // Recuperar todas las citas del grupo para armar el mensaje
         const groupAppts = await appointmentModel
@@ -735,7 +793,10 @@ const appointmentService = {
           .populate('employee')
           .sort({ startDate: 1 });
 
-        if (!groupAppts.length) return;
+        if (!groupAppts.length) {
+          await recordConfirmationOutcome(allCreatedIds, "failed", "No se encontraron citas del grupo al momento de enviar la confirmación");
+          return;
+        }
 
         const servicesListLines = groupAppts.map((appt, i) => {
           const svcName = appt.service?.name || 'Servicio';
@@ -770,9 +831,18 @@ const appointmentService = {
         if (planAllowsConfirmations && isBatchConfirmationEnabled) {
           await whatsappService.sendNotification(organizationId, phoneE164, 'scheduleAppointmentBatch', templateData);
           console.log(`✅ WA multi-profesional enviado (${groupAppts.length} citas, ${employeeNames.length} profesionales)`);
+          await recordConfirmationOutcome(allCreatedIds, "sent");
+        } else {
+          console.log('⏭️  Confirmación multi-profesional deshabilitada');
+          await recordConfirmationOutcome(
+            allCreatedIds,
+            "blocked",
+            !planAllowsConfirmations ? "Bloqueada por límite del plan (autoConfirmations)" : "Deshabilitada en plantillas de WhatsApp (enabledTypes.scheduleAppointmentBatch)"
+          );
         }
       } catch (err) {
         console.error('Error enviando WA multi-profesional:', err?.message || err);
+        await recordConfirmationOutcome(allCreatedIds, "failed", err?.message || String(err));
       }
     })();
 

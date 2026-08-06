@@ -93,6 +93,18 @@ const appointmentModelSchema = new mongoose.Schema(
     secondReminderSent: { type: Boolean, default: false },
     secondReminderBulkId: { type: String },
     followUpReminderSent: { type: Boolean, default: false },
+    // 📨 Resultado del intento de envío de la confirmación de agendamiento por
+    // WhatsApp (scheduleAppointment/scheduleAppointmentBatch). Permite diagnosticar
+    // reclamos de "no llegó la confirmación" sin depender de logs de servidor.
+    // sent = enviado OK · failed = se intentó y falló (ver waConfirmationError)
+    // blocked = deshabilitado por plan o por plantilla · skipped = sin teléfono/enlace utilizable
+    waConfirmationStatus: {
+      type: String,
+      enum: ["sent", "failed", "blocked", "skipped"],
+      required: false,
+    },
+    waConfirmationSentAt: { type: Date, required: false },
+    waConfirmationError: { type: String, required: false },
     advancePayment: {
       type: Number,
       default: 0,
