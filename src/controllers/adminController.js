@@ -25,6 +25,7 @@ import ClientPackage from "../models/clientPackageModel.js";
 import AuditLog from "../models/auditLogModel.js";
 import ChatLog from "../models/chatLogModel.js";
 import ChatbotFeedback from "../models/chatbotFeedbackModel.js";
+import WaBotMessage from "../models/waBotMessageModel.js";
 import ImpactSurveyResponse from "../models/impactSurveyResponseModel.js";
 import Expense from "../models/expenseModel.js";
 import Class from "../models/classModel.js";
@@ -560,6 +561,7 @@ const adminController = {
               duracionPromedioMs: { $avg: "$durationMs" },
               conRoundLimit: { $sum: { $cond: ["$hitRoundLimit", 1, 0] } },
               conError: { $sum: { $cond: [{ $ifNull: ["$error", false] }, 1, 0] } },
+              revisadas: { $sum: { $cond: ["$review.reviewed", 1, 0] } },
             },
           },
         ]),
@@ -655,8 +657,9 @@ const adminController = {
   /**
    * GET /api/admin/chatbot/sessions
    * Lista paginada de sesiones de chat con filtros:
-   * type (admin|booking), organizationId, converted (true), hasError (true),
-   * hitRoundLimit (true), page, limit.
+   * type (admin|booking), channel (web|whatsapp), organizationId,
+   * converted (true), hasError (true), hitRoundLimit (true),
+   * reviewed (true|false), page, limit.
    */
   getChatbotSessions: async (req, res) => {
     try {
@@ -668,12 +671,15 @@ const adminController = {
         },
       };
       if (["admin", "booking"].includes(req.query.type)) filter.type = req.query.type;
+      if (["web", "whatsapp"].includes(req.query.channel)) filter.channel = req.query.channel;
       if (req.query.organizationId && mongoose.Types.ObjectId.isValid(req.query.organizationId)) {
         filter.organizationId = req.query.organizationId;
       }
       if (req.query.converted === "true") filter.reservationCreated = true;
       if (req.query.hasError === "true") filter.error = { $exists: true, $ne: null };
       if (req.query.hitRoundLimit === "true") filter.hitRoundLimit = true;
+      if (req.query.reviewed === "true") filter["review.reviewed"] = true;
+      if (req.query.reviewed === "false") filter["review.reviewed"] = { $ne: true };
 
       const page = Math.max(1, parseInt(req.query.page, 10) || 1);
       const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
@@ -692,6 +698,199 @@ const adminController = {
     } catch (error) {
       console.error("[admin/getChatbotSessions] Error:", error);
       sendResponse(res, 500, null, "Error al obtener sesiones de chat");
+    }
+  },
+
+  /**
+   * POST /api/admin/chatbot/sessions/:id/review
+   * Marca (o desmarca) una sesión de ChatLog como revisada, con categoría y
+   * notas opcionales. Body: { reviewed: boolean, category?, notes? }.
+   */
+  markChatLogSessionReviewed: async (req, res) => {
+    try {
+      const { id } = req.params;
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return sendResponse(res, 400, null, "Id de sesión inválido");
+      }
+      const { reviewed, category, notes } = req.body;
+      const admin = await AdminUser.findById(req.user?.adminId).select("email name").lean();
+      const reviewer = admin?.name || admin?.email || "Admin";
+
+      const set = {
+        "review.reviewed": !!reviewed,
+        "review.reviewedBy": reviewer,
+        "review.reviewedAt": new Date(),
+      };
+      if (category !== undefined) set["review.category"] = category;
+      if (notes !== undefined) set["review.notes"] = notes;
+
+      const session = await ChatLog.findByIdAndUpdate(id, { $set: set }, { new: true }).lean();
+
+      if (!session) return sendResponse(res, 404, null, "Sesión no encontrada");
+      sendResponse(res, 200, session);
+    } catch (error) {
+      console.error("[admin/markChatLogSessionReviewed] Error:", error);
+      sendResponse(res, 500, null, "Error al guardar la revisión");
+    }
+  },
+
+  // ─── Agente admin por WhatsApp (WaBotMessage) ───────────────────────────────
+
+  /**
+   * GET /api/admin/chatbot/wa-sessions
+   * Lista paginada de sesiones del agente admin de WhatsApp, agrupando
+   * WaBotMessage por sessionId (no existe un doc de sesión — se agrega en
+   * vivo, igual que platformInboxService.listConversations pero por
+   * sessionId en vez de phone). Filtros: organizationId, reviewed (true|false),
+   * page, limit. El rango de fechas aplica sobre createdAt de los mensajes.
+   */
+  getWaBotSessions: async (req, res) => {
+    try {
+      const { startDate, endDate } = adminController._resolveDateRange(req.query);
+      const match = {
+        createdAt: {
+          $gte: new Date(`${startDate}T00:00:00.000Z`),
+          $lte: new Date(`${endDate}T23:59:59.999Z`),
+        },
+      };
+      if (req.query.organizationId && mongoose.Types.ObjectId.isValid(req.query.organizationId)) {
+        match.organizationId = new mongoose.Types.ObjectId(req.query.organizationId);
+      }
+
+      const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+      const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
+
+      const pipeline = [
+        { $match: match },
+        { $sort: { createdAt: -1 } },
+        {
+          $group: {
+            _id: "$sessionId",
+            organizationId: { $first: "$organizationId" },
+            messageCount: { $sum: 1 },
+            inputTokens: { $sum: { $ifNull: ["$inputTokens", 0] } },
+            outputTokens: { $sum: { $ifNull: ["$outputTokens", 0] } },
+            firstMessageAt: { $min: "$createdAt" },
+            lastMessageAt: { $max: "$createdAt" },
+            reviewed: { $max: { $cond: ["$review.reviewed", 1, 0] } },
+            reviewedBy: { $first: "$review.reviewedBy" },
+            reviewedAt: { $first: "$review.reviewedAt" },
+            category: { $first: "$review.category" },
+            notes: { $first: "$review.notes" },
+          },
+        },
+      ];
+
+      if (req.query.reviewed === "true") pipeline.push({ $match: { reviewed: 1 } });
+      if (req.query.reviewed === "false") pipeline.push({ $match: { reviewed: 0 } });
+
+      pipeline.push(
+        {
+          $lookup: {
+            from: "organizations",
+            localField: "organizationId",
+            foreignField: "_id",
+            as: "org",
+          },
+        },
+        {
+          $project: {
+            sessionId: "$_id",
+            _id: 0,
+            organizationId: {
+              _id: "$organizationId",
+              name: { $ifNull: [{ $arrayElemAt: ["$org.name", 0] }, "(eliminada)"] },
+            },
+            messageCount: 1,
+            inputTokens: 1,
+            outputTokens: 1,
+            firstMessageAt: 1,
+            lastMessageAt: 1,
+            review: {
+              reviewed: { $eq: ["$reviewed", 1] },
+              reviewedBy: "$reviewedBy",
+              reviewedAt: "$reviewedAt",
+              category: "$category",
+              notes: "$notes",
+            },
+          },
+        },
+        { $sort: { lastMessageAt: -1 } },
+        {
+          $facet: {
+            data: [{ $skip: (page - 1) * limit }, { $limit: limit }],
+            totalCount: [{ $count: "count" }],
+          },
+        }
+      );
+
+      const [result] = await WaBotMessage.aggregate(pipeline);
+      const sessions = result?.data || [];
+      const total = result?.totalCount?.[0]?.count || 0;
+
+      sendResponse(res, 200, { sessions, total, page, pages: Math.ceil(total / limit) });
+    } catch (error) {
+      console.error("[admin/getWaBotSessions] Error:", error);
+      sendResponse(res, 500, null, "Error al obtener sesiones del agente admin de WhatsApp");
+    }
+  },
+
+  /**
+   * GET /api/admin/chatbot/wa-sessions/:sessionId/messages
+   * Mensajes crudos de una sesión del agente admin de WhatsApp, en orden.
+   */
+  getWaBotSessionMessages: async (req, res) => {
+    try {
+      const messages = await WaBotMessage.find({ sessionId: req.params.sessionId })
+        .sort({ createdAt: 1 })
+        .lean();
+      sendResponse(res, 200, { messages });
+    } catch (error) {
+      console.error("[admin/getWaBotSessionMessages] Error:", error);
+      sendResponse(res, 500, null, "Error al obtener los mensajes de la sesión");
+    }
+  },
+
+  /**
+   * POST /api/admin/chatbot/wa-sessions/:sessionId/review
+   * Marca (o desmarca) TODOS los mensajes de una sesión como revisados —no
+   * existe un doc de sesión, así que la revisión se denormaliza sobre cada
+   * mensaje (esto también exime a la sesión del TTL vía partialFilterExpression).
+   */
+  markWaBotSessionReviewed: async (req, res) => {
+    try {
+      const { sessionId } = req.params;
+      const { reviewed, category, notes } = req.body;
+      const admin = await AdminUser.findById(req.user?.adminId).select("email name").lean();
+      const reviewer = admin?.name || admin?.email || "Admin";
+
+      const reviewedAt = new Date();
+      const set = {
+        "review.reviewed": !!reviewed,
+        "review.reviewedBy": reviewer,
+        "review.reviewedAt": reviewedAt,
+      };
+      if (category !== undefined) set["review.category"] = category;
+      if (notes !== undefined) set["review.notes"] = notes;
+
+      const result = await WaBotMessage.updateMany({ sessionId }, { $set: set });
+
+      if (result.matchedCount === 0) {
+        return sendResponse(res, 404, null, "Sesión no encontrada");
+      }
+      sendResponse(res, 200, {
+        sessionId,
+        review: {
+          reviewed: !!reviewed,
+          reviewedBy: reviewer,
+          reviewedAt,
+          category,
+          notes,
+        },
+      });
+    } catch (error) {
+      console.error("[admin/markWaBotSessionReviewed] Error:", error);
+      sendResponse(res, 500, null, "Error al guardar la revisión");
     }
   },
 };

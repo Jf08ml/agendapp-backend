@@ -131,4 +131,34 @@ router.get(
   adminController.getChatbotSessions
 );
 
+router.post(
+  "/admin/chatbot/sessions/:id/review",
+  verifyToken,
+  requireSuperAdmin,
+  adminController.markChatLogSessionReviewed
+);
+
+// ─── Agente admin por WhatsApp (WaBotMessage) — sin doc de sesión propio ────
+
+router.get(
+  "/admin/chatbot/wa-sessions",
+  verifyToken,
+  requireSuperAdmin,
+  adminController.getWaBotSessions
+);
+
+router.get(
+  "/admin/chatbot/wa-sessions/:sessionId/messages",
+  verifyToken,
+  requireSuperAdmin,
+  adminController.getWaBotSessionMessages
+);
+
+router.post(
+  "/admin/chatbot/wa-sessions/:sessionId/review",
+  verifyToken,
+  requireSuperAdmin,
+  adminController.markWaBotSessionReviewed
+);
+
 export default router;

@@ -36,7 +36,11 @@ export const bookingChat = async (req, res) => {
       ChatLog.findOneAndUpdate(
         { sessionId },
         {
-          $setOnInsert: { organizationId: req.organization._id, type: "booking" },
+          $setOnInsert: {
+            organizationId: req.organization._id,
+            type: "booking",
+            "review.reviewed": false,
+          },
           $set: { error: err.message },
           $inc: { durationMs: Date.now() - startTime },
         },

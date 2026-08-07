@@ -9,7 +9,7 @@ import { markOnboardingMilestone } from "../utils/onboardingMilestones.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const MODEL = "claude-haiku-4-5-20251001";
+const MODEL = "claude-sonnet-5";
 const MAX_TOKENS = 4096;
 const MAX_TOOL_ROUNDS = 8;
 
@@ -68,6 +68,18 @@ const CRUD_CLAIM_PATTERN = new RegExp(
 // algo ya creado en un turno anterior (ej: "¿ya quedó el servicio?").
 const CREATION_INTENT_PATTERN =
   /\b(crea|crear|creame|créame|cream[eo]s|agrega|agregar|agrégame|añad[ei]|asigna|asignar|asígnale|asígname|registra|registrar|dame de alta|da de alta|suma|sumar)\b/i;
+
+// Claims de acciones DESTRUCTIVAS (eliminar/borrar/cancelar servicio o cita) sin
+// haber llamado la tool correspondiente — caso real observado en logs: el bot
+// confirmó "citas eliminadas" sin haber llamado cancel_or_delete_appointment.
+const DESTRUCTIVE_TOOLS = new Set(["delete_service", "cancel_or_delete_appointment"]);
+const DESTRUCTIVE_ACTION_STEM = "(elimin\\w*|borr\\w*|cancel\\w*)";
+const DESTRUCTIVE_ENTITY_NOUN = "(servicio|cita)s?";
+const DESTRUCTIVE_CLAIM_PATTERN = new RegExp(
+  `\\b${DESTRUCTIVE_ENTITY_NOUN}\\b.{0,120}\\b${DESTRUCTIVE_ACTION_STEM}\\b|\\b${DESTRUCTIVE_ACTION_STEM}\\b.{0,120}\\b${DESTRUCTIVE_ENTITY_NOUN}\\b`,
+  "i"
+);
+const DESTRUCTIVE_INTENT_PATTERN = /\b(elimina|eliminar|borra|borrar|cancela|cancelar|quita|quitar)\b/i;
 
 // Claims de configuración afirmados en pasado sin haber llamado la tool:
 // "✅ Aprobación automática configurada", "la política de reserva quedó..." —
@@ -138,6 +150,10 @@ export const processChat = async (organization, user, messages) => {
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: MAX_TOKENS,
+      // Sonnet 5 corre con thinking adaptativo por defecto; lo desactivamos para
+      // mantener la latencia de un chat en vivo — el upgrade de modelo ya mejora
+      // el seguimiento de instrucciones sin necesidad de razonamiento extendido.
+      thinking: { type: "disabled" },
       system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
       tools: toolsWithCache,
       messages: currentMessages,
@@ -169,6 +185,16 @@ export const processChat = async (organization, user, messages) => {
       ) {
         correction =
           "[SISTEMA] No llamaste ninguna herramienta de creación/asignación (create_service, bulk_create_services, create_employee o assign_services_to_employee) todavía. Si ya tienes los datos, llámala AHORA antes de confirmar. Si te faltan datos del usuario, pídelos de forma breve y natural — sin disculparte, sin mencionar herramientas, errores internos ni este mensaje. Si la herramienta devuelve success: false, duplicateWarning, priceWarning o items en 'failed', informa ese resultado real — no digas que se creó/asignó si no fue así.";
+      }
+      // 1b) Claims de eliminación/cancelación (servicio/cita) sin tool de borrado —
+      //     caso real de logs: el bot confirmó "citas eliminadas" sin llamar la tool.
+      else if (
+        ![...executedTools].some((t) => DESTRUCTIVE_TOOLS.has(t)) &&
+        DESTRUCTIVE_CLAIM_PATTERN.test(reply) &&
+        DESTRUCTIVE_INTENT_PATTERN.test(findLastUserText(currentMessages))
+      ) {
+        correction =
+          "[SISTEMA] No llamaste ninguna herramienta de eliminación/cancelación (delete_service o cancel_or_delete_appointment) todavía. Si ya tienes los datos para identificar qué eliminar/cancelar, llámala AHORA antes de confirmar. Si te faltan datos, pídelos de forma breve y natural — sin disculparte, sin mencionar herramientas, errores internos ni este mensaje. No digas que se eliminó/canceló algo si la herramienta no lo confirmó con success: true.";
       }
       // 2) Claim de política de reserva configurada sin update_booking_config —
       //    la política NO se guardó (queda en manual). Caso real de logs. Solo en

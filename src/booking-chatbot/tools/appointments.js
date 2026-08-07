@@ -3,6 +3,7 @@ import moment from "moment-timezone";
 import Client from "../../models/clientModel.js";
 import Appointment from "../../models/appointmentModel.js";
 import appointmentService from "../../services/appointmentService.js";
+import cancellationService from "../../services/cancellationService.js";
 
 const IDENTIFIER_FIELD_MAP = {
   phone: "phone_e164",
@@ -266,6 +267,74 @@ export const rescheduleAppointment = {
       professional: appt.employee?.names || "Profesional asignado",
       de: fechaAnterior,
       a: fechaNueva,
+    };
+  },
+};
+
+export const cancelAppointment = {
+  name: "cancel_appointment",
+  description:
+    "Cancela una cita YA EXISTENTE (encontrada con get_my_appointments) del cliente. " +
+    "Úsala SOLO cuando el cliente pida explícitamente cancelar/anular una cita, y solo después de que confirme " +
+    "explícitamente que sí (nunca canceles sin una confirmación clara en el mismo intercambio).",
+  parameters: {
+    identifier: {
+      type: "string",
+      description:
+        "El mismo identificador (teléfono, email o documento) que se usó en get_my_appointments para encontrar la cita. Se usa para verificar que la cita pertenece a este cliente.",
+      required: true,
+    },
+    appointmentId: {
+      type: "string",
+      description: "El campo 'id' exacto de la cita a cancelar, devuelto por get_my_appointments.",
+      required: true,
+    },
+  },
+  handler: async ({ identifier, appointmentId }, { organizationId, organization }) => {
+    if (!mongoose.Types.ObjectId.isValid(appointmentId)) {
+      return {
+        success: false,
+        error: "El id de cita no es válido. Vuelve a llamar get_my_appointments para obtener el id correcto.",
+      };
+    }
+
+    const client = await resolveOwnerClient(identifier, organizationId, organization);
+    if (!client) {
+      return { success: false, error: "No se encontró ningún cliente registrado con ese identificador." };
+    }
+
+    const appt = await Appointment.findOne({
+      _id: appointmentId,
+      organizationId,
+      client: client._id,
+    })
+      .populate("service", "name")
+      .populate("employee", "names");
+
+    if (!appt) {
+      return {
+        success: false,
+        error: "No encontré esa cita, o no pertenece a este cliente. Vuelve a llamar get_my_appointments para confirmar el id correcto.",
+      };
+    }
+    if (RESCHEDULABLE_EXCLUDED_STATUSES.includes(appt.status)) {
+      return { success: false, error: "Esa cita ya está cancelada." };
+    }
+    if (new Date(appt.startDate).getTime() < Date.now()) {
+      return { success: false, error: "Esa cita ya pasó y no se puede cancelar." };
+    }
+
+    const result = await cancellationService.cancelAppointmentByCustomer(appt._id.toString());
+    if (!result.success) {
+      return { success: false, error: result.message || "No se pudo cancelar la cita." };
+    }
+
+    const timezone = organization.timezone || "America/Bogota";
+    return {
+      success: true,
+      service: appt.service?.name || "Servicio",
+      professional: appt.employee?.names || "Profesional asignado",
+      fecha: moment(appt.startDate).tz(timezone).format("dddd D [de] MMMM [a las] h:mm A"),
     };
   },
 };

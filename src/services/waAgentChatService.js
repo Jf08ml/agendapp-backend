@@ -8,7 +8,7 @@ import { logOutboundMessage } from "./platformInboxService.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const MODEL = "claude-haiku-4-5-20251001";
+const MODEL = "claude-sonnet-5";
 const MAX_TOKENS = 1024;
 const MAX_TOOL_ROUNDS = 8;
 // Sesión expira tras 30 min de inactividad
@@ -70,6 +70,7 @@ ${dateRefsBlock}
 - *Crear* (create_appointments): necesitas cliente, servicio, profesional, fecha y hora (HH:mm 24h, YYYY-MM-DD). Si solo tienes el nombre del cliente (sin teléfono), llama la tool igual con clientName — ya busca por nombre en la base de datos. NO pidas el teléfono de forma preventiva. Si el admin dice "ya está creado" o "ya existe", confía en eso y reintenta con clientName; solo pide el teléfono si la tool responde que no encontró a nadie con ese nombre. Si hay solapamiento avisa pero crea igual.
 - *Reprogramar* (reschedule_appointment): necesitas cliente, nueva fecha y hora. Incluye la fecha actual si el cliente tiene varias citas para afinar. Si hay solapamiento avisa pero reprograma igual.
 - *Cancelar/Eliminar* (cancel_or_delete_appointment): "cancela" → action:cancel. "cancela y avisa" → notifyClient:true. "elimina" → action:delete. Si hay múltiples resultados devuelve lista para que especifiques.
+- *Nota de sesión* (update_session_notes): para dejar constancia de lo ocurrido en una cita puntual (observaciones, seguimiento). NO uses reschedule_appointment para esto — su parámetro de nota fue eliminado porque no se guardaba. Busca la cita igual que register_payment.
 - *Registrar pago* (register_payment): para "abonó", "pagó", "le cobré X". Necesitas el monto y los datos para ubicar la cita (cliente, fecha, servicio o profesional). Si hay múltiples resultados devuelve lista para que especifiques (puedes repetir con appointmentId).
 
 Búsqueda de cliente/paciente: la búsqueda por nombre es flexible (ignora acentos, mayúsculas, orden y nombres incompletos) — usa el nombre tal como te lo dieron, NO pidas de inmediato teléfono con código de país ni la hora exacta de la cita. Si la tool devuelve "No se encontró..." o multipleFound, primero intenta afinar con fecha/servicio/profesional antes de pedir el teléfono.
@@ -82,6 +83,7 @@ Búsqueda de cliente/paciente: la búsqueda por nombre es flexible (ignora acent
 - *Crear* (create_service): necesitas nombre, duración (min) y precio. Tipo/categoría es opcional.
 - *Crear varios de una vez* (bulk_create_services): si el admin pega o dicta una lista de 2 o más servicios en un solo mensaje (ej. su catálogo completo), usa esta en vez de crear uno por uno — es mucho más rápido y barato.
 - *Editar* (update_service): cambiar precio, duración, nombre o activar/desactivar un servicio existente. Solo envía los campos que cambian.
+- *Eliminar* (delete_service): SOLO si el admin pide explícitamente eliminar/borrar (no "desactivar" — para eso usa update_service con isActive:false). Confirma antes de llamarla. Si falla porque tiene citas asociadas, no insistas: ofrece desactivarlo en su lugar.
 
 ═══ PROFESIONALES ═══
 - *Listar* (get_employees): muestra los profesionales activos.
@@ -116,7 +118,8 @@ Reglas:
 - Usa emojis moderadamente (✅, ❌, 📅).
 - Cuando tengas los datos para ejecutar una acción, ejecuta la herramienta INMEDIATAMENTE sin anunciarlo.
 - Convierte fechas a YYYY-MM-DD usando las referencias de arriba. Convierte horas a HH:mm (24h).
-- Nunca inventes datos. Si falta información, pregunta solo lo que necesitas.`;
+- Nunca inventes datos. Si falta información, pregunta solo lo que necesitas.
+- AgenditApp NO tiene app nativa en App Store ni Google Play — es una PWA. Si preguntan cómo instalarla, explica que se agrega a la pantalla de inicio desde el navegador.`;
 }
 
 export async function processAdminCommand(org, messageBody) {
@@ -142,6 +145,8 @@ export async function processAdminCommand(org, messageBody) {
 
   let currentMessages = [...session.messages];
   let finalReply = null;
+  let inputTokens = 0;
+  let outputTokens = 0;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const toolsWithCache = claudeTools.map((t, i) =>
@@ -151,10 +156,16 @@ export async function processAdminCommand(org, messageBody) {
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: MAX_TOKENS,
+      // Sonnet 5 corre con thinking adaptativo por defecto; lo desactivamos para
+      // mantener la latencia de un chat de WhatsApp en vivo.
+      thinking: { type: "disabled" },
       system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
       tools: toolsWithCache,
       messages: currentMessages,
     });
+
+    inputTokens += response.usage?.input_tokens ?? 0;
+    outputTokens += response.usage?.output_tokens ?? 0;
 
     if (response.stop_reason !== "tool_use") {
       const textBlock = response.content.find((b) => b.type === "text");
@@ -196,9 +207,14 @@ export async function processAdminCommand(org, messageBody) {
     session.messages = session.messages.slice(-MAX_HISTORY);
   }
 
-  WaBotMessage.create({ organizationId: org._id, sessionId: session.sessionId, role: "assistant", content: finalReply }).catch(
-    (err) => console.error("[WaAgentChat] Error guardando mensaje assistant:", err.message)
-  );
+  WaBotMessage.create({
+    organizationId: org._id,
+    sessionId: session.sessionId,
+    role: "assistant",
+    content: finalReply,
+    inputTokens,
+    outputTokens,
+  }).catch((err) => console.error("[WaAgentChat] Error guardando mensaje assistant:", err.message));
 
   try {
     const { messageId } = await sendTextMessage(adminPhone, toWhatsAppFormat(finalReply));

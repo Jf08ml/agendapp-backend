@@ -1183,8 +1183,10 @@ const appointmentService = {
     appt.additionalItems = additionalItems;
     appt.totalPrice = totalPrice;
 
-    // Si envían status u otros campos sueltos (nota, etc.), respétalos
-    const passthrough = ["status", "notes", "source", "meta", "reminderSent"];
+    // Si envían status u otros campos sueltos, respétalos. (Nota de sesión: usa
+    // updateSessionNotes — "notes" no es un path del schema, se quitó de esta
+    // lista porque se estaba perdiendo silenciosamente sin persistir ni fallar.)
+    const passthrough = ["status", "source", "meta", "reminderSent"];
     for (const k of passthrough) {
       if (updatedData[k] != null) appt[k] = updatedData[k];
     }

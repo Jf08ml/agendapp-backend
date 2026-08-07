@@ -32,7 +32,12 @@ export const chat = async (req, res) => {
       ChatLog.findOneAndUpdate(
         { sessionId },
         {
-          $setOnInsert: { organizationId: req.organization._id, type: "admin", userId: req.user?._id },
+          $setOnInsert: {
+            organizationId: req.organization._id,
+            type: "admin",
+            userId: req.user?._id,
+            "review.reviewed": false,
+          },
           $set: { error: err.message },
           $inc: { durationMs: Date.now() - startTime },
         },

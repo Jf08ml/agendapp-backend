@@ -1,6 +1,13 @@
 import { config } from "dotenv";
 config({ path: `.env.${process.env.NODE_ENV}` });
 
+// Locale global de moment — sin esto, format() con tokens como dddd/MMMM
+// (nombre de día/mes) cae al inglés por defecto ("Monday" en vez de "lunes"),
+// aunque el resto del string esté en español. Debe ir antes que cualquier
+// import que pueda formatear fechas al cargarse.
+import moment from "moment-timezone";
+moment.locale("es");
+
 import webPush from "web-push";
 import dbConnection from "./config/db.js";
 import express from "express";

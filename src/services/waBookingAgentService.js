@@ -204,6 +204,7 @@ export async function processClientBookingMessage(org, clientPhone, body) {
       organizationId: org._id,
       type: "booking",
       channel: "whatsapp",
+      "review.reviewed": false,
     },
     $push: {
       messages: {

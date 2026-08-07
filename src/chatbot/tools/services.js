@@ -1,5 +1,6 @@
 import Service from "../../models/serviceModel.js";
 import Organization from "../../models/organizationModel.js";
+import serviceService from "../../services/serviceService.js";
 import { getVerticalCatalog } from "../../utils/verticalCatalogs.js";
 
 // Monedas sin decimales (denominación grande): sus precios típicos van ×1000
@@ -287,6 +288,36 @@ export default [
         },
         actualizados: Object.keys(update),
       };
+    },
+  },
+  {
+    name: "delete_service",
+    description:
+      "Elimina PERMANENTEMENTE un servicio. Solo funciona si el servicio no tiene ninguna cita asociada (pasada o futura) — si tiene, la operación falla y no borra nada; en ese caso usa update_service con isActive: false para desactivarlo en su lugar (deja de ofrecerse, pero conserva el historial). Confirma con el usuario antes de llamar esta tool: es irreversible cuando sí se puede borrar.",
+    parameters: {
+      serviceName: { type: "string", description: "Nombre (parcial) del servicio a eliminar.", required: true },
+    },
+    handler: async (params, context) => {
+      const service = await Service.findOne({
+        organizationId: context.organizationId,
+        name: { $regex: escapeRegex(params.serviceName), $options: "i" },
+      });
+      if (!service) {
+        return { success: false, error: `No se encontró un servicio llamado "${params.serviceName}".` };
+      }
+
+      try {
+        await serviceService.deleteService(service._id.toString());
+      } catch (err) {
+        return {
+          success: false,
+          error: err.message,
+          _instruction:
+            "No se pudo eliminar (probablemente tiene citas asociadas). Ofrece al usuario desactivarlo en su lugar con update_service y isActive: false — deja de ofrecerse a clientes nuevos pero conserva el historial de citas.",
+        };
+      }
+
+      return { success: true, deletedService: { name: service.name } };
     },
   },
 ];

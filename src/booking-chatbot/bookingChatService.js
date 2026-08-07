@@ -8,7 +8,7 @@ import {
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const MODEL = "claude-haiku-4-5-20251001";
+const MODEL = "claude-sonnet-5";
 const MAX_TOKENS = 1024;
 const MAX_TOOL_ROUNDS = 8;
 
@@ -83,6 +83,9 @@ export const processBookingChat = async (organization, messages, options = {}) =
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: MAX_TOKENS,
+      // Sonnet 5 corre con thinking adaptativo por defecto; lo desactivamos para
+      // mantener la latencia de un chat en vivo cara al cliente final.
+      thinking: { type: "disabled" },
       system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
       tools: toolsWithCache,
       messages: currentMessages,

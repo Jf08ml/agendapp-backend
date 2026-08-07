@@ -47,11 +47,32 @@ const chatLogSchema = new mongoose.Schema(
 
     // Error si el proceso lanzó excepción
     error: { type: String },
+
+    // Revisión manual (superadmin) para curar ejemplos de entrenamiento/mejora de prompts
+    review: {
+      reviewed: { type: Boolean, default: false },
+      reviewedBy: { type: String },
+      reviewedAt: { type: Date },
+      // Lista de opciones vive solo en el frontend (Select); sin enum aquí para
+      // poder agregar categorías nuevas sin necesitar una migración.
+      category: { type: String },
+      notes: { type: String },
+    },
   },
   { timestamps: true }
 );
 
-// Retención automática: los logs se eliminan después de 90 días
-chatLogSchema.index({ createdAt: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 });
+// Retención automática: los logs se eliminan después de 90 días, EXCEPTO los
+// ya revisados (partialFilterExpression los excluye del TTL indefinidamente).
+// MongoDB solo permite igualdad/$exists/comparaciones en partialFilterExpression
+// (nada de $ne/$or) — por eso la igualdad exacta contra `false` en vez de $ne:true.
+// Para que esto funcione siempre, todo insert nuevo de ChatLog debe fijar
+// "review.reviewed": false explícitamente en su $setOnInsert (los upserts no
+// aplican defaults de Mongoose solos); ver chatController.js / bookingChatController.js /
+// waBookingAgentService.js.
+chatLogSchema.index(
+  { createdAt: 1 },
+  { expireAfterSeconds: 90 * 24 * 60 * 60, partialFilterExpression: { "review.reviewed": false } }
+);
 
 export default mongoose.model("ChatLog", chatLogSchema);
