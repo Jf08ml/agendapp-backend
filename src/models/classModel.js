@@ -22,6 +22,9 @@ const classSchema = new Schema(
     // Cupo por defecto para las sesiones (puede sobreescribirse por sesión)
     defaultCapacity: { type: Number, required: true, min: 1 },
     pricePerPerson: { type: Number, required: true, min: 0 },
+    // 🙈 Oculta el precio en la vista pública (landing, catálogo, detalle,
+    // reserva) — igual semántica que Service.hidePrice.
+    hidePrice: { type: Boolean, default: false },
     groupDiscount: { type: groupDiscountSchema, default: () => ({}) },
     // Color para identificación visual en la agenda
     color: { type: String, default: null },
