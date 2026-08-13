@@ -172,6 +172,24 @@ Has alcanzado tu meta de referidos en *{{organization}}*.
 
 Preséntate en tu próxima visita y reclama tu beneficio. ¡Gracias por recomendar nuestros servicios!`,
 
+      // 📊 Progreso de servicios (registro sin completar meta aún)
+      loyaltyServiceProgress: `✅ ¡Hola, {{names}}!
+
+Se registró tu servicio en *{{organization}}*.
+
+📊 Llevas *{{currentCount}}* — te faltan *{{remaining}}* para tu próximo premio: *{{nextReward}}*.
+
+¡Gracias por tu preferencia! 💖`,
+
+      // 📊 Progreso de referidos (registro sin completar meta aún)
+      loyaltyReferralProgress: `✅ ¡Hola, {{names}}!
+
+Se registró tu referido en *{{organization}}*.
+
+📊 Llevas *{{currentCount}}* — te faltan *{{remaining}}* para tu próximo premio: *{{nextReward}}*.
+
+¡Gracias por recomendarnos! 🎁`,
+
       // ⏳ Reserva recibida, pendiente de aprobación
       statusReservationPending: `⏳ ¡Hola, {{names}}!
 

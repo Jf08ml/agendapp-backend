@@ -66,6 +66,15 @@ const whatsappTemplateSchema = new mongoose.Schema(
           type: Boolean,
           default: true,
         },
+        // 📊 Notificaciones de progreso de fidelidad (registro sin completar meta aún)
+        loyaltyServiceProgress: {
+          type: Boolean,
+          default: false,
+        },
+        loyaltyReferralProgress: {
+          type: Boolean,
+          default: false,
+        },
         // 📚 Módulo de Clases
         classEnrollmentConfirmed: {
           type: Boolean,
@@ -122,6 +131,8 @@ const whatsappTemplateSchema = new mongoose.Schema(
         clientNoShowAck: true,
         loyaltyServiceReward: true,
         loyaltyReferralReward: true,
+        loyaltyServiceProgress: false,
+        loyaltyReferralProgress: false,
         classEnrollmentConfirmed: true,
         classEnrollmentPending: true,
         classEnrollmentCancelled: true,
@@ -184,6 +195,15 @@ const whatsappTemplateSchema = new mongoose.Schema(
       default: null,
     },
     loyaltyReferralReward: {
+      type: String,
+      default: null,
+    },
+    // 📊 Templates personalizables para progreso de fidelidad
+    loyaltyServiceProgress: {
+      type: String,
+      default: null,
+    },
+    loyaltyReferralProgress: {
       type: String,
       default: null,
     },

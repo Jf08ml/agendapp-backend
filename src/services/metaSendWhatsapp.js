@@ -16,6 +16,9 @@
  *   manage_block    → enlace_gestion
  *   appointments_list/appointmentsList → lista_citas
  *   reward          → premio
+ *   currentCount    → cantidad_actual
+ *   remaining       → faltantes
+ *   nextReward      → proximo_premio
  *   count           → cantidad_citas
  *   cita_pal        → cita_o_citas
  *   agendada_pal    → agendada_o_agendadas
@@ -40,6 +43,8 @@ const META_TEMPLATE_NAMES = {
   clientNoShowAck:           "aviso_no_asistencia",
   loyaltyServiceReward:      "premio_fidelidad",
   loyaltyReferralReward:     "premio_referidos",
+  loyaltyServiceProgress:    "progreso_fidelidad",
+  loyaltyReferralProgress:   "progreso_referidos",
   statusReservationApproved: "reserva_aprobada",
   statusReservationRejected: "reserva_no_disponible",
   // 📚 Módulo de Clases
@@ -86,6 +91,8 @@ const VARIABLE_ORDER = {
   aviso_no_asistencia:     ["nombre_cliente", "servicio", "fecha_cita", "nombre_negocio"],
   premio_fidelidad:        ["nombre_cliente", "nombre_negocio", "premio"],
   premio_referidos:        ["nombre_cliente", "nombre_negocio", "premio"],
+  progreso_fidelidad:      ["nombre_cliente", "nombre_negocio", "cantidad_actual", "faltantes", "proximo_premio"],
+  progreso_referidos:      ["nombre_cliente", "nombre_negocio", "cantidad_actual", "faltantes", "proximo_premio"],
   reserva_aprobada:        ["nombre_cliente", "fecha_cita", "nombre_negocio", "direccion", "servicio", "enlace_cancelacion"],
   reserva_no_disponible:   ["nombre_cliente", "fecha_cita", "nombre_negocio"],
   // 📚 Módulo de Clases
@@ -119,6 +126,9 @@ function buildMetaVarMap(data) {
     enlace_gestion:       data.manage_block       ?? "",
     lista_citas:          data.appointments_list ?? data.appointmentsList ?? "",
     premio:               data.reward             ?? "",
+    cantidad_actual:      String(data.currentCount ?? ""),
+    faltantes:            String(data.remaining    ?? ""),
+    proximo_premio:       data.nextReward          ?? "",
     cantidad_citas:       String(data.count       ?? ""),
     cita_o_citas:         data.cita_pal           ?? "",
     agendada_o_agendadas: data.agendada_pal       ?? "",

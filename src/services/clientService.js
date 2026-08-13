@@ -285,6 +285,33 @@ const clientService = {
           console.error('[registerService] Error enviando WA de recompensa:', waError.message);
         }
       }
+    } else if (!rewardEarned && client.phone_e164 && organization && serviceTiers.length > 0) {
+      // 📊 Aún no cumple la meta — avisar el progreso hacia el próximo nivel
+      const sortedTiers = [...serviceTiers].sort((a, b) => a.threshold - b.threshold);
+      const nextTier = sortedTiers.find((t) => t.threshold > client.servicesTaken);
+      if (nextTier) {
+        try {
+          const whatsappDoc = await WhatsappTemplate.findOne({ organizationId: organization._id });
+          const isEnabled = whatsappDoc?.enabledTypes?.loyaltyServiceProgress === true;
+          if (isEnabled) {
+            await whatsappService.sendNotification(
+              organization._id.toString(),
+              client.phone_e164,
+              'loyaltyServiceProgress',
+              {
+                names: client.name,
+                organization: organization.name,
+                currentCount: client.servicesTaken,
+                remaining: nextTier.threshold - client.servicesTaken,
+                nextReward: nextTier.reward,
+              }
+            );
+            console.log(`[registerService] WA de progreso enviado a ${client.name}: ${client.servicesTaken}/${nextTier.threshold}`);
+          }
+        } catch (waError) {
+          console.error('[registerService] Error enviando WA de progreso:', waError.message);
+        }
+      }
     }
 
     return client;
@@ -322,6 +349,33 @@ const clientService = {
           }
         } catch (waError) {
           console.error('[registerReferral] Error enviando WA de recompensa:', waError.message);
+        }
+      }
+    } else if (!rewardEarned && client.phone_e164 && organization && referralTiers.length > 0) {
+      // 📊 Aún no cumple la meta — avisar el progreso hacia el próximo nivel
+      const sortedTiers = [...referralTiers].sort((a, b) => a.threshold - b.threshold);
+      const nextTier = sortedTiers.find((t) => t.threshold > client.referralsMade);
+      if (nextTier) {
+        try {
+          const whatsappDoc = await WhatsappTemplate.findOne({ organizationId: organization._id });
+          const isEnabled = whatsappDoc?.enabledTypes?.loyaltyReferralProgress === true;
+          if (isEnabled) {
+            await whatsappService.sendNotification(
+              organization._id.toString(),
+              client.phone_e164,
+              'loyaltyReferralProgress',
+              {
+                names: client.name,
+                organization: organization.name,
+                currentCount: client.referralsMade,
+                remaining: nextTier.threshold - client.referralsMade,
+                nextReward: nextTier.reward,
+              }
+            );
+            console.log(`[registerReferral] WA de progreso enviado a ${client.name}: ${client.referralsMade}/${nextTier.threshold}`);
+          }
+        } catch (waError) {
+          console.error('[registerReferral] Error enviando WA de progreso:', waError.message);
         }
       }
     }

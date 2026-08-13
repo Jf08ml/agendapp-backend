@@ -1783,9 +1783,11 @@ const appointmentService = {
   /**
    * Auto-marca como attended las citas confirmed pasadas de una organización.
    * Se ejecuta desde el cronjob nocturno solo si org.autoMarkAttended === true.
-   * Cada cita marcada registra también el servicio para el conteo de fidelidad
-   * (equivalente a lo que haría un admin manualmente en Gestión de clientes),
-   * ya que aquí nadie hace ese registro manual.
+   * Si además org.autoRegisterServiceOnAttendance === true, cada cita marcada
+   * registra también el servicio para el conteo de fidelidad (equivalente a lo
+   * que haría un admin manualmente en Gestión de clientes) — los dos toggles
+   * son independientes: se puede marcar asistencia automáticamente sin que eso
+   * registre servicio, o viceversa.
    */
   autoMarkAttendedAppointments: async (organizationId) => {
     try {
@@ -1812,15 +1814,17 @@ const appointmentService = {
         { $set: { status: 'attended' } }
       );
 
-      for (const appt of appointmentsToMark) {
-        if (!appt.client) continue;
-        try {
-          await clientService.registerService(appt.client, organization);
-        } catch (err) {
-          console.error(
-            `[autoMarkAttendedAppointments] Error registrando servicio de fidelidad (cliente ${appt.client}):`,
-            err.message
-          );
+      if (organization.autoRegisterServiceOnAttendance) {
+        for (const appt of appointmentsToMark) {
+          if (!appt.client) continue;
+          try {
+            await clientService.registerService(appt.client, organization);
+          } catch (err) {
+            console.error(
+              `[autoMarkAttendedAppointments] Error registrando servicio de fidelidad (cliente ${appt.client}):`,
+              err.message
+            );
+          }
         }
       }
 

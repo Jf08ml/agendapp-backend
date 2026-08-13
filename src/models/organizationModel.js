@@ -356,6 +356,13 @@ const organizationSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  // Si está activo (y autoMarkAttended también), el mismo cronjob registra el servicio
+  // de fidelidad de cada cita que marca como attended. Independiente de autoMarkAttended
+  // para poder marcar asistencia automáticamente sin tocar el conteo de fidelidad.
+  autoRegisterServiceOnAttendance: {
+    type: Boolean,
+    default: true,
+  },
   showLoyaltyProgram: {
     type: Boolean,
     default: true,

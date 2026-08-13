@@ -56,6 +56,14 @@ const TEMPLATE_TYPES = {
     label: "Felicitación por recompensa de referidos",
     variables: ["{{names}}", "{{reward}}", "{{organization}}"],
   },
+  loyaltyServiceProgress: {
+    label: "Aviso de progreso al registrar un servicio (sin completar meta aún)",
+    variables: ["{{names}}", "{{organization}}", "{{currentCount}}", "{{remaining}}", "{{nextReward}}"],
+  },
+  loyaltyReferralProgress: {
+    label: "Aviso de progreso al registrar un referido (sin completar meta aún)",
+    variables: ["{{names}}", "{{organization}}", "{{currentCount}}", "{{remaining}}", "{{nextReward}}"],
+  },
   classEnrollmentConfirmed: {
     label: "Confirmación de inscripción a clase grupal",
     variables: ["{{names}}", "{{organization}}"],

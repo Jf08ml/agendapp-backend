@@ -184,6 +184,7 @@ const organizationService = {
       metaPhoneNumberId,
       metaPhone,
       autoMarkAttended,
+      autoRegisterServiceOnAttendance,
       aiAssistantName,
       storeEnabled,
       storeCodEnabled,
@@ -446,6 +447,7 @@ const organizationService = {
 
     // ✅ Auto-marcar asistencia
     if (autoMarkAttended !== undefined) organization.autoMarkAttended = autoMarkAttended;
+    if (autoRegisterServiceOnAttendance !== undefined) organization.autoRegisterServiceOnAttendance = autoRegisterServiceOnAttendance;
 
     // 🛍️ Tienda pública de productos (flags del toggle en /inventario)
     if (storeEnabled !== undefined) organization.storeEnabled = !!storeEnabled;
