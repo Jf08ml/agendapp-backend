@@ -2,12 +2,12 @@
 import cron from "node-cron";
 import moment from "moment-timezone";
 import Membership from "../models/membershipModel.js";
-import Service from "../models/serviceModel.js";
 import Appointment from "../models/appointmentModel.js";
 import WhatsappTemplate from "../models/whatsappTemplateModel.js";
 import whatsappService from "../services/sendWhatsappService.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
 import { waBulkSend, waBulkOptIn } from "../services/waHttpService.js";
+import { getActiveRules, computeDueBatchForOrg } from "../services/followUpReminderService.js";
 
 /**
  * 🔁 Job de recordatorios de seguimiento entre servicios relacionados
@@ -38,12 +38,6 @@ import { waBulkSend, waBulkOptIn } from "../services/waHttpService.js";
  */
 
 const ACTIVE_STATUSES = ["active", "trial"];
-const CANCELLED_STATUSES = ["cancelled", "cancelled_by_customer", "cancelled_by_admin"];
-
-// Si la cita gatillo superó followUpDays + este margen sin resolverse, se
-// abandona sin enviar (se marca igual, para no volver a evaluarla mañana).
-// Evita que activar el feature dispare sobre citas de hace meses/años.
-const MAX_OVERDUE_DAYS = 30;
 
 // Pausa entre envíos individuales (solo canal Meta, uno por uno vía Graph API).
 const SEND_DELAY_MS = 200;
@@ -56,6 +50,39 @@ function orgCanSendWhatsapp(org) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Marca un lote de candidatos como procesados, grabando el outcome + el
+ * snapshot de la regla vigente (target service/days) — agrupado por regla
+ * porque cada una puede tener un servicio/días de seguimiento distinto y un
+ * único updateMany compartido les pisaría el snapshot entre sí.
+ */
+async function markProcessed(candidates, outcome) {
+  if (!candidates.length) return;
+
+  const byRule = new Map();
+  for (const c of candidates) {
+    const key = String(c.rule._id);
+    if (!byRule.has(key)) byRule.set(key, { rule: c.rule, apptIds: [] });
+    byRule.get(key).apptIds.push(c.appt._id);
+  }
+
+  const processedAt = new Date();
+  for (const { rule, apptIds } of byRule.values()) {
+    await Appointment.updateMany(
+      { _id: { $in: apptIds } },
+      {
+        $set: {
+          followUpReminderSent: true,
+          followUpReminderOutcome: outcome,
+          followUpReminderProcessedAt: processedAt,
+          followUpReminderTargetServiceId: rule.followUpServiceId,
+          followUpReminderTargetDays: rule.followUpDays,
+        },
+      }
+    );
+  }
 }
 
 export async function runFollowUpReminders() {
@@ -78,128 +105,46 @@ export async function runFollowUpReminders() {
       const templateDoc = await WhatsappTemplate.findOne({ organizationId: org._id });
       if (!templateDoc || templateDoc.enabledTypes?.followUpReminder !== true) continue;
 
-      // Servicios con seguimiento configurado
-      const rules = await Service.find({
-        organizationId: org._id,
-        followUpServiceId: { $ne: null },
-        followUpDays: { $ne: null },
-        isActive: true,
-      }).lean();
-
+      // Reglas de seguimiento vigentes en la organización
+      const { rules, followUpServiceById } = await getActiveRules(org._id);
       if (!rules.length) continue;
-
-      const followUpServiceIds = [...new Set(rules.map((r) => String(r.followUpServiceId)))];
-      const followUpServices = await Service.find({ _id: { $in: followUpServiceIds } }).lean();
-      const followUpServiceById = new Map(followUpServices.map((s) => [String(s._id), s]));
 
       const tz = org.timezone || "America/Bogota";
 
-      // Recolectar candidatos de TODAS las reglas antes de decidir qué enviar
-      // — así, si un cliente matchea varias reglas (ej. distintos estilos de
-      // pestañas), se evalúa una sola vez con su cita gatillo más reciente,
-      // en vez de la primera regla que se procese por orden arbitrario.
-      const allCandidates = [];
-      for (const rule of rules) {
-        if (!followUpServiceById.has(String(rule.followUpServiceId))) continue;
+      const { toSend: dueToSend, skippedNoPhone, skippedAlreadyReturned, superseded } =
+        await computeDueBatchForOrg({ organizationId: org._id, rules, tz, referenceDate: new Date() });
 
-        const cutoff = moment.tz(tz).subtract(rule.followUpDays, "days").toDate();
-        const tooOldCutoff = moment
-          .tz(tz)
-          .subtract(rule.followUpDays + MAX_OVERDUE_DAYS, "days")
-          .toDate();
-
-        const candidates = await Appointment.find({
-          organizationId: org._id,
-          service: rule._id,
-          status: "attended",
-          // $ne (no === false): las citas creadas antes de que este campo
-          // existiera en el esquema no lo tienen guardado en absoluto, y un
-          // filtro estricto `false` no matchea documentos donde el campo
-          // está ausente — quedaban invisibles para este cron para siempre.
-          followUpReminderSent: { $ne: true },
-          startDate: { $lte: cutoff, $gt: tooOldCutoff },
-        })
-          .populate("client")
-          .lean();
-
-        for (const appt of candidates) {
-          allCandidates.push({ appt, rule });
-        }
+      if (!dueToSend.length && !skippedNoPhone.length && !skippedAlreadyReturned.length && !superseded.length) {
+        continue;
       }
 
-      if (!allCandidates.length) continue;
+      // Resueltos sin enviar (perdió contra otra regla el mismo día / sin
+      // teléfono / cliente ya volvió) — se marcan igual, para no volver a
+      // evaluarlos mañana, cada uno con su motivo.
+      await markProcessed(superseded, "skipped_superseded");
+      await markProcessed(skippedNoPhone, "skipped_no_phone");
+      await markProcessed(skippedAlreadyReturned, "skipped_already_returned");
 
-      // Más reciente por cliente, entre TODAS las reglas que matchearon.
-      const latestByClient = new Map();
-      for (const c of allCandidates) {
-        const clientId = String(c.appt.client?._id || c.appt.client || "");
-        if (!clientId) continue;
-        const existing = latestByClient.get(clientId);
-        if (!existing || new Date(c.appt.startDate) > new Date(existing.appt.startDate)) {
-          latestByClient.set(clientId, c);
-        }
-      }
+      if (!dueToSend.length) continue;
 
-      // El resto (mismo cliente con citas más viejas, o sin client._id) se
-      // marca resuelto sin enviar — no duplicar mensajes el mismo día.
-      const chosenApptIds = new Set([...latestByClient.values()].map((c) => String(c.appt._id)));
-      const staleIds = allCandidates
-        .filter((c) => !chosenApptIds.has(String(c.appt._id)))
-        .map((c) => c.appt._id);
-      if (staleIds.length) {
-        await Appointment.updateMany({ _id: { $in: staleIds } }, { $set: { followUpReminderSent: true } });
-      }
+      // Marcar ANTES de enviar — evita reenvíos si el proceso se interrumpe
+      // a mitad de la tanda (mismo patrón que sendDailyReminders).
+      await markProcessed(dueToSend, "sent");
 
-      const toSend = [];
-      const resolvedOnlyIds = [];
-
-      for (const { appt, rule } of latestByClient.values()) {
-        const client = appt.client;
-        if (!client || !client.phone_e164) {
-          resolvedOnlyIds.push(appt._id);
-          continue;
-        }
-
-        // ¿Ya tiene una cita del servicio de seguimiento posterior a la gatillo?
-        const alreadyFollowedUp = await Appointment.exists({
-          organizationId: org._id,
-          service: rule.followUpServiceId,
-          client: client._id,
-          startDate: { $gt: appt.startDate },
-          status: { $nin: CANCELLED_STATUSES },
-        });
-
-        if (alreadyFollowedUp) {
-          resolvedOnlyIds.push(appt._id);
-          continue;
-        }
-
+      const toSend = dueToSend.map(({ appt, rule }) => {
         const followUpService = followUpServiceById.get(String(rule.followUpServiceId));
-        toSend.push({
+        return {
           apptId: appt._id,
-          phone: client.phone_e164,
+          phone: appt.client.phone_e164,
           vars: {
-            names: client.name,
+            names: appt.client.name,
             organization: org.name,
             service: followUpService.name,
             originalService: rule.name,
             days: String(rule.followUpDays),
           },
-        });
-      }
-
-      if (resolvedOnlyIds.length) {
-        await Appointment.updateMany({ _id: { $in: resolvedOnlyIds } }, { $set: { followUpReminderSent: true } });
-      }
-
-      if (!toSend.length) continue;
-
-      // Marcar ANTES de enviar — evita reenvíos si el proceso se interrumpe
-      // a mitad de la tanda (mismo patrón que sendDailyReminders).
-      await Appointment.updateMany(
-        { _id: { $in: toSend.map((s) => s.apptId) } },
-        { $set: { followUpReminderSent: true } }
-      );
+        };
+      });
 
       let orgSent = 0;
       const isMeta = org.waConnectionType === "meta";

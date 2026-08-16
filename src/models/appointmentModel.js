@@ -93,6 +93,25 @@ const appointmentModelSchema = new mongoose.Schema(
     secondReminderSent: { type: Boolean, default: false },
     secondReminderBulkId: { type: String },
     followUpReminderSent: { type: Boolean, default: false },
+    // 🔁 Detalle del resultado del recordatorio de seguimiento (ver
+    // followUpReminderService.js) — followUpReminderSent sigue siendo el
+    // filtro de candidatos del cron ($ne: true), esto es solo para poder
+    // mostrarle al admin qué pasó y por qué en la pestaña "Seguimientos".
+    followUpReminderOutcome: {
+      type: String,
+      enum: ["sent", "skipped_already_returned", "skipped_no_phone", "skipped_superseded"],
+      required: false,
+    },
+    followUpReminderProcessedAt: { type: Date, required: false },
+    // Snapshot de la regla vigente al momento de procesar — si el admin edita
+    // o borra la regla después, el historial no debe mentir sobre qué
+    // servicio se recomendó en su momento.
+    followUpReminderTargetServiceId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Service",
+      required: false,
+    },
+    followUpReminderTargetDays: { type: Number, required: false },
     // 📨 Resultado del intento de envío de la confirmación de agendamiento por
     // WhatsApp (scheduleAppointment/scheduleAppointmentBatch). Permite diagnosticar
     // reclamos de "no llegó la confirmación" sin depender de logs de servidor.

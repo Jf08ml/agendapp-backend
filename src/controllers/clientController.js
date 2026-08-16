@@ -2,6 +2,7 @@ import appointmentService from "../services/appointmentService.js";
 import clientService from "../services/clientService.js";
 import sendResponse from "../utils/sendResponse.js";
 import { auditLogService } from "../services/auditLogService.js";
+import { getClientFollowUpOverview } from "../services/followUpReminderService.js";
 
 const clientController = {
   // Controlador para crear un nuevo cliente
@@ -71,6 +72,21 @@ const clientController = {
       sendResponse(res, 200, client, "Cliente encontrado");
     } catch (error) {
       sendResponse(res, 404, null, error.message);
+    }
+  },
+
+  // Controlador para el estado de recordatorios de seguimiento (próximos/enviados/no enviados)
+  getFollowUpStatus: async (req, res) => {
+    const { id } = req.params;
+    try {
+      const status = await getClientFollowUpOverview({
+        organizationId: req.organization._id,
+        clientId: id,
+        tz: req.organization.timezone || "America/Bogota",
+      });
+      sendResponse(res, 200, status, "Estado de recordatorios de seguimiento obtenido exitosamente");
+    } catch (error) {
+      sendResponse(res, 500, null, error.message);
     }
   },
 

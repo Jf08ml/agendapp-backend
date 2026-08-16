@@ -30,6 +30,7 @@ router.get(
   clientController.searchClients
 );
 router.get("/:id", organizationResolver, verifyToken, clientController.getClientById);
+router.get("/:id/follow-up-status", organizationResolver, verifyToken, clientController.getFollowUpStatus);
 router.delete("/:id", organizationResolver, verifyToken, clientController.deleteClient);
 router.post("/:id/register-service", organizationResolver, verifyToken, clientController.registerService);
 router.post(
