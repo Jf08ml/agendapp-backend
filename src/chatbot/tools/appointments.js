@@ -944,6 +944,82 @@ Busca la cita por cliente, fecha, servicio o profesional — igual que cancel_or
   },
 
   {
+    name: "get_client_notes",
+    description: `Consulta las notas de sesión YA GUARDADAS en las citas de un cliente, o de TODOS los clientes de la organización, para responder preguntas o hacer un resumen sobre ellas.
+Úsala cuando el usuario pida LEER, CONSULTAR o RESUMIR notas de sesión existentes (ej: "recoge todas las notas de Rafael", "resúmeme las notas de este mes", "qué dice la nota de la cita del 13", "algún cliente con seguimiento pendiente según las notas"). NO uses update_session_notes para esto — esa tool solo ESCRIBE una nota nueva, no lee las existentes.
+Si no se especifica cliente, busca en TODOS los clientes de la organización dentro del rango de fechas (usa this_month por defecto si el usuario no da fechas, para no traer el historial completo del negocio de una sola vez).`,
+    parameters: {
+      clientName: {
+        type: "string",
+        description: "Nombre parcial del cliente cuyas notas se quieren consultar. Si se omite junto con clientPhone, busca en todos los clientes.",
+        required: false,
+      },
+      clientPhone: {
+        type: "string",
+        description: "Teléfono del cliente. Prioridad sobre clientName.",
+        required: false,
+      },
+      dateFrom: { type: "string", description: 'Fecha inicio de las citas a revisar. Preset ("today", "this_month", etc.) o YYYY-MM-DD. Si se omite y no hay cliente específico, usa this_month.', required: false },
+      dateTo: { type: "string", description: "Fecha fin. Preset o YYYY-MM-DD. Si se omite, usa el mismo valor que dateFrom.", required: false },
+    },
+    handler: async (params, context) => {
+      const { organizationId, organization } = context;
+      const tz = organization.timezone || "America/Bogota";
+
+      const filter = { organizationId, sessionNotes: { $ne: "" } };
+
+      if (params.clientPhone) {
+        const clients = await findClientsByPhone(organizationId, params.clientPhone);
+        if (clients.length === 0) {
+          return { success: false, error: `No se encontró ningún cliente con el teléfono "${params.clientPhone}".` };
+        }
+        filter.client = { $in: clients.map((c) => c._id) };
+      } else if (params.clientName) {
+        const clients = await findClientsByName(organizationId, params.clientName);
+        if (clients.length === 0) {
+          return { success: false, error: `No se encontró ningún cliente con el nombre "${params.clientName}".` };
+        }
+        filter.client = { $in: clients.map((c) => c._id) };
+      }
+
+      const hasClientFilter = !!filter.client;
+      // Sin cliente específico: exigir rango de fechas (this_month por defecto) para
+      // no traer de una sola vez el historial completo de notas de la organización.
+      const fromStr = params.dateFrom || (hasClientFilter ? null : "this_month");
+      if (fromStr) {
+        const toStr = params.dateTo || fromStr;
+        const fromRange = resolveDate(fromStr, tz);
+        const toRange = resolveDate(toStr, tz);
+        if (!fromRange || !toRange) {
+          return { success: false, error: `No pude interpretar las fechas: "${fromStr}" / "${toStr}". Usa formato YYYY-MM-DD o presets como today, this_month.` };
+        }
+        filter.startDate = { $gte: fromRange[0].toDate(), $lte: toRange[1].toDate() };
+      }
+
+      const appointments = await Appointment.find(filter)
+        .populate("client", "name")
+        .populate("service", "name")
+        .populate("employee", "names")
+        .sort({ startDate: -1 })
+        .limit(hasClientFilter ? 50 : 30);
+
+      if (appointments.length === 0) {
+        return { success: true, found: false, message: "No se encontraron notas de sesión con esos filtros." };
+      }
+
+      const notas = appointments.map((a) => ({
+        fecha: moment(a.startDate).tz(tz).format("DD/MM/YYYY"),
+        cliente: a.client?.name || "?",
+        servicio: a.service?.name || "?",
+        profesional: a.employee?.names || "?",
+        nota: a.sessionNotes,
+      }));
+
+      return { success: true, totalNotas: notas.length, notas };
+    },
+  },
+
+  {
     name: "register_payment",
     description: `Registra un pago (completo o un abono/parcial) sobre una cita existente.
 Busca la cita por cliente, fecha, servicio o profesional — igual que cancel_or_delete_appointment. Si encuentra más de una, devuelve la lista para que el usuario especifique (puedes repetir la llamada con appointmentId).

@@ -206,7 +206,7 @@ export const rescheduleAppointment = {
       organizationId,
       client: client._id,
     })
-      .populate("service", "name")
+      .populate("service", "name maxConcurrentAppointments")
       .populate("employee", "names");
 
     if (!appt) {
@@ -232,19 +232,23 @@ export const rescheduleAppointment = {
     const newEnd = new Date(newStart.toDate().getTime() + Math.max(durationMs, 0));
 
     // A diferencia del reagendado admin (que solo advierte), acá se BLOQUEA si
-    // el profesional ya tiene otra cita en ese rango — un cliente por chat no
-    // debería poder forzar un doble agendamiento.
+    // el profesional ya está al tope de su capacidad simultánea en ese rango —
+    // un cliente por chat no debería poder forzar un doble agendamiento.
+    // Cuenta citas simultáneas (no solo "¿hay alguna?") porque servicios/clases
+    // con maxConcurrentAppointments > 1 (ej. clases grupales) esperan que varias
+    // citas compartan profesional+horario — igual que scheduleService.js.
     if (appt.employee) {
-      const overlapping = await Appointment.findOne({
+      const maxConcurrent = appt.service?.maxConcurrentAppointments || 1;
+      const overlappingCount = await Appointment.countDocuments({
         _id: { $ne: appt._id },
         employee: appt.employee._id,
         organizationId,
         status: { $nin: RESCHEDULABLE_EXCLUDED_STATUSES },
         startDate: { $lt: newEnd },
         endDate: { $gt: newStart.toDate() },
-      }).lean();
+      });
 
-      if (overlapping) {
+      if (overlappingCount >= maxConcurrent) {
         return {
           success: false,
           error: "Ese horario ya no está disponible para el profesional de esta cita. Busca otro horario con get_available_slots.",
