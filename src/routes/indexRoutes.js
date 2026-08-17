@@ -39,6 +39,8 @@ import platformInboxRoutes from "./platformInboxRoutes.js";
 import auditLogRoutes from "./auditLog.js";
 import announcementRoutes from "./announcementRoutes.js";
 import announcementAdminRoutes from "./announcementAdminRoutes.js";
+import featureRequestRoutes from "./featureRequestRoutes.js";
+import featureRequestAdminRoutes from "./featureRequestAdminRoutes.js";
 import chatRoutes from "./chatRoutes.js";
 import bookingChatRoutes from "./bookingChatRoutes.js";
 import waAgentRoutes from "./waAgentRoutes.js";
@@ -220,6 +222,8 @@ router.use("/audit-logs", organizationResolver, verifyToken, auditLogRoutes);
 router.use("/impact-survey", organizationResolver, verifyToken, impactSurveyRoutes);
 router.use("/announcements", verifyToken, announcementRoutes);
 router.use("/admin/announcements", announcementAdminRoutes);
+router.use("/feature-requests", verifyToken, featureRequestRoutes);
+router.use("/admin/feature-requests", featureRequestAdminRoutes);
 
 // ═══════════════════════════════════════════════════
 // 5. MÓDULO DE CLASES
