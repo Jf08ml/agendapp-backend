@@ -7,6 +7,9 @@ const router = express.Router();
 // Ruta para ejecutar el cron job de recordatorios
 router.get("/daily-reminder", cronController.runDailyReminder);
 
+// Ruta para ejecutar el cron job de recordatorios a profesionales (in-app + push)
+router.get("/employee-reminders", cronController.runEmployeeReminders);
+
 // Ruta para ejecutar el cron job de verificación de membresías
 router.get("/check-memberships", membershipController.runMembershipCheckManual);
 

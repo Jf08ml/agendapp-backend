@@ -100,6 +100,12 @@ const employeeModelSchema = new mongoose.Schema({
     type: [ScheduleExceptionSchema],
     default: [],
   },
+
+  // Recordatorio de cita al propio profesional (in-app + push), activo por defecto
+  reminderPreferences: {
+    enabled: { type: Boolean, default: true },
+    hoursBefore: { type: Number, enum: [1, 2, 6, 24], default: 1 },
+  },
 });
 
 // Aplicar índice único compuesto (email + organizationId)

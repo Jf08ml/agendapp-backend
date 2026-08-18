@@ -92,6 +92,9 @@ const appointmentModelSchema = new mongoose.Schema(
     reminderBulkId: { type: String },
     secondReminderSent: { type: Boolean, default: false },
     secondReminderBulkId: { type: String },
+    // 🔔 Recordatorio al profesional asignado (independiente del recordatorio al cliente arriba)
+    employeeReminderSent: { type: Boolean, default: false },
+    employeeReminderSentAt: { type: Date, required: false },
     followUpReminderSent: { type: Boolean, default: false },
     // 🔁 Detalle del resultado del recordatorio de seguimiento (ver
     // followUpReminderService.js) — followUpReminderSent sigue siendo el

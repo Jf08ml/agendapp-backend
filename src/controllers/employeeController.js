@@ -97,6 +97,36 @@ const employeeController = {
     }
   },
 
+  // Obtener la preferencia de recordatorio del empleado autenticado
+  getMyReminderPreferences: async (req, res) => {
+    if (req.user?.userType !== "employee") {
+      return sendResponse(res, 403, null, "Solo un empleado puede consultar esta preferencia");
+    }
+    try {
+      const preferences = await employeeService.getReminderPreferences(req.user.userId);
+      sendResponse(res, 200, preferences, "Preferencia de recordatorio obtenida");
+    } catch (error) {
+      sendResponse(res, 404, null, error.message);
+    }
+  },
+
+  // Actualizar la preferencia de recordatorio del empleado autenticado
+  updateMyReminderPreferences: async (req, res) => {
+    if (req.user?.userType !== "employee") {
+      return sendResponse(res, 403, null, "Solo un empleado puede actualizar esta preferencia");
+    }
+    try {
+      const { enabled, hoursBefore } = req.body;
+      const preferences = await employeeService.updateReminderPreferences(
+        req.user.userId,
+        { enabled, hoursBefore }
+      );
+      sendResponse(res, 200, preferences, "Preferencia de recordatorio actualizada");
+    } catch (error) {
+      sendResponse(res, 400, null, error.message);
+    }
+  },
+
   // Controlador para eliminar un empleado
   deleteEmployee: async (req, res) => {
     const { id } = req.params;

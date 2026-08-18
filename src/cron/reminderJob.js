@@ -1,6 +1,7 @@
 import cron from "node-cron";
 import appointmentService from "../services/appointmentService.js";
 import enrollmentService from "../services/enrollmentService.js";
+import employeeReminderService from "../services/employeeReminderService.js";
 
 /**
  * Sistema de Recordatorios Inteligente
@@ -33,6 +34,10 @@ const reminderJob = () => {
       // Recordatorios de clases grupales (mismo intervalo)
       enrollmentService.sendClassReminders().catch((e) =>
         console.error("[reminderJob] Error en recordatorios de clases:", e?.message || e)
+      );
+      // Recordatorios al profesional asignado (in-app + push, mismo intervalo)
+      employeeReminderService.sendEmployeeReminders().catch((e) =>
+        console.error("[reminderJob] Error en recordatorios de empleados:", e?.message || e)
       );
     },
     {

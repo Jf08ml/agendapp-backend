@@ -14,6 +14,18 @@ router.get(
 // 🔒 Rutas PROTEGIDAS (requieren autenticación)
 router.post("/", organizationResolver, verifyToken, employeeController.createEmployee);
 router.get("/", organizationResolver, verifyToken, employeeController.getEmployees);
+router.get(
+  "/me/reminder-preferences",
+  organizationResolver,
+  verifyToken,
+  employeeController.getMyReminderPreferences
+);
+router.put(
+  "/me/reminder-preferences",
+  organizationResolver,
+  verifyToken,
+  employeeController.updateMyReminderPreferences
+);
 router.get("/:id", organizationResolver, verifyToken, employeeController.getEmployeeById);
 router.get(
   "/phone/:phoneNumber",

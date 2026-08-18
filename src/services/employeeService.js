@@ -1,6 +1,7 @@
 import Employee from "../models/employeeModel.js";
 import Appointment from "../models/appointmentModel.js";
 import bcrypt from "bcryptjs";
+import employeeReminderService from "./employeeReminderService.js";
 
 const employeeService = {
   // Crear un nuevo empleado
@@ -138,6 +139,34 @@ const employeeService = {
     // Ocultar el campo password antes de devolver el empleado actualizado
     updatedEmployee.password = undefined;
     return updatedEmployee;
+  },
+
+  // Obtener la preferencia de recordatorio de cita del propio empleado
+  getReminderPreferences: async (employeeId) => {
+    const employee = await Employee.findById(employeeId).select(
+      "reminderPreferences"
+    );
+    if (!employee) {
+      throw new Error("Empleado no encontrado");
+    }
+    return employeeReminderService.resolveEmployeeReminderPreference(employee);
+  },
+
+  // Actualizar la preferencia de recordatorio de cita del propio empleado
+  updateReminderPreferences: async (employeeId, { enabled, hoursBefore }) => {
+    const employee = await Employee.findById(employeeId);
+    if (!employee) {
+      throw new Error("Empleado no encontrado");
+    }
+
+    const current = employee.reminderPreferences || {};
+    employee.reminderPreferences = {
+      enabled: enabled !== undefined ? enabled : current.enabled,
+      hoursBefore: hoursBefore !== undefined ? hoursBefore : current.hoursBefore,
+    };
+
+    await employee.save();
+    return employeeReminderService.resolveEmployeeReminderPreference(employee);
   },
 
   // Eliminar un empleado

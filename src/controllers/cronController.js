@@ -1,4 +1,5 @@
 import appointmentService from "../services/appointmentService.js";
+import employeeReminderService from "../services/employeeReminderService.js";
 import Organization from "../models/organizationModel.js";
 
 const cronController = {
@@ -9,6 +10,17 @@ const cronController = {
       res.status(200).json({ message: "Recordatorios enviados correctamente" });
     } catch (error) {
       console.error("Error al ejecutar el recordatorio:", error);
+      res.status(500).json({ message: "Error interno del servidor" });
+    }
+  },
+
+  // Recordatorios al profesional asignado (in-app + push) - ejecución manual
+  runEmployeeReminders: async (req, res) => {
+    try {
+      await employeeReminderService.sendEmployeeReminders();
+      res.status(200).json({ message: "Recordatorios de empleados enviados correctamente" });
+    } catch (error) {
+      console.error("Error al ejecutar el recordatorio de empleados:", error);
       res.status(500).json({ message: "Error interno del servidor" });
     }
   },
