@@ -209,7 +209,7 @@ router.use("/chat", organizationResolver, verifyToken, chatRoutes);
 router.use("/appointments", organizationResolver, verifyToken, requireActiveMembership, appointmentRoutes);
 router.use("/images", organizationResolver, verifyToken, requireActiveMembership, imagesRoutes);
 router.use("/advances", organizationResolver, verifyToken, requireActiveMembership, advanceRoutes);
-router.use("/whatsapp-templates", verifyToken, requireActiveMembership, whatsappTemplateRoutes);
+router.use("/whatsapp-templates", organizationResolver, verifyToken, requireActiveMembership, whatsappTemplateRoutes);
 router.use("/wa", verifyToken, requireActiveMembership, waRoutes);
 router.use("/reminders", verifyToken, requireActiveMembership, reminderRoutes);
 router.use("/campaigns", verifyToken, requireActiveMembership, campaignRoutes);
