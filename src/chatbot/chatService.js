@@ -165,9 +165,13 @@ export const processChat = async (organization, user, messages) => {
     if (response.stop_reason !== "tool_use") {
       // Fallback: si el modelo terminó el turno sin bloque de texto (puede pasar en
       // sesiones largas con muchas tool calls seguidas), nunca devolver un reply vacío.
+      // CRÍTICO: este texto NO debe afirmar que algo se completó — cuando este fallback
+      // se dispara es precisamente porque no sabemos qué pasó, y los guards de abajo no
+      // detectan un claim de éxito genérico sin el nombre de la entidad (caso real:
+      // Rossette Spa, "Listo, ya quedó registrado" sin haber creado ningún servicio).
       const reply =
         extractText(response.content) ||
-        "Listo, ya quedó registrado. ¿Hay algo más en lo que te pueda ayudar?";
+        "¿Puedes confirmarme de nuevo qué necesitas? No terminé de procesar tu mensaje anterior.";
 
       // Guards anti-alucinación: el bot afirma haber hecho algo sin haber llamado
       // la herramienta correspondiente. Se inyecta una corrección [SISTEMA] y se
