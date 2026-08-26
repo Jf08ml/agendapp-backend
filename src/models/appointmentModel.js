@@ -102,10 +102,23 @@ const appointmentModelSchema = new mongoose.Schema(
     // mostrarle al admin qué pasó y por qué en la pestaña "Seguimientos".
     followUpReminderOutcome: {
       type: String,
-      enum: ["sent", "skipped_already_returned", "skipped_no_phone", "skipped_superseded"],
+      enum: [
+        "sent",
+        "skipped_already_returned",
+        "skipped_no_phone",
+        "skipped_superseded",
+        "failed_max_retries",
+      ],
       required: false,
     },
     followUpReminderProcessedAt: { type: Date, required: false },
+    // Intentos de envío reales (no confirmados como entregados) acumulados —
+    // NO se resetea entre corridas, solo al llegar a MAX_FOLLOWUP_RETRY_ATTEMPTS
+    // en followUpReminderJob.js, que entonces marca "failed_max_retries" y deja
+    // de reintentar. Reintentar un contacto indefinidamente en WhatsApp puede
+    // empeorar restricciones reales de la cuenta (ver error 463 de Baileys:
+    // "no retry — retrying counts as another reach out and worsens the restriction").
+    followUpReminderFailCount: { type: Number, default: 0 },
     // Snapshot de la regla vigente al momento de procesar — si el admin edita
     // o borra la regla después, el historial no debe mentir sobre qué
     // servicio se recomendó en su momento.
