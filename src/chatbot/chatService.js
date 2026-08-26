@@ -9,7 +9,12 @@ import { markOnboardingMilestone } from "../utils/onboardingMilestones.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const MODEL = "claude-sonnet-5";
+// Bajado de Sonnet 5 a Haiku 4.5 el 2026-08-26 por costo (mitad de precio en
+// ambos lados). Sonnet se había subido en agosto por alucinaciones reales de
+// Haiku (ver CLAUDE.md / memoria "fase2-ronda2-guardrails-y-upgrade-modelo")
+// — los guards anti-alucinación siguen activos, pero Haiku los ignoraba más
+// seguido. Decisión consciente del usuario, revisar chatlogs si reaparecen.
+const MODEL = "claude-haiku-4-5";
 const MAX_TOKENS = 4096;
 const MAX_TOOL_ROUNDS = 8;
 
@@ -150,9 +155,9 @@ export const processChat = async (organization, user, messages) => {
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: MAX_TOKENS,
-      // Sonnet 5 corre con thinking adaptativo por defecto; lo desactivamos para
-      // mantener la latencia de un chat en vivo — el upgrade de modelo ya mejora
-      // el seguimiento de instrucciones sin necesidad de razonamiento extendido.
+      // Haiku 4.5 no piensa por defecto sin budget_tokens — este disabled explícito
+      // es un remanente inofensivo de cuando el modelo era Sonnet 5 (adaptativo por
+      // defecto); se deja igual para no tocar el request shape entre modelos.
       thinking: { type: "disabled" },
       system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
       tools: toolsWithCache,

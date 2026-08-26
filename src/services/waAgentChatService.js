@@ -8,7 +8,9 @@ import { logOutboundMessage } from "./platformInboxService.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const MODEL = "claude-sonnet-5";
+// Bajado de Sonnet 5 a Haiku 4.5 el 2026-08-26 por costo — ver nota en
+// agenda-backend/src/chatbot/chatService.js (misma decisión, mismo motivo).
+const MODEL = "claude-haiku-4-5";
 const MAX_TOKENS = 1024;
 const MAX_TOOL_ROUNDS = 8;
 // Sesión expira tras 30 min de inactividad
@@ -157,8 +159,9 @@ export async function processAdminCommand(org, messageBody) {
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: MAX_TOKENS,
-      // Sonnet 5 corre con thinking adaptativo por defecto; lo desactivamos para
-      // mantener la latencia de un chat de WhatsApp en vivo.
+      // Haiku 4.5 no piensa por defecto sin budget_tokens — este disabled explícito
+      // es un remanente inofensivo de cuando el modelo era Sonnet 5 (adaptativo por
+      // defecto); se deja igual para no tocar el request shape entre modelos.
       thinking: { type: "disabled" },
       system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
       tools: toolsWithCache,
