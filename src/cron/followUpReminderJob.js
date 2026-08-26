@@ -6,7 +6,8 @@ import Appointment from "../models/appointmentModel.js";
 import WhatsappTemplate from "../models/whatsappTemplateModel.js";
 import whatsappService from "../services/sendWhatsappService.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
-import { waBulkSend, waBulkOptIn } from "../services/waHttpService.js";
+import { waBulkSend, waBulkOptIn, waGetStatus } from "../services/waHttpService.js";
+import { isWaReady } from "../services/waIntegrationService.js";
 import { getActiveRules, computeDueBatchForOrg } from "../services/followUpReminderService.js";
 
 /**
@@ -127,8 +128,31 @@ export async function runFollowUpReminders() {
 
       if (!dueToSend.length) continue;
 
+      const isMeta = org.waConnectionType === "meta";
+
+      // Baileys: el microservicio externo acepta el lote (200 ok) aunque la
+      // sesión esté caída — sin este chequeo el cron marcaba "sent" sin haber
+      // entregado nada, y al ser idempotente nunca lo reintentaba (bug real
+      // detectado en luciazaratenails: sesión desconectada con reason 401,
+      // 14 citas marcadas "sent" sin ningún mensaje enviado).
+      if (!isMeta) {
+        let waReady = false;
+        try {
+          waReady = isWaReady(await waGetStatus(org.clientIdWhatsapp));
+        } catch (err) {
+          console.warn(`🔁 [followUpReminderJob] [${org.name}] No se pudo consultar estado de WhatsApp: ${err?.message || err}`);
+        }
+        if (!waReady) {
+          console.warn(
+            `🔁 [followUpReminderJob] [${org.name}] WhatsApp desconectado — se pospone el envío a ${dueToSend.length} cliente(s) para la próxima corrida.`
+          );
+          continue;
+        }
+      }
+
       // Marcar ANTES de enviar — evita reenvíos si el proceso se interrumpe
-      // a mitad de la tanda (mismo patrón que sendDailyReminders).
+      // a mitad de la tanda (mismo patrón que sendDailyReminders). Ahora solo
+      // se llega aquí con la sesión Baileys confirmada como conectada (o vía Meta).
       await markProcessed(dueToSend, "sent");
 
       const toSend = dueToSend.map(({ appt, rule }) => {
@@ -147,7 +171,6 @@ export async function runFollowUpReminders() {
       });
 
       let orgSent = 0;
-      const isMeta = org.waConnectionType === "meta";
 
       if (isMeta) {
         for (const item of toSend) {

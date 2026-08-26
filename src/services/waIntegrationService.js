@@ -15,7 +15,9 @@ import { getVerticalCatalog } from "../utils/verticalCatalogs.js";
 
 // Detecta de forma defensiva si el status del wa-backend indica "conectado",
 // sin asumir una forma exacta (puede venir como status/code/state/connected).
-function isWaReady(s) {
+// Exportada para que los crons de envío masivo (ej. followUpReminderJob) la
+// reutilicen antes de dar por enviado un lote a una sesión Baileys caída.
+export function isWaReady(s) {
   if (!s || typeof s !== "object") return false;
   const v = String(s.status ?? s.code ?? s.state ?? "").toLowerCase();
   return s.connected === true || v === "ready" || v === "connected";
