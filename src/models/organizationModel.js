@@ -493,6 +493,15 @@ const organizationSchema = new mongoose.Schema({
     enum: ["modern", "minimal", "cards", "landing", "academy"],
     default: "modern",
   },
+  // 📊 Tags de Google que el propio negocio configura para medir SU tráfico/
+  // campañas en su página pública de reserva (independiente del gtag propio
+  // de AgenditApp en index.html). No son secretos — se exponen tal cual en
+  // GET /organization-config para que el frontend los inyecte client-side.
+  analyticsConfig: {
+    gaMeasurementId: { type: String, trim: true, default: "" }, // Google Analytics 4 (G-XXXXXXX)
+    googleAdsId: { type: String, trim: true, default: "" }, // Google Ads (AW-XXXXXXX)
+    googleAdsConversionLabel: { type: String, trim: true, default: "" }, // Etiqueta de conversión (junto a googleAdsId arma el "send_to")
+  },
   reminderSettings: {
     enabled: {
       type: Boolean,

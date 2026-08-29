@@ -188,6 +188,7 @@ const organizationService = {
       aiAssistantName,
       storeEnabled,
       storeCodEnabled,
+      analyticsConfig,
     } = organizationData;
 
     const organization = await Organization.findById(id);
@@ -314,6 +315,13 @@ const organizationService = {
 
     if (homeLayout !== undefined) {
       organization.homeLayout = homeLayout;
+    }
+
+    if (analyticsConfig !== undefined) {
+      organization.analyticsConfig = {
+        ...(organization.analyticsConfig?.toObject?.() ?? organization.analyticsConfig),
+        ...analyticsConfig,
+      };
     }
 
     if (reminderSettings !== undefined) {
