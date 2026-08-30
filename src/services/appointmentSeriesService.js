@@ -8,12 +8,14 @@ import mongoose from 'mongoose';
 import appointmentModel from '../models/appointmentModel.js';
 import organizationService from './organizationService.js';
 import employeeService from './employeeService.js';
+import membershipService from './membershipService.js';
 import serviceService from './serviceService.js';
 import clientService from './clientService.js';
 import WhatsappTemplate from '../models/whatsappTemplateModel.js';
 import whatsappTemplates from '../utils/whatsappTemplates.js';
 import { waIntegrationService } from './waIntegrationService.js';
 import whatsappService from './sendWhatsappService.js';
+import { recordConfirmationOutcome } from './appointmentService.js';
 import cancellationService from './cancellationService.js';
 import { generateCancellationLink } from '../utils/cancellationUtils.js';
 
@@ -567,8 +569,23 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
 
       if (!phoneE164) {
         console.warn('⚠️ Cliente sin teléfono utilizable; no se enviará mensaje WhatsApp para la serie.');
+        await recordConfirmationOutcome(created.map(c => c._id), "skipped", "Cliente sin teléfono utilizable");
       } else {
-        
+        // Verificar si el plan permite confirmaciones automáticas (mismo criterio
+        // que createAppointment/createAppointmentsBatch/createMultiEmployeeBatch)
+        // — calculado una sola vez aquí porque AMBAS opciones (toda la serie /
+        // solo primera ocurrencia) lo necesitan; antes vivía solo dentro del
+        // bloque de la opción 1 y la opción 2 lo referenciaba fuera de su scope
+        // (ReferenceError real en tiempo de ejecución, atrapado en silencio por
+        // el try/catch de más abajo — la opción 2 es además la que trae el
+        // checkbox del modal de citas desmarcado por defecto).
+        const seriesPlanLimits = await membershipService.getPlanLimits(baseAppointment.organizationId);
+        const planAllowsSeriesConfirmations = !(seriesPlanLimits && seriesPlanLimits.autoConfirmations === false);
+
+        // 🆕 Verificar si el envío de confirmación de series está habilitado
+        const whatsappTemplate = await WhatsappTemplate.findOne({ organizationId: baseAppointment.organizationId });
+        const isRecurringConfirmationEnabled = whatsappTemplate?.enabledTypes?.recurringAppointmentSeries !== false;
+
         if (notifyAllAppointments) {
           // 📨 OPCIÓN 1: Enviar UN mensaje con TODAS las citas de la serie
           console.log('📨 Enviando mensaje con TODAS las citas de la serie...');
@@ -619,34 +636,42 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
             cancellationLink,
           };
           
-          // 🆕 Verificar si el envío de confirmación de series está habilitado
-          const whatsappTemplate = await WhatsappTemplate.findOne({ organizationId: baseAppointment.organizationId });
-          const isRecurringConfirmationEnabled = whatsappTemplate?.enabledTypes?.recurringAppointmentSeries !== false;
-
-          if (isRecurringConfirmationEnabled) {
-            await whatsappService.sendNotification(
+          if (planAllowsSeriesConfirmations && isRecurringConfirmationEnabled) {
+            const notifyResult = await whatsappService.sendNotification(
               baseAppointment.organizationId,
               phoneE164,
               'recurringAppointmentSeries',
-              templateData
+              templateData,
+              { externalRef: `confirmation:${created.map(c => c._id).join(",")}` }
             );
-            
-            console.log(`✅ Confirmación de serie recurrente enviada: ${Object.keys(citasPorOcurrencia).length} ocurrencias (${created.length} citas totales)`);
+            const messageId = notifyResult?.messageId || notifyResult?.id || null;
+            console.log(`✅ Confirmación de serie recurrente enviada: ${Object.keys(citasPorOcurrencia).length} ocurrencias (${created.length} citas totales) — messageId: ${messageId || "?"}`);
+            await recordConfirmationOutcome(created.map(c => c._id), "sent", undefined, messageId);
           } else {
             console.log(`⏭️  Confirmación de serie recurrente deshabilitada`);
+            await recordConfirmationOutcome(
+              created.map(c => c._id),
+              "blocked",
+              !planAllowsSeriesConfirmations ? "Bloqueada por límite del plan (autoConfirmations)" : "Deshabilitada en plantillas de WhatsApp (enabledTypes.recurringAppointmentSeries)"
+            );
           }
           
         } else {
           // 📨 OPCIÓN 2: Enviar mensaje solo de la PRIMERA ocurrencia
           console.log('📨 Enviando mensaje solo de la PRIMERA ocurrencia...');
-          
-          // 🆕 Verificar si el envío está habilitado (usa el mismo check que la serie completa)
-          if (!isRecurringConfirmationEnabled) {
+
+          // Filtrar solo las citas de la primera ocurrencia (occurrenceNumber: 1)
+          const primerasCitas = created.filter(c => c.occurrenceNumber === 1);
+
+          // Mismo chequeo de plan + plantilla que la opción de serie completa
+          if (!planAllowsSeriesConfirmations || !isRecurringConfirmationEnabled) {
             console.log(`⏭️  Confirmación de primera ocurrencia deshabilitada (controlada por recurringAppointmentSeries)`);
+            await recordConfirmationOutcome(
+              primerasCitas.map(c => c._id),
+              "blocked",
+              !planAllowsSeriesConfirmations ? "Bloqueada por límite del plan (autoConfirmations)" : "Deshabilitada en plantillas de WhatsApp (enabledTypes.recurringAppointmentSeries)"
+            );
           } else {
-            // Filtrar solo las citas de la primera ocurrencia (occurrenceNumber: 1)
-            const primerasCitas = created.filter(c => c.occurrenceNumber === 1);
-            
             if (primerasCitas.length === 0) {
               console.warn('⚠️ No se encontraron citas de la primera ocurrencia');
             } else {
@@ -703,14 +728,16 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
               
               // Usar template batch o simple según cantidad de servicios
               const templateType = primerasCitas.length > 1 ? 'scheduleAppointmentBatch' : 'scheduleAppointment';
-              await whatsappService.sendNotification(
+              const notifyResult = await whatsappService.sendNotification(
                 baseAppointment.organizationId,
                 phoneE164,
                 templateType,
-                templateData
+                templateData,
+                { externalRef: `confirmation:${primerasCitas.map(c => c._id).join(",")}` }
               );
-              
-              console.log(`📱 Mensaje enviado solo de primera ocurrencia (${primerasCitas.length} servicios)`);
+              const messageId = notifyResult?.messageId || notifyResult?.id || null;
+              console.log(`📱 Mensaje enviado solo de primera ocurrencia (${primerasCitas.length} servicios) — messageId: ${messageId || "?"}`);
+              await recordConfirmationOutcome(primerasCitas.map(c => c._id), "sent", undefined, messageId);
             }
           }
         }
@@ -718,6 +745,7 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
     } catch (error) {
       console.error('❌ Error enviando mensaje WhatsApp para serie:', error.message || error);
       // No lanzar error, las citas ya fueron creadas exitosamente
+      await recordConfirmationOutcome(created.map(c => c._id), "failed", error?.message || String(error));
     }
   }
 

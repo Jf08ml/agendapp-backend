@@ -65,7 +65,7 @@ const fmtTime = (d, tz = "America/Bogota", timeFormat = '12h') =>
 
 // 📨 Persiste el resultado del intento de envío de confirmación (fire-and-forget,
 // no debe tumbar el flujo que la llama). Ver enum en appointmentModel.js.
-async function recordConfirmationOutcome(appointmentIds, status, errorMessage) {
+export async function recordConfirmationOutcome(appointmentIds, status, errorMessage, messageId) {
   const ids = Array.isArray(appointmentIds) ? appointmentIds : [appointmentIds];
   if (ids.length === 0) return;
   try {
@@ -76,6 +76,7 @@ async function recordConfirmationOutcome(appointmentIds, status, errorMessage) {
           waConfirmationStatus: status,
           waConfirmationSentAt: new Date(),
           waConfirmationError: errorMessage ? String(errorMessage).slice(0, 500) : undefined,
+          waConfirmationMessageId: messageId || undefined,
         },
       }
     );
@@ -691,9 +692,16 @@ const appointmentService = {
         const isBatchConfirmationEnabled = whatsappTemplate?.enabledTypes?.scheduleAppointmentBatch !== false;
 
         if (planAllowsConfirmations && isBatchConfirmationEnabled) {
-          await whatsappService.sendNotification(organizationId, phoneE164, 'scheduleAppointmentBatch', templateData);
-          console.log(`✅ Confirmación batch enviada (${allGroupAppointments.length} citas)`);
-          await recordConfirmationOutcome(groupApptIds, "sent");
+          const notifyResult = await whatsappService.sendNotification(
+            organizationId,
+            phoneE164,
+            'scheduleAppointmentBatch',
+            templateData,
+            { externalRef: `confirmation:${groupApptIds.join(",")}` }
+          );
+          const messageId = notifyResult?.messageId || notifyResult?.id || null;
+          console.log(`✅ Confirmación batch enviada (${allGroupAppointments.length} citas) — messageId: ${messageId || "?"}`);
+          await recordConfirmationOutcome(groupApptIds, "sent", undefined, messageId);
         } else {
           console.log(`⏭️  Confirmación batch deshabilitada`);
           await recordConfirmationOutcome(
@@ -831,9 +839,16 @@ const appointmentService = {
         const isBatchConfirmationEnabled = whatsappTemplate?.enabledTypes?.scheduleAppointmentBatch !== false;
 
         if (planAllowsConfirmations && isBatchConfirmationEnabled) {
-          await whatsappService.sendNotification(organizationId, phoneE164, 'scheduleAppointmentBatch', templateData);
-          console.log(`✅ WA multi-profesional enviado (${groupAppts.length} citas, ${employeeNames.length} profesionales)`);
-          await recordConfirmationOutcome(allCreatedIds, "sent");
+          const notifyResult = await whatsappService.sendNotification(
+            organizationId,
+            phoneE164,
+            'scheduleAppointmentBatch',
+            templateData,
+            { externalRef: `confirmation:${allCreatedIds.join(",")}` }
+          );
+          const messageId = notifyResult?.messageId || notifyResult?.id || null;
+          console.log(`✅ WA multi-profesional enviado (${groupAppts.length} citas, ${employeeNames.length} profesionales) — messageId: ${messageId || "?"}`);
+          await recordConfirmationOutcome(allCreatedIds, "sent", undefined, messageId);
         } else {
           console.log('⏭️  Confirmación multi-profesional deshabilitada');
           await recordConfirmationOutcome(
