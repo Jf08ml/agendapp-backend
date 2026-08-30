@@ -92,6 +92,13 @@ const appointmentModelSchema = new mongoose.Schema(
     reminderBulkId: { type: String },
     secondReminderSent: { type: Boolean, default: false },
     secondReminderBulkId: { type: String },
+    // 📶 Entrega real reportada por Baileys vía ack (SERVER_ACK/DELIVERY_ACK) —
+    // distinto de reminderSent/secondReminderSent, que solo marcan "se intentó
+    // enviar". Independiente por etapa porque cada una es un mensaje distinto.
+    reminderDeliveryStatus: { type: String, enum: ["sent", "delivered", "failed"] },
+    reminderDeliveryUpdatedAt: { type: Date },
+    secondReminderDeliveryStatus: { type: String, enum: ["sent", "delivered", "failed"] },
+    secondReminderDeliveryUpdatedAt: { type: Date },
     // 🔔 Recordatorio al profesional asignado (independiente del recordatorio al cliente arriba)
     employeeReminderSent: { type: Boolean, default: false },
     employeeReminderSentAt: { type: Date, required: false },
@@ -140,6 +147,16 @@ const appointmentModelSchema = new mongoose.Schema(
     },
     waConfirmationSentAt: { type: Date, required: false },
     waConfirmationError: { type: String, required: false },
+    // 📶 Entrega real reportada por Baileys vía ack (SERVER_ACK/DELIVERY_ACK),
+    // independiente de waConfirmationStatus ("sent" ahí solo significa que la
+    // llamada de envío no lanzó excepción, no que WhatsApp la haya entregado).
+    waConfirmationMessageId: { type: String, required: false },
+    waConfirmationDeliveryStatus: {
+      type: String,
+      enum: ["sent", "delivered", "failed"],
+      required: false,
+    },
+    waConfirmationDeliveryUpdatedAt: { type: Date, required: false },
     advancePayment: {
       type: Number,
       default: 0,

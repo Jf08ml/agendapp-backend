@@ -3,12 +3,14 @@ import {
   handleMetaVerify,
   handleMetaIncoming,
   handleBaileysMessage,
+  handleBaileysStatus,
 } from "../controllers/waAgentController.js";
 
 const router = Router();
 
 // Baileys microservice → backend
 router.post("/message", handleBaileysMessage);
+router.post("/status", handleBaileysStatus);
 
 // Meta webhook: verificación inicial (GET) + mensajes entrantes de la org (POST)
 router.get("/meta-incoming", handleMetaVerify);

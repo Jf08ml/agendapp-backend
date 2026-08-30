@@ -12,6 +12,7 @@ import {
   findOrganizationByPhone,
   updateMessageStatus,
 } from "../services/platformInboxService.js";
+import Appointment from "../models/appointmentModel.js";
 
 // Dedupe de webhooks: Meta puede reintentar la entrega del mismo mensaje.
 // Map message.id → timestamp; se poda cada vez que crece.
@@ -233,4 +234,72 @@ export async function handleBaileysMessage(req, res) {
   }
 
   // Baileys es solo canal de notificaciones salientes — mensajes entrantes se ignoran
+}
+
+// Orden de progreso de los acks de entrega — un ack tardío no puede retroceder
+// un estado ya más avanzado (mismo criterio que platformInboxService.updateMessageStatus,
+// pero sin "read": no nos interesa si el cliente vio el mensaje).
+const DELIVERY_STATUS_RANK = { failed: 1, sent: 1, delivered: 2 };
+
+// externalRef viaja como "<kind>:<id1>,<id2>,..." — un recordatorio puede
+// agrupar varias citas del mismo cliente/teléfono en un solo mensaje.
+const REF_KIND_FIELDS = {
+  confirmation: { statusField: "waConfirmationDeliveryStatus", updatedAtField: "waConfirmationDeliveryUpdatedAt" },
+  reminder: { statusField: "reminderDeliveryStatus", updatedAtField: "reminderDeliveryUpdatedAt" },
+  reminder2: { statusField: "secondReminderDeliveryStatus", updatedAtField: "secondReminderDeliveryUpdatedAt" },
+};
+
+/**
+ * POST /api/wa-agent/status
+ * Recibe acks reales de entrega (SERVER_ACK/DELIVERY_ACK de Baileys, ya
+ * traducidos a "sent"/"delivered"/"failed") correlacionados por el externalRef
+ * que viajó en el envío original (ver sendWhatsappService.js/appointmentService.js).
+ * Autenticado con el mismo shared secret que /api/wa-agent/message.
+ */
+export async function handleBaileysStatus(req, res) {
+  const secret = req.headers["x-wa-agent-secret"];
+  if (!secret || secret !== process.env.WA_AGENT_SECRET) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  // Responder inmediatamente — el microservicio no debe esperar el procesamiento
+  res.status(200).json({ ok: true });
+
+  const { externalRef, status } = req.body || {};
+  if (!externalRef || !DELIVERY_STATUS_RANK[status]) return;
+
+  const sepIndex = externalRef.indexOf(":");
+  if (sepIndex === -1) return;
+
+  const kind = externalRef.slice(0, sepIndex);
+  const fields = REF_KIND_FIELDS[kind];
+  if (!fields) {
+    console.warn(`[WaAgent] externalRef con kind desconocido: ${kind}`);
+    return;
+  }
+
+  const appointmentIds = externalRef.slice(sepIndex + 1).split(",").filter(Boolean);
+  if (!appointmentIds.length) return;
+
+  try {
+    const appointments = await Appointment.find({ _id: { $in: appointmentIds } })
+      .select(fields.statusField)
+      .lean();
+
+    const toUpdateIds = appointments
+      .filter((a) => {
+        const current = a[fields.statusField];
+        return !current || DELIVERY_STATUS_RANK[status] >= DELIVERY_STATUS_RANK[current];
+      })
+      .map((a) => a._id);
+
+    if (!toUpdateIds.length) return;
+
+    await Appointment.updateMany(
+      { _id: { $in: toUpdateIds } },
+      { $set: { [fields.statusField]: status, [fields.updatedAtField]: new Date() } }
+    );
+  } catch (err) {
+    console.error("[WaAgent] Error actualizando status de entrega Baileys:", err.message);
+  }
 }

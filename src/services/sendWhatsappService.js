@@ -154,6 +154,10 @@ const whatsappService = {
       message,
     };
     if (image) payload.image = image;
+    // externalRef: id de correlación para el tracking real de entrega (ver
+    // waAgentController.handleBaileysStatus) — el microservicio lo reenvía
+    // sin interpretarlo cuando llega el ack de WhatsApp.
+    if (opts.externalRef) payload.externalRef = opts.externalRef;
 
     return this.sendViaMultiSession(payload, opts);
   },

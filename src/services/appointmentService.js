@@ -232,7 +232,7 @@ const appointmentService = {
           client?.phone_e164 || client?.phoneNumber,
           'scheduleAppointment',
           templateData,
-          ...(fallbackMessage ? [{ fallbackMessage }] : [])
+          { externalRef: `confirmation:${newAppointment._id}`, ...(fallbackMessage ? { fallbackMessage } : {}) }
         );
         newAppointment.waConfirmationSentAt = new Date();
         if (notifyResult?.blocked) {
@@ -244,8 +244,10 @@ const appointmentService = {
           newAppointment.waConfirmationStatus = "failed";
           newAppointment.waConfirmationError = "Sin template aprobado ni canal disponible (Meta)";
         } else {
-          console.log(`✅ Confirmación enviada para cita ${newAppointment._id} — messageId: ${notifyResult?.messageId || notifyResult?.id || "?"}`);
+          const messageId = notifyResult?.messageId || notifyResult?.id || null;
+          console.log(`✅ Confirmación enviada para cita ${newAppointment._id} — messageId: ${messageId || "?"}`);
           newAppointment.waConfirmationStatus = "sent";
+          if (messageId) newAppointment.waConfirmationMessageId = messageId;
         }
       } else if (!isConfirmationEnabled) {
         console.log(`⏭️  Confirmación deshabilitada (enabledTypes.scheduleAppointment) para cita ${newAppointment._id}`);
@@ -1495,7 +1497,11 @@ const appointmentService = {
             recommendations: recommendationsBlock,
           };
 
-          items.push({ phone: bucket.phone, vars });
+          // externalRef: correlación para el tracking real de entrega (ver
+          // waAgentController.handleBaileysStatus) — un bucket puede agrupar
+          // varias citas del mismo cliente/teléfono en un solo mensaje.
+          const refKind = sentField === "secondReminderSent" ? "reminder2" : "reminder";
+          items.push({ phone: bucket.phone, vars, externalRef: `${refKind}:${Array.from(bucket.apptIds).join(",")}` });
           includedIds.push(...Array.from(bucket.apptIds));
         }
 
@@ -1505,6 +1511,7 @@ const appointmentService = {
         }
 
         // Enviar recordatorios
+        let sendSucceeded = false;
         try {
           const targetDateFmt = targetTimeStart.toISOString().slice(0, 10);
           const title = `${label} ${targetDateFmt} ${currentHourOrg}:00 (${org.name})`;
@@ -1567,22 +1574,41 @@ const appointmentService = {
             messageTpl: messageTpl,
             dryRun: false,
           });
+          sendSucceeded = true;
 
           console.log(
             `[${org.name}] [${label}] Campaña enviada: ${result.prepared} mensajes (bulkId: ${result.bulkId})`
           );
 
-          // Actualizar solo el bulkId (el flag ya fue marcado antes del envío)
+          // Actualizar solo el bulkId (el flag ya fue marcado antes del envío) — si
+          // esto falla el envío YA ocurrió: no se revierte sentField (evitaría
+          // duplicados), solo queda sin bulkId guardado para diagnóstico.
           if (includedIds.length) {
             await appointmentModel.updateMany(
               { _id: { $in: includedIds } },
               { $set: { [bulkIdField]: result.bulkId } }
+            ).catch((e) =>
+              console.error(`[${org.name}] [${label}] Envío OK pero no se pudo guardar el bulkId:`, e?.message || e)
             );
           }
 
           return { ok: markedCount, skipped: 0 };
         } catch (err) {
           console.error(`[${org.name}] [${label}] Error enviando campaña:`, err.message);
+          // El envío realmente falló antes de completarse (microservicio caído,
+          // sesión desconectada, error de red) — revertir el flag marcado más
+          // arriba para que el próximo cron (cada 30 min) reintente, en vez de
+          // perder el recordatorio para siempre. Antes de este fix, una falla
+          // transitoria dejaba sentField=true sin haberse enviado nada — bug
+          // real que probablemente explica reportes de "no llegó el recordatorio".
+          if (!sendSucceeded && includedIds.length) {
+            await appointmentModel.updateMany(
+              { _id: { $in: includedIds } },
+              { $set: { [sentField]: false } }
+            ).catch((e) =>
+              console.error(`[${org.name}] [${label}] No se pudo revertir ${sentField} tras fallo de envío:`, e?.message || e)
+            );
+          }
           return { ok: 0, skipped: appointments.length };
         }
       };

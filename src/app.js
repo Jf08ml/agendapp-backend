@@ -67,9 +67,11 @@ const generalLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  // Excluir cron jobs del rate limiting
+  // Excluir cron jobs y el webhook del microservicio Baileys (autenticado con
+  // secreto compartido, no con IP — un bulk de recordatorios puede disparar
+  // cientos de acks de entrega desde la IP fija del microservicio)
   skip: (req) => {
-    return req.path.startsWith('/api/cron/');
+    return req.path.startsWith('/api/cron/') || req.path.startsWith('/api/wa-agent/');
   }
 });
 
