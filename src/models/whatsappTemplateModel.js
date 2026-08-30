@@ -253,6 +253,26 @@ const whatsappTemplateSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    // 📲 Plantillas Meta: borrador real (con nombres de variable) que el admin
+    // envió a revisión, keyed por templateKey (mismas claves que enabledTypes).
+    // Meta solo guarda {{1}},{{2}}... sin significado — sin esto, ni la pantalla
+    // puede re-mostrar lo que el admin escribió, ni el envío sabe en qué orden
+    // van las variables si la org personalizó la plantilla por defecto.
+    metaTemplateDrafts: {
+      type: Map,
+      of: new mongoose.Schema(
+        {
+          headerText: { type: String, default: "" },
+          bodyText: { type: String, default: "" },
+          footerText: { type: String, default: "" },
+          category: { type: String, default: "UTILITY" },
+          language: { type: String, default: "es" },
+          bodyVariableOrder: { type: [String], default: [] },
+        },
+        { _id: false }
+      ),
+      default: () => new Map(),
+    },
   },
   {
     timestamps: true,

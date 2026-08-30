@@ -29,6 +29,7 @@
  */
 
 import { listTemplates, sendTemplateMessage, getOrgPrefix } from "./metaTemplateService.js";
+import WhatsappTemplate from "../models/whatsappTemplateModel.js";
 
 // ── Template name mapping ────────────────────────────────────────────────────
 
@@ -182,8 +183,12 @@ export function invalidateTemplateCache(orgId) {
 
 // ── Component builder ────────────────────────────────────────────────────────
 
-function buildComponents(metaTemplateName, data) {
-  const order = VARIABLE_ORDER[metaTemplateName];
+function buildComponents(metaTemplateName, data, customOrder) {
+  // customOrder: orden real de variables que el admin guardó al personalizar
+  // su plantilla (ver metaTemplateController.handleCreateTemplate) — tiene
+  // prioridad sobre el default de fábrica, que solo aplica si la org nunca
+  // personalizó esta plantilla en particular.
+  const order = customOrder?.length ? customOrder : VARIABLE_ORDER[metaTemplateName];
   if (!order || order.length === 0) return [];
 
   const varMap = buildMetaVarMap(data);
@@ -244,7 +249,23 @@ export async function sendMetaTemplateNotification(org, phone, templateType, dat
     return null;
   }
 
-  const components = buildComponents(metaName, data);
+  // Si la org personalizó esta plantilla, usar el orden de variables que
+  // realmente guardó al enviarla a revisión (ver metaTemplateController.js) —
+  // el default de fábrica (VARIABLE_ORDER) solo aplica sin personalización.
+  // Se busca por metaName (nombre real en Meta), no por templateType: más de
+  // un templateType puede compartir el mismo nombre de plantilla (ej.
+  // scheduleAppointment y scheduleAppointmentBatch comparten "confirmacion_cita").
+  let customOrder;
+  try {
+    const templateDoc = await WhatsappTemplate.findOne({ organizationId: org._id })
+      .select("metaTemplateDrafts")
+      .lean();
+    customOrder = templateDoc?.metaTemplateDrafts?.[metaName]?.bodyVariableOrder;
+  } catch (err) {
+    console.warn(`[metaSendWA] No se pudo leer el borrador guardado para org ${org._id}:`, err.message);
+  }
+
+  const components = buildComponents(metaName, data, customOrder);
   const lang = template.language || language;
 
   try {

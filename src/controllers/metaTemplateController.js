@@ -1,5 +1,6 @@
 import { listTemplates, createTemplate, updateTemplate, deleteTemplate, syncTemplateStatus } from "../services/metaTemplateService.js";
 import Organization from "../models/organizationModel.js";
+import WhatsappTemplate from "../models/whatsappTemplateModel.js";
 import sendResponse from "../utils/sendResponse.js";
 
 async function getOrg(orgId) {
@@ -13,7 +14,10 @@ export async function handleListTemplates(req, res) {
   try {
     const org = await getOrg(req.params.id);
     const templates = await listTemplates(org);
-    sendResponse(res, 200, templates);
+    const templateDoc = await WhatsappTemplate.findOne({ organizationId: org._id }).lean();
+    // .lean() devuelve los campos Map como objeto plano, no como Map real.
+    const drafts = templateDoc?.metaTemplateDrafts || {};
+    sendResponse(res, 200, { templates, drafts });
   } catch (err) {
     sendResponse(res, 400, null, err.message);
   }
@@ -22,7 +26,33 @@ export async function handleListTemplates(req, res) {
 export async function handleCreateTemplate(req, res) {
   try {
     const org = await getOrg(req.params.id);
-    const result = await createTemplate(org, req.body);
+    const { namedDraft, bodyVariableOrder, ...metaPayload } = req.body;
+    const result = await createTemplate(org, metaPayload);
+
+    // Se indexa por el NOMBRE real de la plantilla en Meta (ej. "confirmacion_cita"),
+    // no por el templateKey del editor — un mismo nombre de plantilla puede
+    // servir a más de un templateType (scheduleAppointment y
+    // scheduleAppointmentBatch comparten "confirmacion_cita"), así que indexar
+    // por templateKey dejaría sin borrador guardado a la mitad de los envíos.
+    if (metaPayload.name) {
+      await WhatsappTemplate.findOneAndUpdate(
+        { organizationId: org._id },
+        {
+          $set: {
+            [`metaTemplateDrafts.${metaPayload.name}`]: {
+              headerText: namedDraft?.headerText || "",
+              bodyText: namedDraft?.bodyText || "",
+              footerText: namedDraft?.footerText || "",
+              category: metaPayload.category,
+              language: metaPayload.language,
+              bodyVariableOrder: bodyVariableOrder || [],
+            },
+          },
+        },
+        { upsert: true }
+      );
+    }
+
     sendResponse(res, 201, result, "Plantilla enviada a revisión de Meta");
   } catch (err) {
     console.error("[metaTemplate] Error creando:", err.response?.data || err.message);
@@ -51,8 +81,31 @@ export async function handleCreateTemplate(req, res) {
 export async function handleUpdateTemplate(req, res) {
   try {
     const org = await getOrg(req.params.id);
-    const result = await updateTemplate(org, req.params.templateId, req.body.components);
-    sendResponse(res, 200, result, "Plantilla actualizada");
+    const { metaTemplateName, namedDraft, bodyVariableOrder, category, language, components } = req.body;
+    const result = await updateTemplate(org, req.params.templateId, components);
+
+    // Mismo criterio que handleCreateTemplate: se indexa por el nombre real
+    // de la plantilla en Meta, no por el templateKey del editor.
+    if (metaTemplateName) {
+      await WhatsappTemplate.findOneAndUpdate(
+        { organizationId: org._id },
+        {
+          $set: {
+            [`metaTemplateDrafts.${metaTemplateName}`]: {
+              headerText: namedDraft?.headerText || "",
+              bodyText: namedDraft?.bodyText || "",
+              footerText: namedDraft?.footerText || "",
+              category: category || "UTILITY",
+              language: language || "es",
+              bodyVariableOrder: bodyVariableOrder || [],
+            },
+          },
+        },
+        { upsert: true }
+      );
+    }
+
+    sendResponse(res, 200, result, "Plantilla actualizada — Meta la revisará de nuevo");
   } catch (err) {
     sendResponse(res, 400, null, err.response?.data?.error?.message || err.message);
   }
