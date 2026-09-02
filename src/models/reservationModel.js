@@ -110,5 +110,8 @@ const reservationSchema = new mongoose.Schema(
 );
 
 reservationSchema.index({ organizationId: 1, status: 1 });
+// Soporta el listado paginado de /gestionar-reservas-online: filtro por
+// organización + rango de fecha ("Solo futuras") y el $sort inicial por startDate.
+reservationSchema.index({ organizationId: 1, startDate: 1 });
 
 export default mongoose.model("Reservation", reservationSchema);

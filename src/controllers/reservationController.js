@@ -1007,19 +1007,43 @@ const reservationController = {
     }
   },
 
-  // Obtener todas las reservas de una organización
+  // Obtener las reservas de una organización, paginadas y filtradas
   getReservationsByOrganization: async (req, res) => {
     const { organizationId } = req.params;
+    const { page, limit, status, employeeId, serviceId, search, onlyFuture } = req.query;
     try {
-      const reservations =
-        await reservationService.getReservationsByOrganization(organizationId);
-      sendResponse(res, 200, reservations, "Reservas obtenidas exitosamente");
+      const result = await reservationService.getReservationsByOrganization(organizationId, {
+        page,
+        limit,
+        status,
+        employeeId,
+        serviceId,
+        search,
+        onlyFuture: onlyFuture !== "false", // default true salvo que se pida explícitamente "false"
+      });
+      sendResponse(res, 200, result, "Reservas obtenidas exitosamente");
     } catch (error) {
       sendResponse(
         res,
         500,
         null,
         `Error al obtener las reservas: ${error.message}`
+      );
+    }
+  },
+
+  // Estadísticas globales de reservas de la organización (tarjetas de origen + alerta de huérfanas)
+  getReservationStats: async (req, res) => {
+    const { organizationId } = req.params;
+    try {
+      const stats = await reservationService.getReservationStats(organizationId);
+      sendResponse(res, 200, stats, "Estadísticas obtenidas exitosamente");
+    } catch (error) {
+      sendResponse(
+        res,
+        500,
+        null,
+        `Error al obtener las estadísticas de reservas: ${error.message}`
       );
     }
   },

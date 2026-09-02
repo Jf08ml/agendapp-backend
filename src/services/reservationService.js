@@ -1,4 +1,5 @@
 // src/services/reservationService.js
+import mongoose from "mongoose";
 import Reservation from "../models/reservationModel.js";
 import Client from "../models/clientModel.js";
 import Organization from "../models/organizationModel.js";
@@ -161,11 +162,159 @@ const reservationService = {
     return reservation;
   },
 
-  // Obtener todas las reservas de una organización (con orden por fecha)
-  getReservationsByOrganization: async (organizationId) => {
-    return await Reservation.find({ organizationId })
+  // 📄 Obtener reservas de una organización, paginado y filtrado en el servidor.
+  // Pagina por "fila visual" (grupo de reservas si tienen groupId, si no la
+  // reserva individual) para que un grupo nunca quede partido entre páginas,
+  // igual que la UI los colapsa en una sola fila. Devuelve las reservas
+  // (populadas) de todos los grupos que caen en la página pedida, más el
+  // total de filas para armar la paginación.
+  getReservationsByOrganization: async (organizationId, options = {}) => {
+    const {
+      page = 1,
+      limit = 20,
+      status,
+      employeeId,
+      serviceId,
+      search,
+      onlyFuture = true,
+    } = options;
+
+    const match = { organizationId: new mongoose.Types.ObjectId(organizationId) };
+
+    if (status && status !== "all") match.status = status;
+    if (employeeId && employeeId !== "all") {
+      match.employeeId = new mongoose.Types.ObjectId(employeeId);
+    }
+    if (serviceId && serviceId !== "all") {
+      match.serviceId = new mongoose.Types.ObjectId(serviceId);
+    }
+    if (onlyFuture) {
+      match.startDate = { $gte: new Date(Date.now() - 60 * 1000) };
+    }
+    if (search && search.trim()) {
+      const escaped = search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const regex = new RegExp(escaped, "i");
+      match.$or = [
+        { "customerDetails.name": regex },
+        { "customerDetails.phone": regex },
+        { "customerDetails.email": regex },
+      ];
+    }
+
+    const statusPriority = {
+      $switch: {
+        branches: [
+          { case: { $eq: ["$status", RES_STATUS.PENDING] }, then: 0 },
+          { case: { $eq: ["$status", RES_STATUS.AUTO_APPROVED] }, then: 1 },
+          { case: { $eq: ["$status", RES_STATUS.APPROVED] }, then: 2 },
+          { case: { $eq: ["$status", RES_STATUS.REJECTED] }, then: 3 },
+        ],
+        default: 99,
+      },
+    };
+
+    const pageNum = Math.max(1, Number(page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(limit) || 20));
+
+    const [facetResult] = await Reservation.aggregate([
+      { $match: match },
+      { $addFields: { _groupKey: { $ifNull: ["$groupId", "$_id"] }, _statusPriority: statusPriority } },
+      { $sort: { startDate: 1 } },
+      {
+        $group: {
+          _id: "$_groupKey",
+          ids: { $push: "$_id" },
+          minStartDate: { $min: "$startDate" },
+          minStatusPriority: { $min: "$_statusPriority" },
+        },
+      },
+      { $sort: { minStatusPriority: 1, minStartDate: 1 } },
+      {
+        $facet: {
+          rows: [{ $skip: (pageNum - 1) * pageSize }, { $limit: pageSize }],
+          totalCount: [{ $count: "count" }],
+        },
+      },
+    ]);
+
+    const rows = facetResult?.rows || [];
+    const total = facetResult?.totalCount?.[0]?.count || 0;
+    const allIds = rows.flatMap((r) => r.ids);
+
+    const reservations = await Reservation.find({ _id: { $in: allIds } })
       .populate("serviceId employeeId customer appointmentId")
-      .sort({ startDate: 1, createdAt: -1 }); // primero próximas por fecha
+      .sort({ startDate: 1, createdAt: -1 });
+
+    // Reordenar según el orden de filas/grupos calculado arriba (sort estable:
+    // dentro de cada grupo se conserva el orden por startDate ya aplicado).
+    const rowIndexById = new Map();
+    rows.forEach((row, idx) => row.ids.forEach((id) => rowIndexById.set(String(id), idx)));
+    reservations.sort(
+      (a, b) => rowIndexById.get(String(a._id)) - rowIndexById.get(String(b._id))
+    );
+
+    return {
+      reservations,
+      total,
+      page: pageNum,
+      pages: Math.max(1, Math.ceil(total / pageSize)),
+    };
+  },
+
+  // 📊 Estadísticas globales para la organización (independientes de filtros/página):
+  // total de solicitudes (deduplicando grupos), origen IA vs manual, y si existen
+  // reservas aprobadas cuya cita ya no existe (para el banner de alerta).
+  getReservationStats: async (organizationId) => {
+    const orgObjectId = new mongoose.Types.ObjectId(organizationId);
+
+    const [sourceAgg, orphanAgg] = await Promise.all([
+      Reservation.aggregate([
+        {
+          $match: {
+            organizationId: orgObjectId,
+            status: { $nin: [RES_STATUS.CANCELLED_BY_CUSTOMER, RES_STATUS.CANCELLED_BY_ADMIN] },
+          },
+        },
+        { $sort: { createdAt: 1 } },
+        { $group: { _id: { $ifNull: ["$groupId", "$_id"] }, source: { $first: "$source" } } },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: 1 },
+            ai: { $sum: { $cond: [{ $eq: ["$source", "ai_chatbot"] }, 1, 0] } },
+          },
+        },
+      ]),
+      Reservation.aggregate([
+        {
+          $match: {
+            organizationId: orgObjectId,
+            status: { $in: [RES_STATUS.APPROVED, RES_STATUS.AUTO_APPROVED] },
+          },
+        },
+        {
+          $lookup: {
+            from: "appointments",
+            localField: "appointmentId",
+            foreignField: "_id",
+            as: "appt",
+          },
+        },
+        { $match: { appt: { $size: 0 } } },
+        { $limit: 1 },
+        { $count: "count" },
+      ]),
+    ]);
+
+    const total = sourceAgg[0]?.total || 0;
+    const ai = sourceAgg[0]?.ai || 0;
+
+    return {
+      total,
+      ai,
+      manual: total - ai,
+      hasApprovedWithoutAppointment: (orphanAgg[0]?.count || 0) > 0,
+    };
   },
 
   // (Opcional) Filtrar por estado

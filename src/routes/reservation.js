@@ -15,6 +15,12 @@ router.post("/checkout", createReservationCheckout);
 // 🔒 Rutas PROTEGIDAS (requieren autenticación)
 router.post("/", organizationResolver, verifyToken, reservationController.createReservation);
 router.get(
+  "/:organizationId/stats",
+  organizationResolver,
+  verifyToken,
+  reservationController.getReservationStats
+);
+router.get(
   "/:organizationId",
   organizationResolver,
   verifyToken,
