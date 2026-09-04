@@ -32,4 +32,8 @@ router.delete(
   sessionController.revokeSession
 );
 
+// Ping de la sesión propia (admin o empleado) — sin requireAdmin a propósito,
+// cualquier usuario autenticado necesita poder chequear su propia sesión.
+router.get("/:id/sessions/current", requireOwnOrganization, sessionController.checkCurrent);
+
 export default router;

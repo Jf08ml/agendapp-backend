@@ -63,10 +63,14 @@ export const verifyToken = async (req, res, next) => {
 
     // Agregar información del usuario al request.
     // adminId solo existe en tokens de superadmin (userType: 'superadmin').
+    // sid: expuesto para que sessionController.checkCurrent le diga al frontend
+    // si el token es "legacy" (sin sid) y necesita un /refresh para engancharse
+    // al gestor de sesiones.
     req.user = {
       userId: decoded.userId,
       userType: decoded.userType,
       adminId: decoded.adminId || null,
+      sid: decoded.sid || null,
       // Claims de impersonación (presentes cuando userType=admin e impersonated=true)
       impersonated: decoded.impersonated || false,
       impersonatedBy: decoded.impersonatedBy || null,
