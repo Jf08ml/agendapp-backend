@@ -6,9 +6,11 @@ import Role from "../models/roleModel.js";
 import ExchangeCode from "../models/exchangeCodeModel.js";
 import Plan from "../models/planModel.js";
 import Agent from "../models/agentModel.js";
+import Session from "../models/sessionModel.js";
 import membershipService from "../services/membershipService.js";
 import { notifyNewRegistration } from "../services/metaApiService.js";
 import sendResponse from "../utils/sendResponse.js";
+import getClientIp from "../utils/getClientIp.js";
 import { isValidSlug, isSlugAvailable, suggestSlugs } from "../utils/reservedSlugs.js";
 
 const TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
@@ -194,7 +196,28 @@ const registrationController = {
         ? 60 * 60 * 1000
         : 7 * 24 * 60 * 60 * 1000;
 
-      // Claims base; agregar claims de impersonación si aplica
+      // Obtener permisos del usuario (y datos para el snapshot de sesión, si aplica)
+      const org = await Organization.findById(exchangeDoc.organizationId).populate("role");
+      const userPermissions = org?.role?.permissions || [];
+
+      // Login normal (no impersonación) también registra la sesión/dispositivo,
+      // igual que authController.login — la impersonación queda fuera (ya tiene
+      // su propio audit trail vía ImpersonationAudit y expira sola en 60 min).
+      let sessionId = null;
+      if (!isImpersonation && org) {
+        const session = await Session.create({
+          organizationId: org._id,
+          userId: exchangeDoc.userId,
+          userType: exchangeDoc.role,
+          displayName: org.ownerName || org.name,
+          ip: getClientIp(req),
+          userAgent: req.headers["user-agent"] || "unknown",
+          expiresAt: new Date(Date.now() + jwtExpiresMs),
+        });
+        sessionId = session._id.toString();
+      }
+
+      // Claims base; agregar claims de impersonación o `sid` según corresponda
       const tokenPayload = {
         userId: exchangeDoc.userId,
         userType: exchangeDoc.role,
@@ -202,6 +225,7 @@ const registrationController = {
           impersonated: true,
           impersonatedBy: exchangeDoc.impersonatedBy.toString(),
         }),
+        ...(sessionId && { sid: sessionId }),
       };
 
       const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: jwtTTL });
@@ -213,12 +237,9 @@ const registrationController = {
         );
       }
 
-      // Obtener permisos del usuario
-      const org = await Organization.findById(exchangeDoc.organizationId).populate("role");
-      const userPermissions = org?.role?.permissions || [];
-
       sendResponse(res, 200, {
         token,
+        sessionId,
         userId: exchangeDoc.userId,
         userType: exchangeDoc.role,
         organizationId: exchangeDoc.organizationId,

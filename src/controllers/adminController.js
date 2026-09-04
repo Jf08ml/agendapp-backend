@@ -33,6 +33,7 @@ import ClassSession from "../models/classSessionModel.js";
 import Room from "../models/roomModel.js";
 import Enrollment from "../models/enrollmentModel.js";
 import sendResponse from "../utils/sendResponse.js";
+import getClientIp from "../utils/getClientIp.js";
 import {
   getPlatformOverview,
   getPlatformTimeSeries,
@@ -46,17 +47,6 @@ const IMPERSONATION_CODE_TTL_MS = 90 * 1000;
 
 /** Duración del JWT resultante cuando es impersonación (60 minutos) */
 const IMPERSONATION_JWT_TTL = "60m";
-
-/**
- * Extrae la IP real del request, considerando proxies/Vercel.
- */
-function getClientIp(req) {
-  return (
-    req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
-    req.socket?.remoteAddress ||
-    "unknown"
-  );
-}
 
 const adminController = {
   /**
