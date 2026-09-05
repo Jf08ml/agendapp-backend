@@ -477,7 +477,7 @@ Para dateFrom/dateTo acepta: "today", "yesterday", "this_week", "last_week", "th
     name: "create_appointments",
     description: `Crea una o varias citas para un cliente. Si son varias, envía un único mensaje de WhatsApp con el resumen completo (servicios, profesionales y horarios).
 Úsalo cuando el usuario quiera agendar citas: una sola o varias con distintos servicios, profesionales o días.
-Antes de crear verifica solapamientos con citas existentes del profesional — avisa si los hay pero crea igual salvo que el usuario indique lo contrario.
+Antes de crear verifica solapamientos con citas existentes del profesional. Si encuentra alguno, NO crea nada: devuelve overlapConflict: true y las advertencias — informa el conflicto al usuario y solo reintenta con force: true si el usuario confirma explícitamente que quiere agendar igual (el profesional quedará con dos citas al mismo tiempo).
 Si el cliente no existe y se proporciona clientPhone, se crea automáticamente. Si no existe y solo hay clientName, pide el teléfono.`,
     parameters: {
       clientName: {
@@ -515,6 +515,11 @@ Si el cliente no existe y se proporciona clientPhone, se crea automáticamente. 
         description: "Cuando el cliente recibe VARIOS servicios en una misma visita a partir de una sola hora de inicio, ponlo en true: los servicios se agendan CONSECUTIVOS (cada uno empieza cuando termina el anterior, según su duración). Pon la hora de inicio en el PRIMER servicio (las horas de los demás se ignoran). Déjalo en false (o no lo envíes) solo si el usuario indicó horas distintas para cada servicio (ej: 'a las 2 retiro y a las 4 uñas') o si son citas en días/horarios independientes.",
         required: false,
       },
+      force: {
+        type: "boolean",
+        description: "Crear las citas aunque haya conflicto de horario con otra cita existente del profesional. Úsalo SOLO tras confirmación explícita del usuario sobre un overlapConflict previo.",
+        required: false,
+      },
     },
     handler: async (params, context) => {
       const { organizationId, organization } = context;
@@ -547,9 +552,10 @@ Si el cliente no existe y se proporciona clientPhone, se crea automáticamente. 
         }
       }
 
-      // 2. Resolver servicios, empleados y horarios
+      // 2. Resolver servicios, empleados y horarios; detectar duplicados exactos y solapamientos
       const resolved = [];
-      const warnings = [];
+      const duplicates = [];
+      const conflicts = []; // solapamientos reales (no duplicados) pendientes de confirmación
       let prevEnd = null; // fin de la cita anterior (para modo consecutivo)
 
       for (let i = 0; i < params.appointments.length; i++) {
@@ -600,7 +606,34 @@ Si el cliente no existe y se proporciona clientPhone, se crea automáticamente. 
         const endMoment = startMoment.clone().add(svc.duration, "minutes");
         prevEnd = endMoment.clone();
 
-        // 3. Verificar solapamiento (advertencia, no bloqueo)
+        const item = {
+          serviceId: svc._id.toString(),
+          employeeId: emp._id.toString(),
+          serviceName: svc.name,
+          employeeName: emp.names,
+          duration: svc.duration,
+          startDateStr: startMoment.format("YYYY-MM-DDTHH:mm:ss"),
+          endDateStr: endMoment.format("YYYY-MM-DDTHH:mm:ss"),
+          startDate: startMoment.toDate(),
+          customPrice: appt.customPrice ?? null,
+        };
+        resolved.push(item);
+
+        // 3. Duplicado exacto (mismo cliente, servicio, profesional y horario) → se omite sin preguntar
+        const existingExact = await Appointment.findOne({
+          organizationId,
+          client: clientDoc._id,
+          service: item.serviceId,
+          employee: item.employeeId,
+          startDate: item.startDate,
+          status: { $nin: CANCELLED_STATUSES },
+        });
+        if (existingExact) {
+          duplicates.push(item);
+          continue;
+        }
+
+        // 4. Solapamiento con OTRA cita del profesional en ese horario — bloquea hasta confirmación explícita
         const overlapping = await Appointment.find({
           employee: emp._id,
           status: { $nin: CANCELLED_STATUSES },
@@ -614,41 +647,11 @@ Si el cliente no existe y se proporciona clientPhone, se crea automáticamente. 
           const list = overlapping
             .map((o) => `${o.service?.name || "?"} con ${o.client?.name || "?"} a las ${moment(o.startDate).tz(timezone).format("HH:mm")}`)
             .join(", ");
-          warnings.push(`⚠️ ${emp.names} ya tiene cita(s) en ese horario: ${list}`);
-        }
-
-        resolved.push({
-          serviceId: svc._id.toString(),
-          employeeId: emp._id.toString(),
-          serviceName: svc.name,
-          employeeName: emp.names,
-          duration: svc.duration,
-          startDateStr: startMoment.format("YYYY-MM-DDTHH:mm:ss"),
-          endDateStr: endMoment.format("YYYY-MM-DDTHH:mm:ss"),
-          startDate: startMoment.toDate(),
-          customPrice: appt.customPrice ?? null,
-        });
-      }
-
-      // 4. Filtrar citas que ya existen (mismo cliente, servicio, profesional y horario exacto)
-      // Evita duplicados cuando la IA repite la creación (p.ej. tras reintentos por errores parciales)
-      const duplicates = [];
-      const toCreate = [];
-      for (const r of resolved) {
-        const existing = await Appointment.findOne({
-          organizationId,
-          client: clientDoc._id,
-          service: r.serviceId,
-          employee: r.employeeId,
-          startDate: r.startDate,
-          status: { $nin: CANCELLED_STATUSES },
-        });
-        if (existing) {
-          duplicates.push(r);
-        } else {
-          toCreate.push(r);
+          conflicts.push(`⚠️ ${emp.names} ya tiene cita(s) el ${moment(item.startDate).tz(timezone).format("DD/MM [a las] HH:mm")}: ${list}`);
         }
       }
+
+      const toCreate = resolved.filter((r) => !duplicates.includes(r));
 
       if (toCreate.length === 0) {
         const lista = duplicates
@@ -663,7 +666,18 @@ Si el cliente no existe y se proporciona clientPhone, se crea automáticamente. 
         };
       }
 
-      // 5. Crear citas — siempre vía createMultiEmployeeBatch (incluso si es una sola)
+      // 5. Si hay solapamientos reales sin confirmar todavía, no crear nada — pedir confirmación
+      if (conflicts.length > 0 && !params.force) {
+        return {
+          success: false,
+          overlapConflict: true,
+          advertencias: conflicts,
+          mensaje: "Hay conflicto de horario con cita(s) existentes del profesional. No se creó ninguna cita todavía.",
+          _instruction: "Informa el conflicto al usuario con el detalle de 'advertencias'. Solo reintenta create_appointments con force: true (mismos datos) si el usuario confirma explícitamente que quiere agendar igual.",
+        };
+      }
+
+      // 6. Crear citas — siempre vía createMultiEmployeeBatch (incluso si es una sola)
       // para que todas queden con groupId, status "confirmed" y un único mensaje de WhatsApp
       const blocks = toCreate.map((r) => ({
         services: [r.serviceId],
@@ -679,10 +693,11 @@ Si el cliente no existe y se proporciona clientPhone, se crea automáticamente. 
         advancePayment: params.advancePayment || 0,
         employeeRequestedByClient: false,
         blocks,
-        skipConcurrencyCheck: true,
+        // Ya se validó arriba: o no había conflicto, o el usuario confirmó explícitamente con force
+        skipConcurrencyCheck: !!params.force || conflicts.length === 0,
       });
 
-      // 6. Respuesta
+      // 7. Respuesta
       const resumen = toCreate
         .map((r) => {
           const hora = moment(r.startDate).tz(timezone).format("DD/MM/YYYY [a las] HH:mm");
@@ -697,7 +712,7 @@ Si el cliente no existe y se proporciona clientPhone, se crea automáticamente. 
         resumen,
         whatsappConfirmacionEnviada: "intentado — depende de si la plantilla está aprobada o hay canal disponible",
         ...(clientCreated && { clienteCreado: true }),
-        ...(warnings.length > 0 && { advertencias: warnings }),
+        ...(conflicts.length > 0 && { advertencias: conflicts, agendadoPeseAlConflicto: true }),
         ...(duplicates.length > 0 && {
           omitidasPorDuplicado: duplicates.map((r) => `${r.serviceName} con ${r.employeeName} (ya existía a esa hora)`),
         }),
@@ -801,7 +816,7 @@ Busca la cita por criterios (cliente, fecha, servicio, profesional). Si encuentr
     description: `Reprograma una cita existente a una nueva fecha y hora.
 Úsalo cuando el usuario diga "reprograma", "cambia la fecha", "mueve la cita" de un cliente.
 Busca la cita por cliente, fecha actual, servicio o profesional. Si encuentra más de una, devuelve la lista para que el usuario especifique.
-Si hay solapamiento en el nuevo horario, lo avisa pero reprograma igual.`,
+Si hay solapamiento en el nuevo horario, NO reprograma: devuelve overlapConflict: true y la advertencia — informa el conflicto al usuario y solo reintenta con force: true si confirma explícitamente que quiere reprogramar igual.`,
     parameters: {
       clientName: {
         type: "string",
@@ -838,6 +853,11 @@ Si hay solapamiento en el nuevo horario, lo avisa pero reprograma igual.`,
         description: "Nueva hora en formato HH:mm (24h). Ej: 14:30 para las 2:30 PM.",
         required: true,
       },
+      force: {
+        type: "boolean",
+        description: "Reprogramar aunque el nuevo horario tenga conflicto con otra cita existente del profesional. Úsalo SOLO tras confirmación explícita del usuario sobre un overlapConflict previo.",
+        required: false,
+      },
     },
     handler: async (params, context) => {
       const { organizationId, organization } = context;
@@ -872,6 +892,17 @@ Si hay solapamiento en el nuevo horario, lo avisa pero reprograma igual.`,
       const fechaAnterior = moment(appt.startDate).tz(timezone).format("DD/MM/YYYY [a las] HH:mm");
       const fechaNueva = newStart.format("DD/MM/YYYY [a las] HH:mm");
 
+      // Si hay conflicto de horario sin confirmar todavía, no reprogramar — pedir confirmación
+      if (warnings.length > 0 && !params.force) {
+        return {
+          success: false,
+          overlapConflict: true,
+          advertencia: `${appt.employee?.names || "El profesional"} ya tiene cita(s) en ese horario: ${warnings.join(", ")}`,
+          mensaje: "Hay conflicto de horario con cita(s) existentes del profesional. No se reprogramó la cita todavía.",
+          _instruction: "Informa el conflicto al usuario. Solo reintenta reschedule_appointment con force: true (mismos datos) si confirma explícitamente que quiere reprogramar igual.",
+        };
+      }
+
       // Para dejar constancia de lo ocurrido en la sesión usa update_session_notes,
       // no este tool — reprogramar y anotar son operaciones distintas.
       await appointmentService.updateAppointment(appt._id.toString(), {
@@ -887,6 +918,7 @@ Si hay solapamiento en el nuevo horario, lo avisa pero reprograma igual.`,
         a: fechaNueva,
         ...(warnings.length > 0 && {
           advertencia: `${appt.employee?.names || "El profesional"} ya tiene cita(s) en ese horario: ${warnings.join(", ")}`,
+          agendadoPeseAlConflicto: true,
         }),
       };
     },

@@ -39,6 +39,12 @@ const appointmentController = {
       const createdAppointments = await appointmentService.createMultiEmployeeBatch(req.body);
       sendResponse(res, 201, createdAppointments, "Citas multi-profesional creadas exitosamente");
     } catch (error) {
+      if (error.code === 'CONCURRENCY_LIMIT_REACHED') {
+        return sendResponse(res, 409, {
+          code: 'CONCURRENCY_LIMIT_REACHED',
+          conflictingAppointments: error.conflictingAppointments || [],
+        }, error.message);
+      }
       sendResponse(res, 500, null, error.message);
     }
   },
@@ -75,6 +81,12 @@ const appointmentController = {
         "Citas creadas exitosamente (batch)"
       );
     } catch (error) {
+      if (error.code === 'CONCURRENCY_LIMIT_REACHED') {
+        return sendResponse(res, 409, {
+          code: 'CONCURRENCY_LIMIT_REACHED',
+          conflictingAppointments: error.conflictingAppointments || [],
+        }, error.message);
+      }
       sendResponse(res, 500, null, error.message);
     }
   },
@@ -239,6 +251,12 @@ const appointmentController = {
         "Cita actualizada exitosamente"
       );
     } catch (error) {
+      if (error.code === 'CONCURRENCY_LIMIT_REACHED') {
+        return sendResponse(res, 409, {
+          code: 'CONCURRENCY_LIMIT_REACHED',
+          conflictingAppointments: error.conflictingAppointments || [],
+        }, error.message);
+      }
       sendResponse(res, 404, null, error.message);
     }
   },

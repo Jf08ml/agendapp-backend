@@ -455,32 +455,42 @@ const appointmentService = {
         // ⏱️ Truncar serviceEnd a minuto exacto para consistencia
         serviceEnd = new Date(Math.floor(serviceEnd.getTime() / 60000) * 60000);
 
-        // 🔍 VALIDACIÓN DE DISPONIBILIDAD - Verificar citas simultáneas del mismo servicio
-        // Contar cuántas citas del MISMO servicio tiene el empleado en ese horario.
-        // maxConcurrentAppointments es un límite por servicio, no por empleado en total.
+        // 🔍 VALIDACIÓN DE DISPONIBILIDAD - Verificar que el empleado no quede doble-agendado
+        // Cualquier cita solapada de OTRO servicio siempre bloquea (el empleado no puede
+        // atender dos cosas distintas a la vez). Las citas solapadas del MISMO servicio
+        // respetan maxConcurrentAppointments (ej. clases grupales).
         // Condición estándar de solapamiento: existente.inicio < nueva.fin Y existente.fin > nueva.inicio
-        const concurrencyQuery = {
+        const overlapQuery = {
           employee: employeeForThisService,
-          service: serviceId,
           organizationId,
           status: { $nin: ['cancelled_by_admin', 'cancelled_by_customer', 'cancelled', 'rejected', 'attended', 'no_show'] },
           startDate: { $lt: serviceEnd },
           endDate: { $gt: currentStart },
         };
-        const simultaneousCount = await appointmentModel.countDocuments(concurrencyQuery, { session }); // 🔒 Usar sesión para ver citas creadas en esta misma transacción
+        const overlappingAppointments = await appointmentModel
+          .find(overlapQuery)
+          .session(session) // 🔒 Ver también citas creadas en esta misma transacción
+          .populate('client', 'name')
+          .select('startDate endDate status client service')
+          .lean();
+
+        const sameServiceCount = overlappingAppointments.filter(
+          (a) => a.service?.toString() === serviceId.toString()
+        ).length;
+        const otherServiceConflict = overlappingAppointments.some(
+          (a) => a.service?.toString() !== serviceId.toString()
+        );
 
         // 👥 Verificar límite de citas simultáneas configurado en el servicio
         const maxConcurrent = svc.maxConcurrentAppointments ?? 1;
-        if (!skipConcurrencyCheck && simultaneousCount >= maxConcurrent) {
-          console.log(`⚠️ Límite de citas simultáneas alcanzado para empleado ${employeeForThisService} en ${currentStart}. Simultáneas: ${simultaneousCount}, Máximo: ${maxConcurrent}`);
-          const conflictingAppointments = await appointmentModel
-            .find(concurrencyQuery)
-            .populate('client', 'name')
-            .select('startDate endDate status client')
-            .lean();
-          const concurrencyErr = new Error(`No hay disponibilidad para el servicio ${svc.name} en el horario solicitado (límite de ${maxConcurrent} cita${maxConcurrent > 1 ? 's' : ''} simultánea${maxConcurrent > 1 ? 's' : ''})`);
+        if (!skipConcurrencyCheck && (otherServiceConflict || sameServiceCount >= maxConcurrent)) {
+          console.log(`⚠️ Conflicto de disponibilidad para empleado ${employeeForThisService} en ${currentStart}. Mismo servicio: ${sameServiceCount}/${maxConcurrent}, otro servicio en conflicto: ${otherServiceConflict}`);
+          const reasonMsg = otherServiceConflict
+            ? 'el profesional ya tiene otra cita en ese horario'
+            : `límite de ${maxConcurrent} cita${maxConcurrent > 1 ? 's' : ''} simultánea${maxConcurrent > 1 ? 's' : ''}`;
+          const concurrencyErr = new Error(`No hay disponibilidad para el servicio ${svc.name} en el horario solicitado (${reasonMsg})`);
           concurrencyErr.code = 'CONCURRENCY_LIMIT_REACHED';
-          concurrencyErr.conflictingAppointments = conflictingAppointments;
+          concurrencyErr.conflictingAppointments = overlappingAppointments;
           throw concurrencyErr;
         }
 
@@ -1074,6 +1084,13 @@ const appointmentService = {
     const appt = await appointmentModel.findById(id);
     if (!appt) throw new Error("Cita no encontrada");
 
+    // 📌 Valores originales — para detectar si el horario/empleado REALMENTE cambia,
+    // sin importar si el payload reenvía los mismos valores actuales (ej. al editar
+    // solo el precio desde una tarjeta que reenvía toda la cita)
+    const originalStartTime = appt.startDate.getTime();
+    const originalEndTime = appt.endDate.getTime();
+    const originalEmployeeId = appt.employee?.toString();
+
     // Obtener organización para timezone
     const orgId = updatedData.organizationId || appt.organizationId;
     const org = await organizationService.getOrganizationById(orgId);
@@ -1206,6 +1223,53 @@ const appointmentService = {
     const passthrough = ["status", "source", "meta", "reminderSent"];
     for (const k of passthrough) {
       if (updatedData[k] != null) appt[k] = updatedData[k];
+    }
+
+    // 🔍 Verificar que el nuevo horario/empleado no deje al profesional doble-agendado
+    // (aplica tanto a reprogramar por drag & drop como a editar desde el modal).
+    // Solo cuando realmente cambia el horario o el empleado — comparando contra
+    // los valores originales (no solo si el campo vino en el payload), así una
+    // edición sin relación (precio, adicionales, nota) que reenvía la cita completa
+    // no queda bloqueada por una cita que ya estaba solapada de antes.
+    const scheduleRelevantChange =
+      appt.startDate.getTime() !== originalStartTime ||
+      appt.endDate.getTime() !== originalEndTime ||
+      appt.employee?.toString() !== originalEmployeeId;
+    if (scheduleRelevantChange && !updatedData.skipConcurrencyCheck) {
+      const overlapQuery = {
+        _id: { $ne: appt._id },
+        employee: appt.employee,
+        organizationId: appt.organizationId,
+        status: { $nin: ['cancelled_by_admin', 'cancelled_by_customer', 'cancelled', 'rejected', 'attended', 'no_show'] },
+        startDate: { $lt: appt.endDate },
+        endDate: { $gt: appt.startDate },
+      };
+      const overlappingAppointments = await appointmentModel
+        .find(overlapQuery)
+        .populate('client', 'name')
+        .select('startDate endDate status client service')
+        .lean();
+
+      if (overlappingAppointments.length > 0) {
+        const finalServiceId = appt.service?.toString();
+        const sameServiceCount = overlappingAppointments.filter(
+          (a) => a.service?.toString() === finalServiceId
+        ).length;
+        const otherServiceConflict = overlappingAppointments.some(
+          (a) => a.service?.toString() !== finalServiceId
+        );
+
+        const maxConcurrent = svc.maxConcurrentAppointments ?? 1;
+        if (otherServiceConflict || sameServiceCount >= maxConcurrent) {
+          const reasonMsg = otherServiceConflict
+            ? 'el profesional ya tiene otra cita en ese horario'
+            : `límite de ${maxConcurrent} cita${maxConcurrent > 1 ? 's' : ''} simultánea${maxConcurrent > 1 ? 's' : ''}`;
+          const concurrencyErr = new Error(`No se pudo actualizar la cita en ese horario (${reasonMsg})`);
+          concurrencyErr.code = 'CONCURRENCY_LIMIT_REACHED';
+          concurrencyErr.conflictingAppointments = overlappingAppointments;
+          throw concurrencyErr;
+        }
+      }
     }
 
     await appt.save();
