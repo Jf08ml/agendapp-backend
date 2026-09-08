@@ -456,6 +456,13 @@ const organizationSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  // 🎓 Pide al cliente elegir "clase paga" vs "usar mi paquete" ANTES de elegir
+  // la clase (ver ClassBookingPage). Default false = comportamiento histórico
+  // (detección de paquete silenciosa recién en el paso de Resumen).
+  enablePackageChoiceStep: {
+    type: Boolean,
+    default: false,
+  },
   // 💳 Cobros cliente→org vía Mercado Pago (ver MpCollectSchema arriba)
   mpCollect: {
     type: MpCollectSchema,
