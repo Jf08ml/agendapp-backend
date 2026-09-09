@@ -375,6 +375,18 @@ const organizationSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  // Controlan la visibilidad de las tarjetas de acceso rápido "Nuestros Servicios"
+  // y "Ubicación" en los layouts modern/minimal/cards (Home.tsx). A diferencia de
+  // enableOnlineBooking/enableClassBooking/storeEnabled/showLoyaltyProgram, estas
+  // dos tarjetas no tenían ningún control de visibilidad hasta ahora.
+  showServicesCard: {
+    type: Boolean,
+    default: true,
+  },
+  showLocationCard: {
+    type: Boolean,
+    default: true,
+  },
   setupCompleted: {
     type: Boolean,
     default: false,

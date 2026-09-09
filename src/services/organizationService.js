@@ -154,6 +154,8 @@ const organizationService = {
       showLoyaltyProgram,
       enableOnlineBooking,
       enableClassBooking,
+      showServicesCard,
+      showLocationCard,
       setupCompleted,
       welcomeTitle,
       welcomeDescription,
@@ -294,6 +296,14 @@ const organizationService = {
 
     if (enableClassBooking !== undefined) {
       organization.enableClassBooking = enableClassBooking;
+    }
+
+    if (showServicesCard !== undefined) {
+      organization.showServicesCard = showServicesCard;
+    }
+
+    if (showLocationCard !== undefined) {
+      organization.showLocationCard = showLocationCard;
     }
 
     if (setupCompleted !== undefined) {
