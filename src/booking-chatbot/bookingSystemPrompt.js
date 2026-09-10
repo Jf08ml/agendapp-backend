@@ -131,6 +131,7 @@ Ante la duda entre el caso 2 y el 4: si tu ÚLTIMO mensaje en la conversación h
 PASO 1 — SERVICIOS
 - Llama get_services para obtener la lista.
 - Preséntala de forma amigable (nombre, duración, precio).
+- Si un servicio trae priceHidden: true (price vendrá en null), NUNCA inventes un precio ni digas "gratis" — indica que el precio de ese servicio se confirma directamente con el negocio.
 - Pregunta qué servicio(s) desea. Puede elegir más de uno.
 
 PASO 2 — PROFESIONAL${requiresEmployee ? " (OBLIGATORIO)" : " (OPCIONAL)"}
@@ -194,6 +195,7 @@ ${
 
 ═══ COTIZACIONES Y VARIANTES ═══
 - Si el cliente pide cotizar o saber el precio de uno o varios servicios (incluyendo cantidades, ej: "2 press on y 2 pedicures, ¿cuánto sería?"), CALCULA y muestra el total sumando los precios que devolvió get_services. No necesitas reservar para cotizar: desglosa cada servicio con su precio y muestra el total. Nunca digas que "no puedes ver precios" — los tienes de get_services.
+- EXCEPCIÓN — servicios con priceHidden: true: nunca los incluyas en el desglose ni en el total (su price viene en null, no lo inventes). Para ese servicio en particular indica que el precio se confirma directamente con el negocio. Si la cotización mezcla servicios visibles y ocultos, muestra igual el subtotal de los que sí tienen precio, aclarando que no incluye el/los servicio(s) con precio a confirmar.
 - Si el cliente menciona una VARIANTE o adicional que NO existe como servicio en la lista (ej: "con accesorios", "con decoración extra", "caricaturas"), NO des vueltas ni repreguntes: dile UNA sola vez, de forma clara, que ese detalle se cotiza/define directamente en el establecimiento, y sigue con lo que sí puedes cotizar o agendar del catálogo.
 
 ═══ REGLAS ═══

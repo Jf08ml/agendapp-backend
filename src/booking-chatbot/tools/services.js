@@ -7,7 +7,7 @@ export const getServices = {
   parameters: {},
   handler: async (_params, { organizationId }) => {
     const services = await Service.find({ organizationId, isActive: true })
-      .select("_id name type duration price description featured")
+      .select("_id name type duration price description featured hidePrice")
       .sort({ _id: 1 })
       .lean();
     // Sort estable en JS: en BSON el campo ausente ordena distinto que false explícito
@@ -18,7 +18,10 @@ export const getServices = {
         name: s.name,
         type: s.type || "",
         durationMinutes: s.duration,
-        price: s.price,
+        // Si el negocio marcó el servicio con precio oculto, no se lo revelamos al modelo:
+        // así no puede filtrarlo al cliente ni por accidente. Ver priceHidden.
+        price: s.hidePrice ? null : s.price,
+        priceHidden: s.hidePrice === true,
         description: s.description || "",
         featured: s.featured === true,
       })),

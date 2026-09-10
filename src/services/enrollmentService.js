@@ -119,7 +119,10 @@ async function sendEnrollmentWhatsApp(templateType, organizationId, enrollment, 
       date: startMoment.format("dddd D [de] MMMM [de] YYYY"),
       startTime: startMoment.format("h:mm A"),
       endTime: endMoment.format("h:mm A"),
-      price: `$${enrollment.totalPrice.toLocaleString("es-CO")}`,
+      // Si la clase tiene el precio oculto al cliente, no lo revelamos por WhatsApp.
+      price: classDoc.hidePrice
+        ? "Consultar"
+        : `$${enrollment.totalPrice.toLocaleString("es-CO")}`,
       discount:
         enrollment.discountPercent > 0
           ? `🎉 Descuento grupal del ${enrollment.discountPercent}% aplicado\n`
