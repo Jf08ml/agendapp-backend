@@ -41,6 +41,12 @@ const StoreOrderSchema = new mongoose.Schema(
       lat: { type: Number },
       lng: { type: Number },
     },
+    // Valores de campos personalizados (Organization.storeFormConfig.fields) —
+    // siempre ligados a este pedido puntual (la tienda no crea Client).
+    customFieldValues: {
+      type: mongoose.Schema.Types.Mixed,
+      required: false,
+    },
     fulfillmentStatus: {
       type: String,
       enum: ["pending", "delivered", "cancelled"],

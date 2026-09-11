@@ -6,6 +6,7 @@ import Appointment from "../../models/appointmentModel.js";
 import scheduleService from "../../services/scheduleService.js";
 import packageService from "../../services/packageService.js";
 import { normalizePhoneNumber } from "../../utils/phoneUtils.js";
+import { getCustomFieldDefinitions, validateAndSplitCustomFieldValues } from "../../utils/customFieldUtils.js";
 
 // Busca un paquete de sesiones activo del cliente que cubra TODOS los
 // servicios solicitados (con sesiones disponibles en cada uno). El endpoint
@@ -201,6 +202,11 @@ export const prepareReservation = {
       description: "Fecha de nacimiento del cliente en formato YYYY-MM-DD (opcional). Conviértela si el usuario la dio en otro formato.",
       required: false,
     },
+    customFieldValues: {
+      type: "object",
+      description: "Mapa clave-valor de los datos adicionales que esta organización requiere, SOLO si el system prompt los lista (sección 'Esta organización además requiere...'). Usa exactamente las claves indicadas ahí. Omite este parámetro por completo si la organización no tiene campos adicionales.",
+      required: false,
+    },
   },
   handler: async (params, context) => {
     const { organizationId, organization } = context;
@@ -213,10 +219,23 @@ export const prepareReservation = {
       customerDocumentId,
       notes,
       customerBirthDate,
+      customFieldValues: rawCustomFieldValues,
     } = params;
 
     if (!services?.length || !startDate || !customerName) {
       return { success: false, error: "Faltan datos requeridos para la reserva." };
+    }
+
+    // Validar campos personalizados de la organización (si tiene configurados) ANTES
+    // de armar el payload — así el modelo recibe un error conversacional claro (ej.
+    // "falta el número de siniestro") en vez de que la reserva falle más adelante.
+    const customFieldDefs = getCustomFieldDefinitions(organization.clientFormConfig?.fields);
+    if (customFieldDefs.length > 0) {
+      try {
+        validateAndSplitCustomFieldValues(customFieldDefs, rawCustomFieldValues);
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
     }
 
     // Resolver IDs (el AI a veces usa nombres en lugar de ObjectIds)
@@ -276,6 +295,9 @@ export const prepareReservation = {
       },
       organizationId: organizationId.toString(),
       ...(coveringPackage ? { clientPackageId: coveringPackage.clientPackageId } : {}),
+      ...(rawCustomFieldValues && Object.keys(rawCustomFieldValues).length > 0
+        ? { customFieldValues: rawCustomFieldValues }
+        : {}),
     };
 
     // En canal WhatsApp guardar el payload en la sesión para que confirm_reservation lo use

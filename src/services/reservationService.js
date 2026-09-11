@@ -438,6 +438,7 @@ const reservationService = {
                   sharedTokenHash, // 🔐 Token compartido para cancelar toda la serie
                   sharedCancellationLink: cancellationLink, // 🔗 Persistir el enlace en las citas (para recordatorios)
                   skipConcurrencyCheck: !!forceApprove,
+                  customFieldValues: dateReservations[0].customFieldValues,
                   ...(groupClientPackageId ? { clientPackageId: groupClientPackageId } : {}),
                 });
 
@@ -513,6 +514,7 @@ const reservationService = {
               skipNotification: false,
               sharedGroupId,
               skipConcurrencyCheck: !!forceApprove,
+              customFieldValues: firstRes.customFieldValues,
               ...(groupClientPackageId ? { clientPackageId: groupClientPackageId } : {}),
             });
 
@@ -580,6 +582,7 @@ const reservationService = {
           organizationId: organizationId._id || organizationId,
           skipNotification,
           skipConcurrencyCheck: !!forceApprove,
+          customFieldValues: reservation.customFieldValues,
           ...(reservation.clientPackageId ? { clientPackageId: reservation.clientPackageId } : {}),
         });
 
@@ -777,6 +780,7 @@ const reservationService = {
     birthDate,
     documentId,
     notes,
+    customFieldValues,
   }) => {
     const org = await Organization.findById(organizationId).select('default_country clientFormConfig');
     const defaultCountry = org?.default_country || 'CO';
@@ -828,6 +832,11 @@ const reservationService = {
       if (birthDate && existingClient.birthDate !== birthDate) { existingClient.birthDate = birthDate; isUpdated = true; }
       if (documentId && existingClient.documentId !== documentId) { existingClient.documentId = documentId.trim(); isUpdated = true; }
       if (notes && existingClient.notes !== notes) { existingClient.notes = notes.trim(); isUpdated = true; }
+      if (customFieldValues && Object.keys(customFieldValues).length > 0) {
+        const merged = { ...(existingClient.customFieldValues || {}), ...customFieldValues };
+        existingClient.customFieldValues = merged;
+        isUpdated = true;
+      }
 
       if (isUpdated) await existingClient.save();
       return existingClient;
@@ -842,6 +851,9 @@ const reservationService = {
     }
     if (documentId) clientDoc.documentId = documentId.trim();
     if (notes) clientDoc.notes = notes.trim();
+    if (customFieldValues && Object.keys(customFieldValues).length > 0) {
+      clientDoc.customFieldValues = customFieldValues;
+    }
 
     return await new Client(clientDoc).save();
   },

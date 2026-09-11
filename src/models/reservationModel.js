@@ -26,6 +26,12 @@ const reservationSchema = new mongoose.Schema(
       phone_e164: { type: String, required: false },
       phone_country: { type: String, required: false, maxlength: 2 },
     },
+    // Valores de campos personalizados con scope "booking" (Organization.clientFormConfig.fields)
+    // — ligados solo a esta reserva puntual.
+    customFieldValues: {
+      type: mongoose.Schema.Types.Mixed,
+      required: false,
+    },
     organizationId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Organization",

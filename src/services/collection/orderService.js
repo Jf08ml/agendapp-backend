@@ -189,6 +189,7 @@ export async function createStoreOrder({
   items,
   customer,
   delivery,
+  customFieldValues,
   amount,
   currency,
   marketplaceFee = 0,
@@ -221,6 +222,9 @@ export async function createStoreOrder({
           ? { lat: delivery.lat, lng: delivery.lng }
           : {}),
       },
+      customFieldValues: customFieldValues && Object.keys(customFieldValues).length > 0
+        ? customFieldValues
+        : undefined,
       fulfillmentStatus: "pending",
     },
   });

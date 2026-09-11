@@ -1,12 +1,32 @@
 import mongoose from "mongoose";
 
-// Schema para configuración de campos del formulario de cliente
-const ClientFieldConfigSchema = new mongoose.Schema(
+// Schema para configuración de campos del formulario de cliente/tienda.
+// Los 6 campos built-in ('name'|'phone'|'email'|'birthDate'|'documentId'|'notes')
+// solo usan key/enabled/required/label (comportamiento sin cambios). Un campo
+// personalizado (key fuera de ese set) además usa type/options/scope:
+// - scope "client": el valor persiste en Client.customFieldValues, se reutiliza
+//   entre reservas del mismo cliente (igual que documentId/notes).
+// - scope "booking": el valor queda ligado a esa reserva/pedido puntual
+//   (Reservation.customFieldValues / Order.store.customFieldValues).
+// storeFormConfig no crea Client (ver orderModel.js), así que sus campos
+// personalizados siempre se tratan como "booking" sin importar lo guardado aquí.
+const FormFieldDefinitionSchema = new mongoose.Schema(
   {
-    key: { type: String, required: true }, // 'name'|'phone'|'email'|'birthDate'|'documentId'|'notes'
+    key: { type: String, required: true },
     enabled: { type: Boolean, default: true },
     required: { type: Boolean, default: false },
     label: { type: String }, // etiqueta personalizada, opcional
+    type: {
+      type: String,
+      enum: ["text", "number", "date", "select"],
+      default: "text",
+    },
+    options: { type: [String], default: undefined }, // solo si type === "select"
+    scope: {
+      type: String,
+      enum: ["client", "booking"],
+      default: "booking",
+    },
   },
   { _id: false }
 );
@@ -571,7 +591,7 @@ const organizationSchema = new mongoose.Schema({
       default: 'phone',
     },
     fields: {
-      type: [ClientFieldConfigSchema],
+      type: [FormFieldDefinitionSchema],
       default: [],
     },
   },
@@ -586,7 +606,7 @@ const organizationSchema = new mongoose.Schema({
       default: 'phone',
     },
     fields: {
-      type: [ClientFieldConfigSchema],
+      type: [FormFieldDefinitionSchema],
       default: [],
     },
   },

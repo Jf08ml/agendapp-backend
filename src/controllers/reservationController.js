@@ -19,6 +19,7 @@ import appointmentSeriesService from "../services/appointmentSeriesService.js";
 import appointmentModel from "../models/appointmentModel.js";
 import ChatLog from "../models/chatLogModel.js";
 import { auditLogService } from "../services/auditLogService.js";
+import { getCustomFieldDefinitions, validateAndSplitCustomFieldValues } from "../utils/customFieldUtils.js";
 
 // Marca como convertido el ChatLog del chatbot de reserva, del lado del servidor
 // y en la misma request que crea la reserva. Reemplaza al frágil POST
@@ -121,6 +122,7 @@ async function _handleRecurringReservation(req, res, ctx) {
   const {
     services, startDate, customerDetails, organizationId, clientPackageId,
     recurrencePattern, org, policy, timezone, customer, normalizeId,
+    customFieldValues: bookingCustomFieldValues,
   } = ctx;
 
   try {
@@ -225,6 +227,7 @@ async function _handleRecurringReservation(req, res, ctx) {
               sharedGroupId,
               sharedTokenHash,
               sharedCancellationLink: cancellationLink, // 🔗 Persistir el enlace en las citas (para recordatorios)
+              customFieldValues: bookingCustomFieldValues,
               ...(clientPackageId ? { clientPackageId } : {}),
             });
 
@@ -274,6 +277,7 @@ async function _handleRecurringReservation(req, res, ctx) {
           auto: true,
           appointmentId: apt._id,
           groupId: reservationGroupId,
+          customFieldValues: bookingCustomFieldValues,
         };
         const newRes = await reservationService.createReservation(reservationData);
         createdReservations.push(newRes);
@@ -325,6 +329,7 @@ async function _handleRecurringReservation(req, res, ctx) {
             organizationId,
             status: "pending",
             groupId: reservationGroupId,
+            customFieldValues: bookingCustomFieldValues,
             // Guardar info de serie para vincular al aprobar
             ...(occurrenceNumber === 1 && sd === serviceDetails[0]
               ? { recurrenceInfo: { seriesId, recurrencePattern, totalOccurrences: availableOccurrences.length } }
@@ -434,6 +439,7 @@ const reservationController = {
       startDate,
       customerDetails,
       organizationId,
+      customFieldValues: rawCustomFieldValues,
     } = req.body;
 
     try {
@@ -442,6 +448,13 @@ const reservationController = {
       if (!org)
         return sendResponse(res, 404, null, "Organización no encontrada");
       const policy = org.reservationPolicy || "manual";
+
+      // 🧩 Campos personalizados (Organization.clientFormConfig.fields)
+      const customFieldDefs = getCustomFieldDefinitions(org.clientFormConfig?.fields);
+      const { clientValues, bookingValues } = validateAndSplitCustomFieldValues(
+        customFieldDefs,
+        rawCustomFieldValues
+      );
 
       // 🕒 VALIDAR HORARIO DE DISPONIBILIDAD
       const timezone = org.timezone || 'America/Bogota';
@@ -519,6 +532,7 @@ const reservationController = {
         birthDate: customerDetails.birthDate,
         documentId: customerDetails.documentId,
         notes: customerDetails.notes,
+        customFieldValues: clientValues,
       });
 
       // === AUTO: intentar crear cita batch con un solo servicio
@@ -534,6 +548,7 @@ const reservationController = {
                 client: customer._id,
                 startDate: startDateAsDate,
                 organizationId,
+                customFieldValues: bookingValues,
               });
 
             // 🔗 Crear Reservation auto_approved vinculada (doble canal)
@@ -549,6 +564,7 @@ const reservationController = {
               status: "auto_approved",
               auto: true,
               appointmentId: apt?._id || null,
+              customFieldValues: bookingValues,
             });
 
             await notifyNewBooking(org, customerDetails, {
@@ -582,6 +598,7 @@ const reservationController = {
         customerDetails,
         organizationId,
         status: "pending",
+        customFieldValues: bookingValues,
       });
 
       // 🔗 Generar link de cancelación si hay token
@@ -626,7 +643,7 @@ const reservationController = {
 
   // POST /api/reservations/multi
   createMultipleReservations: async (req, res) => {
-    const { services, startDate, customerDetails, organizationId, clientPackageId, recurrencePattern, source, chatSessionId } = req.body;
+    const { services, startDate, customerDetails, organizationId, clientPackageId, recurrencePattern, source, chatSessionId, customFieldValues: rawCustomFieldValues } = req.body;
     const bookingSource = ["ai_chatbot", "manual_booking", "admin"].includes(source) ? source : "manual_booking";
 
     if (!services || !Array.isArray(services) || services.length === 0) {
@@ -652,9 +669,16 @@ const reservationController = {
       if (!org)
         return sendResponse(res, 404, null, "Organización no encontrada");
       const policy = org.reservationPolicy || "manual";
-      
+
       // Obtener la zona horaria de la organización
       const timezone = org.timezone || 'America/Bogota';
+
+      // 🧩 Campos personalizados (Organization.clientFormConfig.fields)
+      const customFieldDefs = getCustomFieldDefinitions(org.clientFormConfig?.fields);
+      const { clientValues, bookingValues } = validateAndSplitCustomFieldValues(
+        customFieldDefs,
+        rawCustomFieldValues
+      );
 
       // Cliente (asegurar)
       const customer = await reservationService.ensureClientExists({
@@ -665,6 +689,7 @@ const reservationController = {
         birthDate: customerDetails.birthDate,
         documentId: customerDetails.documentId,
         notes: customerDetails.notes,
+        customFieldValues: clientValues,
       });
 
       // === AUTO: crear citas batch (una sola transacción/mensaje)
@@ -676,6 +701,7 @@ const reservationController = {
         return await _handleRecurringReservation(req, res, {
           services, startDate, customerDetails, organizationId, clientPackageId,
           recurrencePattern, org, policy, timezone, customer, normalizeId,
+          customFieldValues: bookingValues,
         });
       }
 
@@ -757,6 +783,7 @@ const reservationController = {
               sharedGroupId, // 🔗 Mismo groupId para todas las citas
               sharedTokenHash, // 🔗 Mismo token hash para todas las citas
               sharedCancellationLink: cancellationLink, // 🔗 Persistir el enlace en las citas (para recordatorios)
+              customFieldValues: bookingValues,
               ...(clientPackageId ? { clientPackageId } : {}), // 📦 Paquete de sesiones
             });
 
@@ -793,6 +820,7 @@ const reservationController = {
               appointmentId: appt?._id || null,
               groupId: reservationGroupId,
               source: bookingSource,
+              customFieldValues: bookingValues,
             };
 
             const newReservation = await reservationService.createReservation(
@@ -945,6 +973,7 @@ const reservationController = {
             groupId: reservationGroupId,
             errorMessage: errorToSave,
             source: bookingSource,
+            customFieldValues: bookingValues,
             ...(clientPackageId ? { clientPackageId } : {}),
           };
 

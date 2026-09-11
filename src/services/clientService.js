@@ -11,7 +11,7 @@ import whatsappService from "./sendWhatsappService.js";
 const clientService = {
   // Crear un nuevo cliente
   createClient: async (clientData) => {
-    const { name, email, phoneNumber, organizationId, birthDate, documentId, notes } = clientData;
+    const { name, email, phoneNumber, organizationId, birthDate, documentId, notes, customFieldValues } = clientData;
 
     const org = await Organization.findById(organizationId).select('default_country clientFormConfig');
     const defaultCountry = org?.default_country || 'CO';
@@ -20,6 +20,9 @@ const clientService = {
     const clientDoc = { name, email, organizationId, birthDate };
     if (documentId) clientDoc.documentId = documentId.trim();
     if (notes) clientDoc.notes = notes.trim();
+    if (customFieldValues && Object.keys(customFieldValues).length > 0) {
+      clientDoc.customFieldValues = customFieldValues;
+    }
 
     // Normalizar teléfono si se provee
     if (phoneNumber) {
@@ -166,7 +169,7 @@ const clientService = {
 
   // Actualizar un cliente
   updateClient: async (id, clientData) => {
-    const { name, email, phoneNumber, phone_country, organizationId, birthDate, documentId, notes } = clientData;
+    const { name, email, phoneNumber, phone_country, organizationId, birthDate, documentId, notes, customFieldValues } = clientData;
     const client = await Client.findById(id);
 
     if (!client) {
@@ -220,6 +223,9 @@ const clientService = {
     client.birthDate = birthDate !== undefined ? birthDate : client.birthDate;
     if (documentId !== undefined) client.documentId = documentId ? documentId.trim() : documentId;
     if (notes !== undefined) client.notes = notes ? notes.trim() : notes;
+    if (customFieldValues && Object.keys(customFieldValues).length > 0) {
+      client.customFieldValues = { ...(client.customFieldValues || {}), ...customFieldValues };
+    }
 
     // Verificar duplicado por identificador si el campo cambió
     const labels = { phone: 'teléfono', email: 'correo electrónico', documentId: 'número de documento' };

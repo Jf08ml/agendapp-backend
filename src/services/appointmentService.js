@@ -341,6 +341,7 @@ const appointmentService = {
       clientPackageId = null, // 📦 Paquete de sesiones del cliente
       usePackageForServices = {}, // 📦 Mapeo serviceId -> clientPackageId
       skipConcurrencyCheck = false, // 🔓 Omitir validación de concurrencia (para forzar aprobación)
+      customFieldValues = undefined, // 🧩 Valores de campos personalizados scope "booking" (copia denormalizada)
     } = payload;
     
     if (!Array.isArray(services) || services.length === 0) {
@@ -536,6 +537,9 @@ const appointmentService = {
           cancelTokenHash: groupCancelTokenHash, // 🔗 Mismo hash para todo el grupo
           cancellationLink: groupCancellationLink || undefined,
           clientPackageId: pkgIdForService || undefined,
+          customFieldValues: customFieldValues && Object.keys(customFieldValues).length > 0
+            ? customFieldValues
+            : undefined,
         });
 
         const saved = await doc.save({ session });
@@ -749,6 +753,7 @@ const appointmentService = {
       employeeRequestedByClient = false,
       blocks,
       skipConcurrencyCheck = false,
+      customFieldValues,
     } = payload;
 
     if (!blocks || blocks.length === 0) {
@@ -784,6 +789,7 @@ const appointmentService = {
         sharedTokenHash: cancelTokenHash,
         sharedCancellationLink,
         skipConcurrencyCheck,
+        customFieldValues,
       });
       allCreated.push(...(created || []));
     }
@@ -1220,7 +1226,7 @@ const appointmentService = {
     // Si envían status u otros campos sueltos, respétalos. (Nota de sesión: usa
     // updateSessionNotes — "notes" no es un path del schema, se quitó de esta
     // lista porque se estaba perdiendo silenciosamente sin persistir ni fallar.)
-    const passthrough = ["status", "source", "meta", "reminderSent"];
+    const passthrough = ["status", "source", "meta", "reminderSent", "customFieldValues"];
     for (const k of passthrough) {
       if (updatedData[k] != null) appt[k] = updatedData[k];
     }

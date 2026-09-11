@@ -1,5 +1,6 @@
 import moment from "moment-timezone";
 import { getCountryCallingCode } from "libphonenumber-js";
+import { getCustomFieldDefinitions } from "../utils/customFieldUtils.js";
 
 // Salida literal que el modelo debe producir cuando decide no responder
 // (mensaje de WhatsApp sin intención de agendar — ver FILTRO DE INTENCIÓN).
@@ -32,6 +33,29 @@ export const buildBookingSystemPrompt = (organization, options = {}) => {
       : identifierField === "documentId"
       ? "número de documento o cédula"
       : "número de teléfono";
+
+  // 🧩 Campos personalizados de la organización (Organization.clientFormConfig.fields,
+  // fuera de los 6 built-in) — el chatbot no tiene una tool para descubrirlos, así que
+  // se listan aquí directamente para que el modelo sepa pedirlos por su nombre exacto.
+  const customFieldDefs = getCustomFieldDefinitions(organization.clientFormConfig?.fields);
+  const customFieldsPromptBlock = customFieldDefs.length
+    ? `
+- Esta organización además requiere estos datos adicionales — pídelos junto con lo anterior, en el mismo mensaje si es posible:
+${customFieldDefs
+  .map((f) => {
+    const typeLabel =
+      f.type === "number"
+        ? "número"
+        : f.type === "date"
+        ? "fecha (formato YYYY-MM-DD)"
+        : f.type === "select"
+        ? `una de estas opciones: ${(f.options || []).join(", ")}`
+        : "texto";
+    return `  · "${f.key}" (${f.label || f.key}) — ${typeLabel}${f.required ? ", OBLIGATORIO" : ", opcional"}`;
+  })
+  .join("\n")}
+- Cuando llames prepare_reservation, incluye customFieldValues: { "<key>": "<valor>" } usando EXACTAMENTE las claves indicadas arriba (tal cual, entre comillas). Omite las que el cliente no dio si no son obligatorias; si una es obligatoria y no la ha dado, pídesela antes de continuar al PASO 6.`
+    : "";
 
   const phoneRule =
     identifierField === "phone"
@@ -172,11 +196,11 @@ ${
 - Pide únicamente el nombre completo${identifierField !== "phone" ? ` y su ${identifierLabel}` : ""}.`
       : `- Pide: nombre completo + ${identifierLabel}.
 - Solo pide lo necesario. No pidas email si el campo es teléfono, y viceversa.${phoneRule}`
-  }
+  }${customFieldsPromptBlock}
 
 PASO 6 — CONFIRMAR
 - Resume la reserva completa:
-  · Servicio(s), profesional (si aplica), fecha, hora, nombre del cliente.
+  · Servicio(s), profesional (si aplica), fecha, hora, nombre del cliente${customFieldDefs.length ? ", y los datos adicionales que haya dado (para que los revise antes de confirmar)" : ""}.
 - Pregunta: "¿Todo está correcto? ¿Confirmo tu reserva?"
 - Cuando el cliente diga SÍ, llama prepare_reservation con todos los datos.
 - CRÍTICO: si durante la conversación se identificó un profesional para algún servicio, el employeeId en prepare_reservation DEBE ser el campo 'id' exacto que devolvió get_employees_for_service — nunca el nombre, nunca null.

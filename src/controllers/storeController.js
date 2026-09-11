@@ -31,6 +31,7 @@ import * as orderService from "../services/collection/orderService.js";
 import { buildAndAttachCheckout } from "./collectionController.js";
 import { publicPaymentMethods } from "./receiptController.js";
 import { notifyNewStoreOrder, notifyStorePaymentReceived } from "../services/collection/storeNotifier.js";
+import { getCustomFieldDefinitions, validateAndSplitCustomFieldValues } from "../utils/customFieldUtils.js";
 
 const COD_METHODS = ["cash", "card", "transfer", "other"];
 
@@ -53,7 +54,7 @@ const DEFAULT_STORE_FORM_FIELDS = [
  * según el `storeFormConfig` de la organización (independiente del
  * `clientFormConfig` usado para citas — la tienda es para público general).
  */
-function validateCustomerAndDelivery(customer, delivery, org) {
+function validateCustomerAndDelivery(customer, delivery, org, rawCustomFieldValues) {
   const storeFormConfig = org?.storeFormConfig;
   const identifierField = storeFormConfig?.identifierField || "phone";
   const fields = storeFormConfig?.fields?.length ? storeFormConfig.fields : DEFAULT_STORE_FORM_FIELDS;
@@ -87,6 +88,16 @@ function validateCustomerAndDelivery(customer, delivery, org) {
   const lng = Number(delivery?.lng);
   const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
 
+  // 🧩 Campos personalizados: la tienda nunca crea Client (ver orderModel.js),
+  // así que sus campos personalizados siempre se tratan como "booking" sin
+  // importar el scope guardado en storeFormConfig.
+  const customFieldDefs = getCustomFieldDefinitions(fields);
+  const { bookingValues: customFieldValues } = validateAndSplitCustomFieldValues(
+    customFieldDefs,
+    rawCustomFieldValues,
+    { forceScope: "booking" }
+  );
+
   return {
     customer: {
       name: String(customer.name).trim(),
@@ -100,6 +111,7 @@ function validateCustomerAndDelivery(customer, delivery, org) {
       notes: String(delivery?.notes || "").trim(),
       ...(hasCoords ? { lat, lng } : {}),
     },
+    customFieldValues,
   };
 }
 
@@ -275,7 +287,7 @@ export const getStoreProductDetail = async (req, res) => {
 // Pago online con Mercado Pago (copia createPackageCheckout). El stock se valida
 // aquí (simple) y se descuenta cuando el webhook confirma el pago (fulfillStoreOrder).
 export const createStoreCheckout = async (req, res) => {
-  const { items, customer, delivery, organizationId } = req.body;
+  const { items, customer, delivery, organizationId, customFieldValues } = req.body;
 
   try {
     const org = await loadStoreOrg(organizationId);
@@ -283,7 +295,7 @@ export const createStoreCheckout = async (req, res) => {
       return sendResponse(res, 400, null, "La organización no tiene Mercado Pago conectado.");
     }
 
-    const buyer = validateCustomerAndDelivery(customer, delivery, org);
+    const buyer = validateCustomerAndDelivery(customer, delivery, org, customFieldValues);
     const validated = await validateStoreItems(org, items);
 
     const order = await orderService.createStoreOrder({
@@ -291,6 +303,7 @@ export const createStoreCheckout = async (req, res) => {
       items: validated.items,
       customer: buyer.customer,
       delivery: buyer.delivery,
+      customFieldValues: buyer.customFieldValues,
       amount: validated.amount,
       currency: String(org.currency || "COP").toUpperCase(),
       marketplaceFee: 0,
@@ -327,7 +340,7 @@ export const createStoreCheckout = async (req, res) => {
 // Contraentrega: el pedido nace "pending" y NO descuenta stock (decisión 3).
 // El admin registra el cobro al entregar (POST /store-orders/:id/collect).
 export const createStoreCodOrder = async (req, res) => {
-  const { items, customer, delivery, organizationId } = req.body;
+  const { items, customer, delivery, organizationId, customFieldValues } = req.body;
 
   try {
     const org = await loadStoreOrg(organizationId);
@@ -335,7 +348,7 @@ export const createStoreCodOrder = async (req, res) => {
       return sendResponse(res, 400, null, "La organización no acepta pago contraentrega.");
     }
 
-    const buyer = validateCustomerAndDelivery(customer, delivery, org);
+    const buyer = validateCustomerAndDelivery(customer, delivery, org, customFieldValues);
     const validated = await validateStoreItems(org, items);
 
     const order = await orderService.createStoreOrder({
@@ -343,6 +356,7 @@ export const createStoreCodOrder = async (req, res) => {
       items: validated.items,
       customer: buyer.customer,
       delivery: buyer.delivery,
+      customFieldValues: buyer.customFieldValues,
       amount: validated.amount,
       currency: String(org.currency || "COP").toUpperCase(),
       provider: "cod",
@@ -376,7 +390,7 @@ export const createStoreCodOrder = async (req, res) => {
 // subida del comprobante y el polling reusan /collection/receipt/:externalReference
 // y /collection/order/:externalReference sin cambios.
 export const createReceiptStoreCheckout = async (req, res) => {
-  const { items, customer, delivery, organizationId } = req.body;
+  const { items, customer, delivery, organizationId, customFieldValues } = req.body;
 
   try {
     const org = await loadStoreOrg(organizationId);
@@ -384,7 +398,7 @@ export const createReceiptStoreCheckout = async (req, res) => {
       return sendResponse(res, 400, null, "La organización no tiene métodos de pago configurados.");
     }
 
-    const buyer = validateCustomerAndDelivery(customer, delivery, org);
+    const buyer = validateCustomerAndDelivery(customer, delivery, org, customFieldValues);
     const validated = await validateStoreItems(org, items);
 
     const order = await orderService.createStoreOrder({
@@ -392,6 +406,7 @@ export const createReceiptStoreCheckout = async (req, res) => {
       items: validated.items,
       customer: buyer.customer,
       delivery: buyer.delivery,
+      customFieldValues: buyer.customFieldValues,
       amount: validated.amount,
       currency: String(org.currency || "COP").toUpperCase(),
       provider: "receipt",

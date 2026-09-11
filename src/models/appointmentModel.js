@@ -166,6 +166,13 @@ const appointmentModelSchema = new mongoose.Schema(
       default: null,
     },
     additionalItems: [additionalItemSchema],
+    // Copia denormalizada de Reservation.customFieldValues (scope "booking") al
+    // crear/aprobar la cita — Appointment.reservationId no se popula en ningún
+    // lado hoy, así que depender de él solo para esto sería plomería nueva.
+    customFieldValues: {
+      type: mongoose.Schema.Types.Mixed,
+      required: false,
+    },
     totalPrice: {
       type: Number,
       required: true,

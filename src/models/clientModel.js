@@ -34,6 +34,12 @@ const clientSchema = new mongoose.Schema(
       type: String,
       required: false,
     },
+    // Valores de campos personalizados con scope "client" (Organization.clientFormConfig.fields)
+    // — persisten y se reutilizan entre reservas de este cliente.
+    customFieldValues: {
+      type: mongoose.Schema.Types.Mixed,
+      required: false,
+    },
     servicesTaken: {
       type: Number,
       default: 0,
