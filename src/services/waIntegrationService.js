@@ -25,11 +25,13 @@ export function isWaReady(s) {
 
 export const waIntegrationService = {
   async connectOrganizationSession({ orgId, clientId, userId, pairingPhone }) {
-    const org = await Organization.findById(orgId);
-    if (!org) throw new Error("Organización no encontrada");
-
-    org.clientIdWhatsapp = clientId;
-    await org.save();
+    // updateOne (no org.save()): solo persiste este campo, sin revalidar el documento
+    // completo — un dato viejo inválido en otra parte de la org no debe impedir conectar.
+    const { matchedCount } = await Organization.updateOne(
+      { _id: orgId },
+      { $set: { clientIdWhatsapp: clientId } }
+    );
+    if (!matchedCount) throw new Error("Organización no encontrada");
 
     // LÓGICA DE DECISIÓN: ¿QR o Pairing?
     if (pairingPhone) {

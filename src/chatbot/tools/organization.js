@@ -6,6 +6,29 @@ import { resolveBaseUrl } from "../../utils/cancellationUtils.js";
 
 const DAY_MAP = { domingo: 0, lunes: 1, martes: 2, miercoles: 3, miércoles: 3, jueves: 4, viernes: 5, sabado: 6, sábado: 6 };
 const DAY_NAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+// Devuelve un mensaje de error si `days` no puede guardarse como weeklySchedule.schedule,
+// o null si es válido. Un día cuenta como abierto salvo isOpen === false (default del schema).
+const validateScheduleDays = (days) => {
+  if (!Array.isArray(days) || days.length === 0) {
+    return "days debe ser una lista con la configuración de los días (0=domingo..6=sábado).";
+  }
+  const seen = new Set();
+  for (const d of days) {
+    const day = d?.day;
+    if (!Number.isInteger(day) || day < 0 || day > 6) {
+      return `Día inválido (${JSON.stringify(day)}): usa un número de 0=domingo a 6=sábado.`;
+    }
+    if (seen.has(day)) return `El día ${DAY_NAMES[day]} está repetido en la lista.`;
+    seen.add(day);
+    if (d.isOpen === false) continue;
+    if (!TIME_RE.test(d.start ?? "") || !TIME_RE.test(d.end ?? "")) {
+      return `El día ${DAY_NAMES[day]} está abierto pero le falta una hora válida de apertura (start) o cierre (end) en formato "HH:mm". Si ese día no se atiende, envía isOpen: false.`;
+    }
+  }
+  return null;
+};
 
 // Convierte el weeklySchedule de la organización en líneas legibles ("lunes: 08:00–20:00").
 const formatWeeklySchedule = (weeklySchedule) => {
@@ -126,6 +149,12 @@ Cada día debe tener: day (0=domingo..6=sábado), isOpen (true/false), start ("H
       },
     },
     handler: async (params, context) => {
+      // findByIdAndUpdate no ejecuta el `required` condicional (isOpen) del schema, así que
+      // un día abierto sin start/end se guardaba tal cual y dejaba la org con un documento
+      // inválido. Se valida aquí y el error vuelve al modelo para que lo corrija.
+      const scheduleError = validateScheduleDays(params.days);
+      if (scheduleError) return { success: false, error: scheduleError };
+
       const update = { "weeklySchedule.enabled": true, "weeklySchedule.schedule": params.days };
       if (params.stepMinutes) update["weeklySchedule.stepMinutes"] = params.stepMinutes;
       await Organization.findByIdAndUpdate(context.organizationId, { $set: update });
