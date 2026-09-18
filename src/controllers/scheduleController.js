@@ -4,6 +4,7 @@
  */
 
 import moment from 'moment-timezone';
+import mongoose from "mongoose";
 import organizationModel from "../models/organizationModel.js";
 import employeeModel from "../models/employeeModel.js";
 import appointmentModel from "../models/appointmentModel.js";
@@ -380,6 +381,114 @@ const scheduleController = {
         null,
         `Error al obtener slots disponibles: ${error.message}`
       );
+    }
+  },
+
+  /**
+   * Ventanas libres del conjunto de profesionales durante un rango de días (vista semanal de la agenda).
+   * POST /api/schedule/availability-week
+   * Body: { startDate: "YYYY-MM-DD", days?: 1-14 (default 7), duration?: minutos, employeeIds: string[] }
+   * Returns: { startDate, days: [{ date, isPast, isToday, windows: [{ start, end }], employeeIds: string[] }] }
+   *   - windows: rangos en que AL MENOS UN profesional puede iniciar una cita de `duration` min
+   *   - employeeIds: los profesionales con algún espacio libre ese día
+   * Usa la misma generateAvailableSlots que la vista por día, pero con una sola consulta de
+   * citas para todo el rango en vez de un request por profesional y día.
+   */
+  getWeekAvailability: async (req, res) => {
+    try {
+      const organization = req.organization;
+      const { startDate, employeeIds } = req.body;
+      const days = Number.isInteger(req.body.days) ? req.body.days : 7;
+      const duration = Number(req.body.duration) || 30;
+
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(startDate || "") ||
+        !Array.isArray(employeeIds) ||
+        employeeIds.length === 0 ||
+        !employeeIds.every((id) => mongoose.isValidObjectId(id))
+      ) {
+        return sendResponse(res, 400, null, "startDate (YYYY-MM-DD) y employeeIds válidos son requeridos");
+      }
+      if (days < 1 || days > 14 || duration < 5 || duration > 480 || employeeIds.length > 50) {
+        return sendResponse(res, 400, null, "Parámetros fuera de rango");
+      }
+
+      const timezone = organization.timezone || "America/Bogota";
+      const first = moment.tz(startDate, "YYYY-MM-DD", timezone);
+      if (!first.isValid()) {
+        return sendResponse(res, 400, null, "startDate inválida");
+      }
+      const dates = Array.from({ length: days }, (_, i) => first.clone().add(i, "days").format("YYYY-MM-DD"));
+      const todayStr = moment.tz(timezone).format("YYYY-MM-DD");
+      // Mismo intervalo que usa generateAvailableSlots para armar la grilla de slots
+      const stepMinutes = organization.weeklySchedule?.stepMinutes ||
+                          organization.openingHours?.stepMinutes ||
+                          30;
+
+      const employees = await employeeModel.find({
+        _id: { $in: employeeIds },
+        organizationId: organization._id,
+      });
+
+      // ✅ Mismos filtros que el endpoint por día: se excluyen las canceladas
+      const appointments = await appointmentModel
+        .find({
+          organizationId: organization._id,
+          employee: { $in: employees.map((e) => e._id) },
+          startDate: {
+            $gte: first.clone().startOf("day").toDate(),
+            $lte: first.clone().add(days - 1, "days").endOf("day").toDate(),
+          },
+          status: { $nin: ["cancelled_by_customer", "cancelled_by_admin"] },
+        })
+        .select("employee startDate endDate")
+        .lean();
+
+      // generateAvailableSlots recorre las citas que recibe por cada slot: se le pasan solo
+      // las de ese profesional y ese día, no todas las de la semana.
+      const apptsByEmployeeDay = new Map();
+      for (const appt of appointments) {
+        const key = `${appt.employee}|${moment.tz(appt.startDate, timezone).format("YYYY-MM-DD")}`;
+        if (!apptsByEmployeeDay.has(key)) apptsByEmployeeDay.set(key, []);
+        apptsByEmployeeDay.get(key).push(appt);
+      }
+
+      const result = dates.map((date) => {
+        const isToday = date === todayStr;
+        if (date < todayStr) return { date, isPast: true, isToday, windows: [], employeeIds: [] };
+
+        // Se unen las horas de inicio de todos los profesionales ANTES de armar las ventanas,
+        // para que el resultado respete la grilla de slots del negocio.
+        const startTimes = new Set();
+        const employeeIdsWithSlots = [];
+        for (const emp of employees) {
+          const times = scheduleService
+            .generateAvailableSlots(
+              date,
+              organization,
+              emp,
+              duration,
+              apptsByEmployeeDay.get(`${emp._id}|${date}`) || []
+            )
+            .filter((s) => s.available)
+            .map((s) => s.time);
+          if (times.length > 0) {
+            employeeIdsWithSlots.push(emp._id.toString());
+            times.forEach((t) => startTimes.add(t));
+          }
+        }
+        return {
+          date,
+          isPast: false,
+          isToday,
+          windows: scheduleService.computeFreeWindows([...startTimes], duration, stepMinutes),
+          employeeIds: employeeIdsWithSlots,
+        };
+      });
+
+      return sendResponse(res, 200, { startDate, days: result }, "Disponibilidad semanal obtenida exitosamente");
+    } catch (error) {
+      return sendResponse(res, 500, null, `Error al obtener la disponibilidad semanal: ${error.message}`);
     }
   },
 

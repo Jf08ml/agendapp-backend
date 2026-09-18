@@ -29,6 +29,8 @@ router.get(
   verifyToken,
   clientController.searchClients
 );
+// Antes de "/:id" para que "follow-ups" no se interprete como un id de cliente
+router.get("/follow-ups", organizationResolver, verifyToken, clientController.getOrgFollowUps);
 router.get("/:id", organizationResolver, verifyToken, clientController.getClientById);
 router.get("/:id/follow-up-status", organizationResolver, verifyToken, clientController.getFollowUpStatus);
 router.delete("/:id", organizationResolver, verifyToken, clientController.deleteClient);

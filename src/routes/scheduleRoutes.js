@@ -23,6 +23,9 @@ router.get("/organization/:orgId/open-days", verifyToken, scheduleController.get
 router.put("/employee/:employeeId", verifyToken, scheduleController.updateEmployeeSchedule);
 router.get("/employee/:employeeId", verifyToken, scheduleController.getEmployeeSchedule);
 router.get("/employee/:employeeId/available-days", verifyToken, scheduleController.getEmployeeAvailableDays);
+// Vista semanal de disponibilidad de la agenda (admin): recibe employeeIds en el body,
+// así que también necesita organizationResolver para acotarlos a la organización.
+router.post("/availability-week", organizationResolver, verifyToken, scheduleController.getWeekAvailability);
 // organizationResolver aquí (además de verifyToken) porque estos endpoints reciben
 // employeeId por parámetro de ruta y deben validar que pertenezca a la organización
 // del solicitante — ver checks de tenant/propiedad dentro del controller.

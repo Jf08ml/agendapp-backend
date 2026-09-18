@@ -2,7 +2,10 @@ import appointmentService from "../services/appointmentService.js";
 import clientService from "../services/clientService.js";
 import sendResponse from "../utils/sendResponse.js";
 import { auditLogService } from "../services/auditLogService.js";
-import { getClientFollowUpOverview } from "../services/followUpReminderService.js";
+import mongoose from "mongoose";
+import { getClientFollowUpOverview, getOrgFollowUpOverview } from "../services/followUpReminderService.js";
+
+const FOLLOW_UP_VIEWS = ["pending", "sent", "not_sent"];
 
 const clientController = {
   // Controlador para crear un nuevo cliente
@@ -85,6 +88,31 @@ const clientController = {
         tz: req.organization.timezone || "America/Bogota",
       });
       sendResponse(res, 200, status, "Estado de recordatorios de seguimiento obtenido exitosamente");
+    } catch (error) {
+      sendResponse(res, 500, null, error.message);
+    }
+  },
+
+  // Lista general (toda la organización) de recordatorios de seguimiento: programados/enviados/no enviados
+  getOrgFollowUps: async (req, res) => {
+    const { view = "pending", serviceId, search, page, limit } = req.query;
+    if (!FOLLOW_UP_VIEWS.includes(view)) {
+      return sendResponse(res, 400, null, `view debe ser una de: ${FOLLOW_UP_VIEWS.join(", ")}`);
+    }
+    if (serviceId && !mongoose.isValidObjectId(serviceId)) {
+      return sendResponse(res, 400, null, "serviceId inválido");
+    }
+    try {
+      const overview = await getOrgFollowUpOverview({
+        organizationId: req.organization._id,
+        view,
+        serviceId: serviceId || null,
+        search: search || "",
+        page: Math.max(parseInt(page, 10) || 1, 1),
+        limit: Math.min(Math.max(parseInt(limit, 10) || 25, 1), 100),
+        tz: req.organization.timezone || "America/Bogota",
+      });
+      sendResponse(res, 200, overview, "Recordatorios de seguimiento obtenidos exitosamente");
     } catch (error) {
       sendResponse(res, 500, null, error.message);
     }

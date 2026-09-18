@@ -499,6 +499,30 @@ function generateAvailableSlots(date, organization, employee = null, durationMin
 }
 
 /**
+ * Convierte los inicios de slot disponibles en ventanas libres contiguas: cada ventana va
+ * del primer inicio al fin de la última cita posible (09:00…11:30 con 30 min → 09:00–12:00).
+ * Los slots consecutivos de la grilla se fusionan aunque la duración sea menor que el
+ * intervalo (45 min con intervalo de 60 dejaría huecos de 15 sin reservar); un descanso o
+ * una cita que bloquea un slot parten la ventana.
+ * @param {string[]} times - Inicios de slot disponibles en "HH:mm"
+ * @param {number} durationMinutes - Duración con la que se generaron los slots
+ * @param {number} stepMinutes - Intervalo entre slots de la organización
+ * @returns {Array<{start: string, end: string}>}
+ */
+function computeFreeWindows(times, durationMinutes, stepMinutes = durationMinutes) {
+  const reach = Math.max(durationMinutes, stepMinutes);
+  const windows = [];
+  let lastStart = -Infinity;
+  for (const startMin of times.map(timeToMinutes).sort((a, b) => a - b)) {
+    const last = windows[windows.length - 1];
+    if (last && startMin - lastStart <= reach) last.end = startMin + durationMinutes;
+    else windows.push({ start: startMin, end: startMin + durationMinutes });
+    lastStart = startMin;
+  }
+  return windows.map((w) => ({ start: minutesToTime(w.start), end: minutesToTime(w.end) }));
+}
+
+/**
  * Obtiene los días de la semana en que está abierto
  * @param {Object} organization - Documento de organización
  * @returns {Array} Array de números de días (0-6)
@@ -1042,6 +1066,7 @@ export default {
   getEmployeeDaySchedule,
   validateDateTime,
   generateAvailableSlots,
+  computeFreeWindows,
   getOpenDays,
   getEmployeeAvailableDays,
   isEmployeeAvailableOnDay,
