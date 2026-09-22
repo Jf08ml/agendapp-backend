@@ -58,6 +58,17 @@ export async function waGetStatus(clientId) {
   return data;
 }
 
+// Estado de TODAS las sesiones Baileys en una sola llamada — usado por
+// waHealthCheckService para no tener que pedir /api/status por cada org.
+// Devuelve un array [{ clientId, status, reason, lastReadyAt, lastQrAt, linkedAt }].
+export async function waGetAllSessions() {
+  const r = await fetch(`${WA_API_URL}/api/sessions`, {
+    method: "GET",
+    headers: headers(),
+  });
+  return handleResponse(r, "GET /api/sessions");
+}
+
 // ⬇️ NUEVO: enviar mensaje
 export async function waSend({ clientId, phone, message, image }) {
   const r = await fetch(`${WA_API_URL}/api/send`, {

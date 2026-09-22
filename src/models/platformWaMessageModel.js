@@ -18,7 +18,7 @@ const platformWaMessageSchema = new mongoose.Schema(
     direction: { type: String, enum: ["inbound", "outbound"], required: true },
     source: {
       type: String,
-      enum: ["inbound", "retargeting", "ai_agent", "manual"],
+      enum: ["inbound", "retargeting", "ai_agent", "manual", "alert"],
       required: true,
     },
     body: { type: String, required: true },

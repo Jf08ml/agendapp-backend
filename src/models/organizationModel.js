@@ -443,6 +443,17 @@ const organizationSchema = new mongoose.Schema({
     whatsappNudgeSentAt:         { type: Date, default: null }, // completó setup pero nunca conectó WhatsApp
     whatsappNudgeAttempts:       { type: Number, default: 0 },
   },
+
+  // ── Alerta de caída de WhatsApp Baileys (cron/waHealthCheckJob.js) ───────
+  // downSince: primera corrida del cron en que se vio la sesión "no ready"
+  // (no se avisa aún, evita falsos positivos por un blip que se autorecupera
+  // con el backoff del wa-backend). notifiedAt: se puso al avisar — mientras
+  // siga con valor no se vuelve a notificar la misma caída. Ambos se resetean
+  // a null en cuanto la sesión vuelve a verse "ready".
+  waDisconnectAlert: {
+    downSince:  { type: Date, default: null },
+    notifiedAt: { type: Date, default: null },
+  },
   blockHolidaysForReservations: {
     type: Boolean,
     default: false,
