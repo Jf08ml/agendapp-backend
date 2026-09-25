@@ -1090,11 +1090,21 @@ const scheduleController = {
 
   /**
    * Eliminar excepción de horario de un empleado
-   * DELETE /api/schedule/employee/:employeeId/exceptions/:exceptionId
+   * DELETE /api/schedule/employee/:employeeId/exceptions/:exceptionId[?date=YYYY-MM-DD]
+   *
+   * Sin `date` elimina el bloqueo completo (todo su rango de fechas).
+   * Con `date` elimina SOLO ese día de un bloqueo multi-día: recorta el rango
+   * (si el día es un extremo) o lo parte en dos (si está en medio). Un bloqueo
+   * de un solo día se elimina por completo.
    */
   removeEmployeeException: async (req, res) => {
     const { employeeId, exceptionId } = req.params;
+    const { date } = req.query;
     try {
+      if (date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(String(date))) {
+        return sendResponse(res, 400, null, "El formato de fecha debe ser YYYY-MM-DD");
+      }
+
       const employee = await employeeModel.findById(employeeId);
       if (!employee) {
         return sendResponse(res, 404, null, "Empleado no encontrado");
@@ -1102,17 +1112,51 @@ const scheduleController = {
       const authError = checkEmployeeExceptionAccess(req, employee);
       if (authError) return sendResponse(res, authError.status, null, authError.message);
 
-      const initialLength = employee.scheduleExceptions.length;
-      employee.scheduleExceptions = employee.scheduleExceptions.filter(
-        (e) => e._id.toString() !== exceptionId
-      );
-
-      if (employee.scheduleExceptions.length === initialLength) {
+      const exception = employee.scheduleExceptions.id(exceptionId);
+      if (!exception) {
         return sendResponse(res, 404, null, "Excepción no encontrada");
       }
 
+      const removeWholeException = !date || exception.startDate === exception.endDate;
+
+      if (removeWholeException) {
+        employee.scheduleExceptions.pull(exceptionId);
+      } else {
+        if (date < exception.startDate || date > exception.endDate) {
+          return sendResponse(res, 400, null, "La fecha indicada no está dentro del bloqueo");
+        }
+
+        // Aritmética de días sobre strings "YYYY-MM-DD" en UTC (sin corrimientos por zona horaria)
+        const shiftDay = (dateStr, days) =>
+          moment.utc(dateStr, "YYYY-MM-DD").add(days, "days").format("YYYY-MM-DD");
+        const originalEndDate = exception.endDate;
+
+        if (date === exception.startDate) {
+          exception.startDate = shiftDay(date, 1);
+        } else if (date === originalEndDate) {
+          exception.endDate = shiftDay(date, -1);
+        } else {
+          // Día en medio: el bloqueo original conserva el tramo anterior y se crea otro con el posterior
+          exception.endDate = shiftDay(date, -1);
+          employee.scheduleExceptions.push({
+            startDate: shiftDay(date, 1),
+            endDate: originalEndDate,
+            allDay: exception.allDay,
+            ...(exception.startTime ? { startTime: exception.startTime } : {}),
+            ...(exception.endTime ? { endTime: exception.endTime } : {}),
+            ...(exception.reason ? { reason: exception.reason } : {}),
+            createdAt: exception.createdAt,
+          });
+        }
+      }
+
       await employee.save();
-      return sendResponse(res, 200, employee.scheduleExceptions, "Excepción eliminada exitosamente");
+      return sendResponse(
+        res,
+        200,
+        employee.scheduleExceptions,
+        removeWholeException ? "Excepción eliminada exitosamente" : "Día del bloqueo eliminado exitosamente"
+      );
     } catch (error) {
       return sendResponse(res, 500, null, `Error: ${error.message}`);
     }
