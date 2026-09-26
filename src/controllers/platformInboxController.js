@@ -5,6 +5,27 @@ import {
   markConversationRead,
   replyToConversation,
 } from "../services/platformInboxService.js";
+import { getPlatformSettings, updatePlatformSettings } from "../services/platformSettingsService.js";
+
+// Interruptores de los envíos automáticos por el número de plataforma
+// (retargeting y aviso de desconexión de WhatsApp).
+export async function getSettings(req, res) {
+  const settings = await getPlatformSettings();
+  sendResponse(res, 200, settings);
+}
+
+export async function patchSettings(req, res) {
+  try {
+    const settings = await updatePlatformSettings(req.body);
+    if (!settings) {
+      return sendResponse(res, 400, null, "No se envió ninguna configuración válida");
+    }
+    sendResponse(res, 200, settings);
+  } catch (err) {
+    console.error("[platformInbox] patchSettings error:", err);
+    sendResponse(res, 500, null, "Error al guardar la configuración");
+  }
+}
 
 export async function getConversations(req, res) {
   try {

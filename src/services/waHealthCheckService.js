@@ -27,6 +27,7 @@ import subscriptionService from "./subscriptionService.js";
 import { sendTextMessage } from "./metaApiService.js";
 import { logOutboundMessage } from "./platformInboxService.js";
 import { normalizeAdminPhone } from "./collection/adminPaymentNotifier.js";
+import { getPlatformSettings } from "./platformSettingsService.js";
 
 async function notifyWhatsappDisconnected(org) {
   const title = "WhatsApp desconectado ⚠️";
@@ -52,6 +53,11 @@ async function notifyWhatsappDisconnected(org) {
   // Meta aprobada para este aviso, así que va como texto libre — solo llega si
   // el dueño le escribió a AgenditApp en las últimas 24h (ventana de servicio
   // de Meta). Si falla, push + in-app ya cubrieron el aviso.
+  // Solo si el superadmin lo tiene prendido (PlatformSettings.waDisconnectWhatsappAlertEnabled,
+  // apagado por defecto); push + in-app salen siempre.
+  const { waDisconnectWhatsappAlertEnabled } = await getPlatformSettings();
+  if (!waDisconnectWhatsappAlertEnabled) return;
+
   const adminPhone = normalizeAdminPhone(org.phoneNumber);
   if (!adminPhone) return;
   try {
