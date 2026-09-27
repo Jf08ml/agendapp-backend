@@ -306,11 +306,21 @@ export async function connectOrgEmbedded(orgId, code, redirectUri, providedWabaI
   });
   const shortToken = shortRes.data.access_token;
 
-  // 2. Convertir a long token (60 días)
-  const longRes = await axios.get(`${GRAPH_URL}/oauth/access_token`, {
-    params: { grant_type: "fb_exchange_token", client_id: APP_ID, client_secret: APP_SECRET, fb_exchange_token: shortToken },
-  });
-  const accessToken = longRes.data.access_token;
+  // 2. Convertir a long token (60 días). Si la configuración de Login emite tokens de
+  //    usuario del sistema (no caducan) el intercambio puede fallar; el code es de un solo
+  //    uso, así que en vez de perder el onboarding se sigue con el token que ya tenemos.
+  let accessToken = shortToken;
+  try {
+    const longRes = await axios.get(`${GRAPH_URL}/oauth/access_token`, {
+      params: { grant_type: "fb_exchange_token", client_id: APP_ID, client_secret: APP_SECRET, fb_exchange_token: shortToken },
+    });
+    accessToken = longRes.data.access_token || shortToken;
+  } catch (exchangeErr) {
+    console.warn(
+      "[metaConnect] fb_exchange_token falló — se usa el token del code tal cual:",
+      exchangeErr.response?.data?.error?.message || exchangeErr.message
+    );
+  }
 
   // 3. Extraer WABA ID desde granular_scopes si no vino en authResponse
   let wabaId = providedWabaId;
@@ -326,15 +336,17 @@ export async function connectOrgEmbedded(orgId, code, redirectUri, providedWabaI
   if (!wabaId) throw new Error("No se encontró WhatsApp Business Account asociada.");
 
   // 4. Obtener phone number del WABA
+  //    is_on_biz_app = el número viene de la app de WhatsApp Business (coexistencia)
+  const PHONE_FIELDS = "id,display_phone_number,verified_name,is_on_biz_app";
   let phoneData;
   if (providedPhoneNumberId) {
     const r = await axios.get(`${GRAPH_URL}/${providedPhoneNumberId}`, {
-      params: { access_token: accessToken, fields: "id,display_phone_number,verified_name" },
+      params: { access_token: accessToken, fields: PHONE_FIELDS },
     });
     phoneData = r.data;
   } else {
     const r = await axios.get(`${GRAPH_URL}/${wabaId}/phone_numbers`, {
-      params: { access_token: accessToken, fields: "id,display_phone_number,verified_name" },
+      params: { access_token: accessToken, fields: PHONE_FIELDS },
     });
     phoneData = r.data?.data?.[0];
   }
@@ -387,12 +399,57 @@ export async function connectOrgEmbedded(orgId, code, redirectUri, providedWabaI
     // waConnectionType queda null hasta que el usuario elige el modo
   });
 
+  // 9. Coexistencia: el número ya estaba en la app de WhatsApp Business. Meta da 24 h desde
+  //    el registro para pedir la sincronización de contactos e historial; pasado ese plazo
+  //    hay que desvincular al cliente y repetir el flujo. Un fallo aquí no bloquea la conexión.
+  const isCoexistence = phoneData.is_on_biz_app === true;
+  const dataSync = isCoexistence ? await requestSmbAppDataSync(phoneData.id, accessToken) : null;
+
   return {
     wabaId,
     phoneNumberId: phoneData.id,
     phone: phoneData.display_phone_number,
     verifiedName: phoneData.verified_name,
+    isCoexistence,
+    dataSync,
   };
+}
+
+/**
+ * Coexistencia: pide a Meta que sincronice los datos de la app de WhatsApp Business
+ * (POST /{phone-number-id}/smb_app_data). Orden de la doc: primero contactos y luego
+ * historial; cada tipo se puede pedir UNA sola vez por onboarding (repetirlo falla y
+ * exige desvincular y volver a registrar). Los datos llegan después por webhook
+ * (`smb_app_state_sync` / `history`), que hoy `handleMetaIncoming` ignora: la solicitud
+ * se hace igual para que el onboarding no caduque a las 24 h.
+ *
+ * Nunca lanza: devuelve { contacts, history } con { ok, requestId?, error? } cada uno.
+ *
+ * @param {string} phoneNumberId
+ * @param {string} token - token del onboarding (el del code de Embedded Signup)
+ */
+export async function requestSmbAppDataSync(phoneNumberId, token) {
+  const client = makeClient(token);
+  const kinds = [
+    ["contacts", "smb_app_state_sync"],
+    ["history", "history"],
+  ];
+  const results = {};
+  for (const [key, syncType] of kinds) {
+    try {
+      const r = await client.post(`/${phoneNumberId}/smb_app_data`, {
+        messaging_product: "whatsapp",
+        sync_type: syncType,
+      });
+      results[key] = { ok: true, requestId: r.data?.request_id };
+      console.log(`[metaConnect] smb_app_data ${syncType} solicitado para ${phoneNumberId} — request_id: ${r.data?.request_id}`);
+    } catch (err) {
+      const error = err.response?.data?.error?.message || err.message;
+      results[key] = { ok: false, error };
+      console.warn(`[metaConnect] smb_app_data ${syncType} falló para ${phoneNumberId}:`, error);
+    }
+  }
+  return results;
 }
 
 /**
