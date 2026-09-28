@@ -42,6 +42,7 @@ router.post(
   clientController.registerReferral
 );
 router.put("/:id/rewards/:rewardId/redeem", organizationResolver, verifyToken, clientController.redeemReward);
+router.delete("/:id/rewards/:rewardId", organizationResolver, verifyToken, clientController.deleteReward);
 router.post("/:id/merge/:sourceId", organizationResolver, verifyToken, clientController.mergeClient);
 router.delete("/:id/force", organizationResolver, verifyToken, clientController.forceDeleteClient);
 router.post("/reset-all", organizationResolver, verifyToken, clientController.resetAllClientsLoyalty);

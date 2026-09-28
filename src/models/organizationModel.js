@@ -391,6 +391,20 @@ const organizationSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  // Sub-interruptores de enableOnlineBooking: qué método(s) de reserva se ofrecen
+  // al cliente en /online-reservation. Con los dos activos (default) se muestra la
+  // pantalla de elección IA/manual; con uno solo, el cliente entra directo a ese
+  // flujo sin pantalla de elección. El backend impide dejar los dos en false
+  // (ver updateOrganization en organizationService.js) para no dejar la reserva
+  // en línea inaccesible con enableOnlineBooking todavía activo.
+  enableAiBooking: {
+    type: Boolean,
+    default: true,
+  },
+  enableManualBooking: {
+    type: Boolean,
+    default: true,
+  },
   enableClassBooking: {
     type: Boolean,
     default: false,

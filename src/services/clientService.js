@@ -411,6 +411,23 @@ const clientService = {
     return client;
   },
 
+  // Eliminar un premio del historial (canjeado o no)
+  deleteReward: async (clientId, rewardId) => {
+    const client = await Client.findById(clientId);
+    if (!client) {
+      throw new Error("Cliente no encontrado");
+    }
+
+    const reward = client.rewardHistory.id(rewardId);
+    if (!reward) {
+      throw new Error("Recompensa no encontrada");
+    }
+
+    client.rewardHistory.pull(rewardId);
+    await client.save();
+    return client;
+  },
+
   // Restablecer contadores de fidelidad de un cliente
   resetClientLoyalty: async (clientId) => {
     const client = await Client.findById(clientId);

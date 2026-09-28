@@ -237,6 +237,17 @@ const clientController = {
     }
   },
 
+  // Controlador para eliminar un premio del historial (canjeado o no)
+  deleteReward: async (req, res) => {
+    const { id, rewardId } = req.params;
+    try {
+      const client = await clientService.deleteReward(id, rewardId);
+      sendResponse(res, 200, client, "Recompensa eliminada correctamente");
+    } catch (error) {
+      sendResponse(res, 400, null, error.message);
+    }
+  },
+
   // Controlador para fusionar cliente origen en cliente destino
   mergeClient: async (req, res) => {
     const { id, sourceId } = req.params;

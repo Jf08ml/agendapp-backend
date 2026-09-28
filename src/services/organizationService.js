@@ -153,6 +153,8 @@ const organizationService = {
       classReservationPolicy,
       showLoyaltyProgram,
       enableOnlineBooking,
+      enableAiBooking,
+      enableManualBooking,
       enableClassBooking,
       showServicesCard,
       showLocationCard,
@@ -292,6 +294,23 @@ const organizationService = {
 
     if (enableOnlineBooking !== undefined) {
       organization.enableOnlineBooking = enableOnlineBooking;
+    }
+
+    if (enableAiBooking !== undefined) {
+      organization.enableAiBooking = enableAiBooking;
+    }
+
+    if (enableManualBooking !== undefined) {
+      organization.enableManualBooking = enableManualBooking;
+    }
+
+    // No dejar los dos métodos de reserva desactivados a la vez: la reserva en
+    // línea quedaría inaccesible aunque enableOnlineBooking siga activo, y el
+    // cliente jamás vería el error (es un estado silencioso en el front público).
+    if (organization.enableAiBooking === false && organization.enableManualBooking === false) {
+      throw new Error(
+        "Debes dejar activo al menos un método de reserva en línea (asistente IA o reserva manual)."
+      );
     }
 
     if (enableClassBooking !== undefined) {
