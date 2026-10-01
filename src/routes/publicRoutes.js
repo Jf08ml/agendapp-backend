@@ -16,4 +16,9 @@ router.post('/cancel', publicCancellationController.cancelByToken);
 // POST /api/public/cancel/confirm
 router.post('/cancel/confirm', publicCancellationController.confirmByToken);
 
+// Reagendamiento por el cliente (mismo token)
+router.get('/cancel/reschedule-info', publicCancellationController.getRescheduleInfo);
+router.post('/cancel/reschedule/slots', publicCancellationController.getRescheduleSlots);
+router.post('/cancel/reschedule', publicCancellationController.rescheduleByToken);
+
 export default router;

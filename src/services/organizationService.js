@@ -166,6 +166,8 @@ const organizationService = {
       paymentMethods,
       requireReservationDeposit,
       reservationDepositPercentage,
+      reservationDepositType,
+      reservationDepositFixedAmount,
       requireClassDeposit,
       classDepositPercentage,
       allowCompanionInClassBooking,
@@ -176,6 +178,7 @@ const organizationService = {
       currency,
       timeFormat,
       cancellationPolicy,
+      reschedulePolicy,
       blockHolidaysForReservations,
       allowedHolidayDates,
       hasAccessBlocked,
@@ -372,6 +375,12 @@ const organizationService = {
     if (reservationDepositPercentage !== undefined) {
       organization.reservationDepositPercentage = reservationDepositPercentage;
     }
+    if (reservationDepositType !== undefined) {
+      organization.reservationDepositType = reservationDepositType;
+    }
+    if (reservationDepositFixedAmount !== undefined) {
+      organization.reservationDepositFixedAmount = reservationDepositFixedAmount;
+    }
 
     if (requireClassDeposit !== undefined) {
       organization.requireClassDeposit = requireClassDeposit;
@@ -416,6 +425,14 @@ const organizationService = {
     // 🤖 Actualizar nombre del agente IA si se proporciona
     if (aiAssistantName !== undefined) {
       organization.aiAssistantName = aiAssistantName?.trim() || "Roxi";
+    }
+
+    // 🔁 Política de reagendamiento por el cliente
+    if (reschedulePolicy !== undefined) {
+      organization.reschedulePolicy = {
+        ...(organization.reschedulePolicy?.toObject?.() ?? organization.reschedulePolicy),
+        ...reschedulePolicy,
+      };
     }
 
     // 🚫 Actualizar política de cancelación si se proporciona

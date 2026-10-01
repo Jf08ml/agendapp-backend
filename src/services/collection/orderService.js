@@ -22,33 +22,58 @@ export function roundForCurrency(amount, currency) {
 }
 
 /**
+ * Resuelve la regla de abono aplicable a UN servicio: la propia (`service.deposit`)
+ * o, si hereda, la general de la organización. Devuelve { mode, value } donde mode
+ * es "percentage" | "fixed".
+ */
+export function resolveDepositRule(org, service) {
+  const own = service?.deposit;
+  if (own && (own.mode === "percentage" || own.mode === "fixed")) {
+    return { mode: own.mode, value: Math.max(Number(own.value) || 0, 0) };
+  }
+  if (org?.reservationDepositType === "fixed") {
+    return { mode: "fixed", value: Math.max(Number(org?.reservationDepositFixedAmount) || 0, 0) };
+  }
+  return { mode: "percentage", value: Number(org?.reservationDepositPercentage ?? 0) };
+}
+
+/**
  * Calcula el depósito a cobrar para un conjunto de servicios de un grupo de
- * reserva, aplicando `reservationDepositPercentage` de la organización.
+ * reserva. Cada servicio usa su propia regla (`service.deposit`) o, si hereda, la
+ * general de la organización (porcentaje o monto fijo por servicio).
  *
- * @param {Object} org      Organization (necesita currency, requireReservationDeposit, reservationDepositPercentage)
- * @param {Array}  services Lista de servicios { _id, price } del grupo de reserva
+ * @param {Object} org      Organization (currency, requireReservationDeposit, reservationDeposit*)
+ * @param {Array}  services Lista de servicios { _id, price, deposit? } del grupo de reserva
  * @returns {Object} {
- *   required,        // ¿la org exige depósito?
- *   percentage,      // % aplicado
+ *   required,        // ¿la org exige depósito y el total a cobrar es > 0?
+ *   percentage,      // % general de la org (informativo)
  *   currency,
  *   subtotal,        // suma de precios de los servicios
  *   total,           // depósito total a cobrar (redondeado)
- *   breakdown: [{ serviceId, price, deposit }]  // parte por servicio (suma = total)
+ *   breakdown: [{ serviceId, price, deposit, mode, value }]  // parte por servicio (suma = total)
  * }
  */
 export function computeDepositForServices(org, services = []) {
   const currency = String(org?.currency || "COP").toUpperCase();
   const percentage = Number(org?.reservationDepositPercentage ?? 0);
-  const required = !!org?.requireReservationDeposit && percentage > 0;
 
   const breakdown = (services || []).map((s) => {
     const price = Number(s?.price || 0);
-    const deposit = roundForCurrency((price * percentage) / 100, currency);
-    return { serviceId: s?._id ? String(s._id) : null, price, deposit };
+    const rule = resolveDepositRule(org, s);
+    const raw = rule.mode === "fixed" ? Math.min(rule.value, price) : (price * rule.value) / 100;
+    const deposit = roundForCurrency(raw, currency);
+    return {
+      serviceId: s?._id ? String(s._id) : null,
+      price,
+      deposit,
+      mode: rule.mode,
+      value: rule.value,
+    };
   });
 
   const subtotal = breakdown.reduce((sum, b) => sum + b.price, 0);
   const total = breakdown.reduce((sum, b) => sum + b.deposit, 0);
+  const required = !!org?.requireReservationDeposit && total > 0;
 
   return { required, percentage, currency, subtotal, total, breakdown };
 }

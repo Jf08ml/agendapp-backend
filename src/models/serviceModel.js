@@ -16,6 +16,14 @@ const serviceSchema = new Schema({
   organizationId: { type: Types.ObjectId, ref: "Organization", required: true },
   isActive: { type: Boolean, default: true },
   hidePrice: { type: Boolean, default: false },
+  // 💳 Abono de reserva propio de este servicio. "inherit" = usa la regla general de
+  // la organización (reservationDepositType/Percentage/FixedAmount). "percentage" =
+  // % del precio de ESTE servicio; "fixed" = monto fijo (tope: el precio del servicio).
+  // Un valor 0 en percentage/fixed = este servicio no exige abono.
+  deposit: {
+    mode: { type: String, enum: ["inherit", "percentage", "fixed"], default: "inherit" },
+    value: { type: Number, default: 0, min: 0 },
+  },
   // ⭐ Servicio destacado: se muestra primero en landing, wizard de reserva y chatbot
   featured: { type: Boolean, default: false },
   // 👥 Número de clientes que pueden ser atendidos simultáneamente por un empleado

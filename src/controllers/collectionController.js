@@ -135,7 +135,7 @@ export const createReservationCheckout = async (req, res) => {
     const withPrice = services.map((s) => {
       const doc = byId.get(String(s.serviceId));
       if (!doc) throw new Error("Servicio no encontrado.");
-      return { _id: doc._id, price: Number(doc.price || 0), duration: s.duration || doc.duration || 0 };
+      return { _id: doc._id, price: Number(doc.price || 0), deposit: doc.deposit, duration: s.duration || doc.duration || 0 };
     });
 
     // Calcular depósito.

@@ -10,6 +10,8 @@ import notificationService from './notificationService.js';
 import whatsappTemplates from '../utils/whatsappTemplates.js';
 import packageService from './packageService.js';
 import clientService from './clientService.js';
+import scheduleService from './scheduleService.js';
+import serviceModel from '../models/serviceModel.js';
 
 const cancellationService = {
   /**
@@ -1188,6 +1190,301 @@ const cancellationService = {
       };
     }
   },
+  // ================= REAGENDAMIENTO POR EL CLIENTE =================
+  // Mismo token público que cancelar/confirmar. Solo citas individuales (sin otras citas
+  // activas en su grupo), mismo profesional y mismo servicio; el cliente solo elige un
+  // nuevo día/hora entre los horarios realmente libres.
+
+  /** Busca la cita dueña del token (SHA-256; fallback bcrypt para tokens antiguos). */
+  async _findAppointmentByToken(token) {
+    const thirtyDaysAgo = moment().subtract(30, 'days').toDate();
+    const hash = crypto.createHash('sha256').update(token).digest('hex');
+    const populate = [
+      { path: 'service', select: 'name duration maxConcurrentAppointments' },
+      { path: 'employee' },
+      { path: 'client', select: 'name' },
+      { path: 'organizationId' },
+    ];
+
+    const appt = await Appointment.findOne({ cancelTokenHash: hash, startDate: { $gte: thirtyDaysAgo } })
+      .populate(populate)
+      .lean();
+    if (appt) return appt;
+
+    const legacy = await Appointment.find({
+      cancelTokenHash: { $exists: true, $ne: null },
+      startDate: { $gte: thirtyDaysAgo },
+    })
+      .select('+cancelTokenHash')
+      .populate(populate)
+      .lean();
+    for (const a of legacy) {
+      if (a.cancelTokenHash && (await this.verifyToken(token, a.cancelTokenHash))) return a;
+    }
+    return null;
+  },
+
+  /**
+   * Valida si la cita del token se puede reagendar según la política de la org.
+   * @returns {{ ok: true, appointment, org, policy, remaining, timezone } | { ok: false, reason, notFound? }}
+   */
+  async _getRescheduleContext(token) {
+    if (!token) return { ok: false, reason: 'Token requerido', notFound: true };
+    const appointment = await this._findAppointmentByToken(token);
+    if (!appointment) return { ok: false, reason: 'Enlace no válido o vencido', notFound: true };
+
+    const org = appointment.organizationId;
+    const policy = org?.reschedulePolicy || {};
+    if (!policy.enabled) {
+      return { ok: false, disabled: true, reason: 'Este negocio no permite reagendar desde el enlace. Escríbenos para cambiar tu cita.' };
+    }
+
+    const timezone = org.timezone || 'America/Bogota';
+    const now = moment.tz(timezone);
+    const start = moment.tz(appointment.startDate, timezone);
+
+    if (['cancelled', 'cancelled_by_customer', 'cancelled_by_admin'].includes(appointment.status)) {
+      return { ok: false, reason: 'Esta cita está cancelada' };
+    }
+    if (['attended', 'no_show'].includes(appointment.status) || start.isBefore(now)) {
+      return { ok: false, reason: 'Esta cita ya pasó y no se puede reagendar' };
+    }
+
+    // Solo citas individuales: si pertenece a un grupo/serie con otras citas activas, no.
+    if (appointment.groupId) {
+      const activeInGroup = await Appointment.countDocuments({
+        groupId: appointment.groupId,
+        status: { $nin: ['cancelled', 'cancelled_by_customer', 'cancelled_by_admin'] },
+      });
+      if (activeInGroup > 1) {
+        return { ok: false, reason: 'Esta reserva incluye varias citas. Escríbenos para modificarla.' };
+      }
+    }
+
+    const maxReschedules = policy.maxReschedules ?? 1;
+    const used = appointment.rescheduleCount || 0;
+    if (used >= maxReschedules) {
+      return {
+        ok: false,
+        reason: maxReschedules === 1
+          ? 'Esta cita ya fue reagendada una vez y no se puede volver a cambiar.'
+          : `Esta cita ya alcanzó el máximo de ${maxReschedules} reagendamientos.`,
+      };
+    }
+
+    const minHours = policy.minHoursBeforeAppointment ?? 24;
+    // Se mide contra la fecha que tiene la cita HOY: no se puede cambiar a última hora
+    if (minHours > 0 && start.diff(now, 'hours', true) < minHours) {
+      return {
+        ok: false,
+        reason: `Solo se puede reagendar con al menos ${minHours} horas de anticipación a la cita.`,
+      };
+    }
+
+    return { ok: true, appointment, org, policy, remaining: maxReschedules - used, timezone };
+  },
+
+  /** Estado de reagendamiento para pintar (o no) el botón en la página pública. */
+  async getRescheduleInfo(token) {
+    try {
+      const ctx = await this._getRescheduleContext(token);
+      if (ctx.notFound) return { success: false, message: ctx.reason };
+      // enabled=false → la org no usa la función (el front no muestra nada); enabled=true, allowed=false → se explica el motivo
+      if (!ctx.ok) return { success: true, data: { enabled: !ctx.disabled, allowed: false, reason: ctx.reason } };
+      const { appointment, org, policy, remaining, timezone } = ctx;
+      return {
+        success: true,
+        data: {
+          enabled: true,
+          allowed: true,
+          remaining,
+          maxReschedules: policy.maxReschedules ?? 1,
+          minHoursBeforeAppointment: policy.minHoursBeforeAppointment ?? 24,
+          timezone,
+          timeFormat: org.timeFormat,
+          appointment: {
+            id: appointment._id,
+            serviceName: appointment.service?.name,
+            employeeName: appointment.employee?.names,
+            startDate: appointment.startDate,
+            endDate: appointment.endDate,
+          },
+        },
+      };
+    } catch (error) {
+      console.error('[getRescheduleInfo] Error:', error);
+      return { success: false, message: 'Error al consultar el reagendamiento' };
+    }
+  },
+
+  /** Horarios libres de un día para la cita del token (mismo profesional y duración). */
+  async _slotsForDate(ctx, date) {
+    const { appointment, org, timezone } = ctx;
+    if (scheduleService.isBlockedHoliday(date, org)) return [];
+
+    const durationMin = Math.max(
+      Math.round((new Date(appointment.endDate) - new Date(appointment.startDate)) / 60000),
+      5
+    );
+    const startOfDay = moment.tz(date, timezone).startOf('day').toDate();
+    const endOfDay = moment.tz(date, timezone).endOf('day').toDate();
+    const appointments = await Appointment.find({
+      organizationId: org._id,
+      employee: appointment.employee._id,
+      _id: { $ne: appointment._id }, // su propio horario actual queda libre
+      startDate: { $gte: startOfDay, $lte: endOfDay },
+      status: { $nin: ['cancelled', 'cancelled_by_customer', 'cancelled_by_admin'] },
+    });
+
+    const service = appointment.service?._id
+      ? await serviceModel.findById(appointment.service._id).select('maxConcurrentAppointments').lean()
+      : null;
+
+    const slots = scheduleService.generateAvailableSlots(
+      date,
+      org,
+      appointment.employee,
+      durationMin,
+      appointments,
+      service?.maxConcurrentAppointments ?? 1
+    );
+    return slots.filter((sl) => sl.available);
+  },
+
+  async getRescheduleSlots(token, date) {
+    try {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) {
+        return { success: false, message: 'Fecha inválida' };
+      }
+      const ctx = await this._getRescheduleContext(token);
+      if (!ctx.ok) return { success: false, message: ctx.reason };
+
+      const day = moment.tz(date, ctx.timezone);
+      if (day.isBefore(moment.tz(ctx.timezone).startOf('day')) || day.isAfter(moment.tz(ctx.timezone).add(120, 'days'))) {
+        return { success: true, data: { date, slots: [] } };
+      }
+      const slots = await this._slotsForDate(ctx, date);
+      return { success: true, data: { date, slots: slots.map((s) => ({ time: s.time, datetime: s.datetime })) } };
+    } catch (error) {
+      console.error('[getRescheduleSlots] Error:', error);
+      return { success: false, message: 'Error al obtener los horarios disponibles' };
+    }
+  },
+
+  /** Mueve la cita del token a un nuevo horario (debe ser uno de los libres). */
+  async rescheduleByToken(token, newStartDate) {
+    try {
+      const ctx = await this._getRescheduleContext(token);
+      if (!ctx.ok) return { success: false, message: ctx.reason };
+      const { appointment, org, timezone } = ctx;
+
+      const newStart = moment.tz(newStartDate, timezone);
+      if (!newStart.isValid()) return { success: false, message: 'Fecha y hora inválidas' };
+      if (!newStart.isAfter(moment.tz(timezone))) {
+        return { success: false, message: 'Elige un horario futuro' };
+      }
+      if (newStart.isAfter(moment.tz(timezone).add(120, 'days'))) {
+        return { success: false, message: 'Esa fecha está muy lejos. Elige una más cercana.' };
+      }
+
+      // El horario debe seguir libre AHORA (recalculado con las citas actuales)
+      const dateStr = newStart.format('YYYY-MM-DD');
+      const freeSlots = await this._slotsForDate(ctx, dateStr);
+      const match = freeSlots.find((s) => moment.tz(s.datetime, timezone).isSame(newStart, 'minute'));
+      if (!match) {
+        return { success: false, message: 'Ese horario ya no está disponible. Elige otro.' };
+      }
+
+      const oldStart = new Date(appointment.startDate);
+      const durationMs = new Date(appointment.endDate) - oldStart;
+      const newStartUtc = match.datetime;
+      const newEndUtc = new Date(new Date(newStartUtc).getTime() + durationMs);
+
+      // Actualización atómica: solo si nadie la movió/canceló en el medio (evita doble reagendamiento)
+      const updated = await Appointment.findOneAndUpdate(
+        {
+          _id: appointment._id,
+          startDate: oldStart,
+          rescheduleCount: appointment.rescheduleCount || 0,
+          status: { $nin: ['cancelled', 'cancelled_by_customer', 'cancelled_by_admin', 'attended', 'no_show'] },
+        },
+        {
+          $set: {
+            startDate: newStartUtc,
+            endDate: newEndUtc,
+            originalStartDate: appointment.originalStartDate || oldStart,
+            // La nueva fecha necesita su propio recordatorio y que el cliente la reconfirme
+            reminderSent: false,
+            secondReminderSent: false,
+            clientConfirmed: false,
+          },
+          $unset: { reminderBulkId: '', secondReminderBulkId: '', clientConfirmedAt: '' },
+          $inc: { rescheduleCount: 1 },
+        },
+        { new: true }
+      );
+      if (!updated) {
+        return { success: false, message: 'La cita cambió mientras reagendabas. Recarga el enlace e intenta de nuevo.' };
+      }
+
+      // 🔗 Mantener sincronizada la reserva en línea vinculada
+      try {
+        await Reservation.updateMany(
+          { appointmentId: appointment._id },
+          { $set: { startDate: newStartUtc, endDate: newEndUtc } }
+        );
+      } catch (resErr) {
+        console.error('⚠️ Error sincronizando reserva tras reagendar:', resErr.message);
+      }
+
+      // 🔔 Avisar al negocio y al profesional (no debe romper el reagendamiento)
+      try {
+        const clientName = appointment.client?.name || 'Un cliente';
+        const serviceName = appointment.service?.name || 'su cita';
+        const fmt = 'DD/MM/YYYY [a las] hh:mm A';
+        const oldLabel = moment.tz(oldStart, timezone).format(fmt);
+        const newLabel = newStart.format(fmt);
+        const message = `${clientName} reagendó ${serviceName}: de ${oldLabel} a ${newLabel}`;
+        await notificationService.createNotification({
+          title: '🔁 Cita reagendada',
+          message,
+          organizationId: org._id,
+          employeeId: null,
+          type: 'reservation',
+          status: 'unread',
+          frontendRoute: '/manage-agenda',
+        });
+        if (appointment.employee?._id) {
+          await notificationService.createNotification({
+            title: '🔁 Cita reagendada',
+            message,
+            organizationId: org._id,
+            employeeId: appointment.employee._id,
+            type: 'reservation',
+            status: 'unread',
+            frontendRoute: '/manage-agenda',
+          });
+        }
+      } catch (notifErr) {
+        console.error('⚠️ Error notificando reagendamiento:', notifErr.message);
+      }
+
+      return {
+        success: true,
+        message: 'Tu cita fue reagendada',
+        data: {
+          appointmentId: updated._id,
+          startDate: updated.startDate,
+          endDate: updated.endDate,
+          remaining: Math.max((ctx.policy.maxReschedules ?? 1) - (updated.rescheduleCount || 0), 0),
+        },
+      };
+    } catch (error) {
+      console.error('[rescheduleByToken] Error:', error);
+      return { success: false, message: 'Error al reagendar la cita' };
+    }
+  },
+
 };
 
 export default cancellationService;

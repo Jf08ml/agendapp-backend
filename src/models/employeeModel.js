@@ -48,6 +48,14 @@ const ScheduleExceptionSchema = new mongoose.Schema(
     startTime: { type: String },                 // "HH:mm" - solo si !allDay
     endTime: { type: String },                   // "HH:mm" - solo si !allDay
     reason: { type: String },
+    // 🔁 Bloqueo recurrente: se aplica solo a los días de [startDate, endDate] que cumplan la
+    // regla. weekly = días de la semana (weekdays, 0=domingo..6=sábado); monthly = días del
+    // mes (monthDays, 1..31; un día 31 no aplica en meses de 30). Sin recurrence = rango corrido.
+    // endDate "2099-12-31" = sin fecha de fin. excludedDates = ocurrencias quitadas una a una.
+    recurrence: { type: String, enum: ["weekly", "monthly"] },
+    weekdays: { type: [Number], default: undefined },
+    monthDays: { type: [Number], default: undefined },
+    excludedDates: { type: [String], default: undefined },
     createdAt: { type: Date, default: Date.now },
   }
 );

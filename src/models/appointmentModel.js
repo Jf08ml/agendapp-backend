@@ -88,6 +88,9 @@ const appointmentModelSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    // 🔁 Reagendamiento por el cliente (ver cancellationService.rescheduleByToken)
+    rescheduleCount: { type: Number, default: 0 },
+    originalStartDate: { type: Date },
     reminderSent: { type: Boolean, default: false },
     reminderBulkId: { type: String },
     secondReminderSent: { type: Boolean, default: false },

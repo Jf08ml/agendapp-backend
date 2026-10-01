@@ -88,6 +88,44 @@ const publicCancellationController = {
       return sendResponse(res, 500, null, 'Error al confirmar la cita');
     }
   },
+  /** GET /api/public/cancel/reschedule-info?token=XYZ — ¿se puede reagendar y con qué reglas? */
+  getRescheduleInfo: async (req, res) => {
+    try {
+      const result = await cancellationService.getRescheduleInfo(req.query.token);
+      if (!result.success) return sendResponse(res, 400, null, result.message);
+      return sendResponse(res, 200, result.data, 'Información de reagendamiento');
+    } catch (error) {
+      console.error('[getRescheduleInfo] Error:', error);
+      return sendResponse(res, 500, null, 'Error al consultar el reagendamiento');
+    }
+  },
+
+  /** POST /api/public/cancel/reschedule/slots — Body: { token, date: "YYYY-MM-DD" } */
+  getRescheduleSlots: async (req, res) => {
+    try {
+      const { token, date } = req.body;
+      const result = await cancellationService.getRescheduleSlots(token, date);
+      if (!result.success) return sendResponse(res, 400, null, result.message);
+      return sendResponse(res, 200, result.data, 'Horarios disponibles');
+    } catch (error) {
+      console.error('[getRescheduleSlots] Error:', error);
+      return sendResponse(res, 500, null, 'Error al obtener los horarios');
+    }
+  },
+
+  /** POST /api/public/cancel/reschedule — Body: { token, newStartDate: ISO } */
+  rescheduleByToken: async (req, res) => {
+    try {
+      const { token, newStartDate } = req.body;
+      if (!token || !newStartDate) return sendResponse(res, 400, null, 'Token y nuevo horario requeridos');
+      const result = await cancellationService.rescheduleByToken(token, newStartDate);
+      if (!result.success) return sendResponse(res, 400, null, result.message);
+      return sendResponse(res, 200, result.data, result.message);
+    } catch (error) {
+      console.error('[rescheduleByToken] Error:', error);
+      return sendResponse(res, 500, null, 'Error al reagendar la cita');
+    }
+  },
 };
 
 export default publicCancellationController;

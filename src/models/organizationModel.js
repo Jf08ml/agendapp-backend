@@ -490,6 +490,18 @@ const organizationSchema = new mongoose.Schema({
     min: 0,
     max: 100,
   },
+  // Regla general del abono: porcentaje del precio (histórico) o monto fijo por
+  // servicio. Cada servicio puede sobrescribirla con Service.deposit.
+  reservationDepositType: {
+    type: String,
+    enum: ["percentage", "fixed"],
+    default: "percentage",
+  },
+  reservationDepositFixedAmount: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
   // 🎓 Política de aprobación para inscripción a CLASES (config propia, independiente de reservationPolicy)
   classReservationPolicy: {
     type: String,
@@ -595,6 +607,25 @@ const organizationSchema = new mongoose.Schema({
       type: String,
       default: "20:00", // Hora fin para enviar (formato HH:mm)
     },
+    // Modo del PRIMER recordatorio: "relative" = X horas antes de cada cita (histórico);
+    // "fixedTime" = una hora fija del día (sendAt), N días antes de la cita
+    // (ej. todos los recordatorios de mañana, hoy a las 8:00). El segundo
+    // recordatorio siempre es relativo.
+    mode: {
+      type: String,
+      enum: ["relative", "fixedTime"],
+      default: "relative",
+    },
+    daysBefore: {
+      type: Number,
+      default: 1,
+      min: 0,
+      max: 7,
+    },
+    sendAt: {
+      type: String,
+      default: "08:00", // Hora fija de envío (HH:mm, zona horaria de la organización)
+    },
     secondReminder: {
       enabled: {
         type: Boolean,
@@ -637,6 +668,15 @@ const organizationSchema = new mongoose.Schema({
   },
 
   // 🚫 Política de cancelación de citas
+  // 🔁 Reagendamiento por el cliente desde el enlace de WhatsApp (misma página de cancelar/confirmar).
+  // Opt-in: apagado por defecto. Solo citas individuales, mismo profesional y mismo servicio.
+  reschedulePolicy: {
+    enabled: { type: Boolean, default: false },
+    // Cuántas veces puede reagendar una misma cita
+    maxReschedules: { type: Number, default: 1, min: 1, max: 10 },
+    // No se puede reagendar con menos de estas horas de anticipación a la cita ORIGINAL
+    minHoursBeforeAppointment: { type: Number, default: 24, min: 0, max: 168 },
+  },
   cancellationPolicy: {
     minHoursBeforeAppointment: {
       type: Number,

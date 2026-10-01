@@ -1351,21 +1351,35 @@ const appointmentService = {
        * @param {string} templateType - Tipo de plantilla a usar ('reminder' | 'secondReminder')
        * @returns {{ ok: number, skipped: number }}
        */
-      const processReminderPass = async (org, hoursBefore, sentField, bulkIdField, label, templateType = 'reminder') => {
+      const processReminderPass = async (org, hoursBefore, sentField, bulkIdField, label, templateType = 'reminder', fixedDaysBefore = null) => {
         const orgId = org._id.toString();
         const timezone = org.timezone || 'America/Bogota';
         const nowInOrgTz = moment.tz(timezone);
         const currentHourOrg = nowInOrgTz.hour();
 
-        // Calcular ventana de tiempo objetivo (normal: ahora + hoursBefore)
-        const targetTimeStart = moment.tz(timezone).add(hoursBefore, 'hours').startOf('hour').toDate();
-        const targetTimeEnd = moment.tz(timezone).add(hoursBefore, 'hours').endOf('hour').toDate();
+        // Calcular ventana de tiempo objetivo:
+        // - relativa: ahora + hoursBefore (hora en punto)
+        // - hora fija: el día completo (hoy + fixedDaysBefore) en la zona de la org
+        let targetTimeStart;
+        let targetTimeEnd;
+        if (fixedDaysBefore != null) {
+          const targetDay = moment.tz(timezone).add(fixedDaysBefore, 'days');
+          targetTimeStart = targetDay.clone().startOf('day').toDate();
+          targetTimeEnd = targetDay.clone().endOf('day').toDate();
+        } else {
+          targetTimeStart = moment.tz(timezone).add(hoursBefore, 'hours').startOf('hour').toDate();
+          targetTimeEnd = moment.tz(timezone).add(hoursBefore, 'hours').endOf('hour').toDate();
+        }
+        // Con daysBefore = 0 el día objetivo es hoy: no recordar citas que ya pasaron
+        const windowStart = fixedDaysBefore != null && targetTimeStart < new Date()
+          ? new Date()
+          : targetTimeStart;
 
         // Buscar citas en la ventana normal
         const appointmentsInWindow = await appointmentModel
           .find({
             organizationId: orgId,
-            startDate: { $gte: targetTimeStart, $lt: targetTimeEnd },
+            startDate: { $gte: windowStart, $lt: targetTimeEnd },
             [sentField]: { $ne: true },
             status: { $nin: ['cancelled', 'cancelled_by_customer', 'cancelled_by_admin'] },
           })
@@ -1465,7 +1479,11 @@ const appointmentService = {
           return { ok: 0, skipped: 0 };
         }
 
-        console.log(`[${org.name}] [${label}] Procesando ${appointments.length} citas (${hoursBefore}h antes)`);
+        console.log(
+          `[${org.name}] [${label}] Procesando ${appointments.length} citas (${
+            fixedDaysBefore != null ? `hora fija, ${fixedDaysBefore} día(s) antes` : `${hoursBefore}h antes`
+          })`
+        );
 
         // Verificar canal de envío configurado — Meta tiene prioridad sobre Baileys
         // (org.waConnectionType === "meta" es la fuente de verdad, no la mera presencia de clientIdWhatsapp)
@@ -1716,18 +1734,37 @@ const appointmentService = {
         const startTimeMinutes = startHour * 60 + startMinute;
         const endTimeMinutes = endHour * 60 + endMinute;
 
-        if (currentTimeMinutes < startTimeMinutes || currentTimeMinutes > endTimeMinutes) {
-          continue;
+        const inRelativeWindow =
+          currentTimeMinutes >= startTimeMinutes && currentTimeMinutes <= endTimeMinutes;
+
+        // Modo hora fija: el primer recordatorio sale a partir de `sendAt` (con
+        // 4h de margen por si el cron/servidor estuvo caído a esa hora) en lugar
+        // de la ventana desde/hasta. Una vez enviado queda reminderSent=true, así
+        // que las pasadas siguientes dentro del margen solo recogen citas nuevas.
+        const isFixedMode = org.reminderSettings?.mode === 'fixedTime';
+        let inFixedWindow = false;
+        if (isFixedMode) {
+          const [fh, fm] = String(org.reminderSettings?.sendAt || '08:00').split(':').map(Number);
+          const sendAtMinutes = (fh || 0) * 60 + (fm || 0);
+          inFixedWindow =
+            currentTimeMinutes >= sendAtMinutes &&
+            currentTimeMinutes <= Math.min(sendAtMinutes + 240, 24 * 60 - 1);
         }
 
         // Pasada 1: Recordatorio principal
-        const hoursBefore = org.reminderSettings?.hoursBefore || 24;
-        const r1 = await processReminderPass(org, hoursBefore, 'reminderSent', 'reminderBulkId', 'Recordatorio 1', 'reminder');
-        totalOk += r1.ok;
-        totalSkipped += r1.skipped;
+        if (isFixedMode ? inFixedWindow : inRelativeWindow) {
+          const hoursBefore = org.reminderSettings?.hoursBefore || 24;
+          const fixedDays = isFixedMode
+            ? Math.min(Math.max(Number(org.reminderSettings?.daysBefore ?? 1), 0), 7)
+            : null;
+          const r1 = await processReminderPass(org, hoursBefore, 'reminderSent', 'reminderBulkId', 'Recordatorio 1', 'reminder', fixedDays);
+          totalOk += r1.ok;
+          totalSkipped += r1.skipped;
+        }
 
         // Pasada 2: Segundo recordatorio (si habilitado y si el plan lo permite)
-        if (org.reminderSettings?.secondReminder?.enabled) {
+        // — siempre relativo y sujeto a la ventana desde/hasta
+        if (inRelativeWindow && org.reminderSettings?.secondReminder?.enabled) {
           const planLimits2 = await membershipService.getPlanLimits(org._id);
           const maxReminders = planLimits2?.maxRemindersPerAppointment ?? 2;
           if (maxReminders < 2) {

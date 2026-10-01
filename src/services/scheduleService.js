@@ -133,6 +133,23 @@ function isSlotInBreak(slotStart, durationMinutes, breaks, dayOfWeek = null) {
 }
 
 /**
+ * ¿Aplica este bloqueo a la fecha? Rango [startDate, endDate] + (si es recurrente) la regla
+ * semanal/mensual, menos las ocurrencias excluidas. Las fechas son strings "YYYY-MM-DD".
+ */
+function exceptionAppliesToDate(exception, dateStr) {
+  if (dateStr < exception.startDate || dateStr > exception.endDate) return false;
+  if (exception.excludedDates?.includes(dateStr)) return false;
+  if (exception.recurrence === "weekly") {
+    const weekday = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
+    return !!exception.weekdays?.includes(weekday);
+  }
+  if (exception.recurrence === "monthly") {
+    return !!exception.monthDays?.includes(Number(dateStr.slice(8, 10)));
+  }
+  return true;
+}
+
+/**
  * Obtiene las excepciones de horario de un empleado para una fecha específica
  * @param {Object} employee - Documento de empleado
  * @param {string} dateStr - Fecha en formato "YYYY-MM-DD"
@@ -146,7 +163,7 @@ function getEmployeeExceptionsForDate(employee, dateStr) {
   const breaks = [];
 
   for (const exception of employee.scheduleExceptions) {
-    if (dateStr >= exception.startDate && dateStr <= exception.endDate) {
+    if (exceptionAppliesToDate(exception, dateStr)) {
       if (exception.allDay) {
         return { blocked: true, breaks: [] };
       } else if (exception.startTime && exception.endTime) {
@@ -1062,6 +1079,7 @@ export default {
   isTimeInBreak,
   isSlotInBreak,
   isBlockedHoliday,
+  exceptionAppliesToDate,
   getOrganizationDaySchedule,
   getEmployeeDaySchedule,
   validateDateTime,

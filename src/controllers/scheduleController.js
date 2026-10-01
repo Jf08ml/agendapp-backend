@@ -1034,7 +1034,7 @@ const scheduleController = {
    */
   addEmployeeException: async (req, res) => {
     const { employeeId } = req.params;
-    const { startDate, endDate, allDay, startTime, endTime, reason } = req.body;
+    const { startDate, endDate, allDay, startTime, endTime, reason, recurrence, weekdays, monthDays } = req.body;
 
     try {
       if (!startDate || !endDate) {
@@ -1063,6 +1063,30 @@ const scheduleController = {
         }
       }
 
+      // 🔁 Recurrencia opcional: días de la semana o del mes dentro del rango
+      let recurrenceFields = {};
+      if (recurrence !== undefined && recurrence !== null && recurrence !== "" && recurrence !== "none") {
+        const toUniqueInts = (arr, min, max) =>
+          Array.isArray(arr)
+            ? [...new Set(arr.map(Number))].filter((n) => Number.isInteger(n) && n >= min && n <= max).sort((a, b) => a - b)
+            : [];
+        if (recurrence === "weekly") {
+          const days = toUniqueInts(weekdays, 0, 6);
+          if (days.length === 0) {
+            return sendResponse(res, 400, null, "Selecciona al menos un día de la semana");
+          }
+          recurrenceFields = { recurrence: "weekly", weekdays: days };
+        } else if (recurrence === "monthly") {
+          const days = toUniqueInts(monthDays, 1, 31);
+          if (days.length === 0) {
+            return sendResponse(res, 400, null, "Selecciona al menos un día del mes");
+          }
+          recurrenceFields = { recurrence: "monthly", monthDays: days };
+        } else {
+          return sendResponse(res, 400, null, "Tipo de recurrencia inválido");
+        }
+      }
+
       const employee = await employeeModel.findById(employeeId);
       if (!employee) {
         return sendResponse(res, 404, null, "Empleado no encontrado");
@@ -1073,6 +1097,7 @@ const scheduleController = {
       const newException = {
         startDate,
         endDate,
+        ...recurrenceFields,
         allDay: allDay !== false,
         ...((!allDay && startTime && endTime) ? { startTime, endTime } : {}),
         ...(reason ? { reason } : {}),
@@ -1117,10 +1142,17 @@ const scheduleController = {
         return sendResponse(res, 404, null, "Excepción no encontrada");
       }
 
-      const removeWholeException = !date || exception.startDate === exception.endDate;
+      const removeWholeException =
+        !date || (!exception.recurrence && exception.startDate === exception.endDate);
 
       if (removeWholeException) {
         employee.scheduleExceptions.pull(exceptionId);
+      } else if (exception.recurrence) {
+        // Bloqueo recurrente: quitar UNA ocurrencia = excluir esa fecha (la regla sigue vigente)
+        if (!scheduleService.exceptionAppliesToDate(exception, date)) {
+          return sendResponse(res, 400, null, "La fecha indicada no es una ocurrencia de este bloqueo");
+        }
+        exception.excludedDates = [...(exception.excludedDates || []), date];
       } else {
         if (date < exception.startDate || date > exception.endDate) {
           return sendResponse(res, 400, null, "La fecha indicada no está dentro del bloqueo");

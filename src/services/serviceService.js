@@ -4,7 +4,7 @@ import Appointment from "../models/appointmentModel.js";
 const serviceService = {
   // Crear un nuevo servicio
   createService: async (serviceData) => {
-    const { images, name, description, price, duration, type, organizationId, icon, featured } =
+    const { images, name, description, price, duration, type, organizationId, icon, featured, deposit } =
       serviceData;
     const newService = new Service({
       images,
@@ -16,6 +16,7 @@ const serviceService = {
       organizationId,
       icon,
       featured: featured === true,
+      ...(deposit ? { deposit } : {}),
     });
     return await newService.save();
   },
