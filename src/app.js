@@ -147,7 +147,15 @@ dbConnection()
         `✨ Server listening on port ${PORT}, ${process.env.NODE_ENV} ✨`
       );
     });
-    
+
+    // En local la BD suele ser la de producción: los crons enviarían
+    // WhatsApp reales duplicados y refrescarían tokens MP en paralelo al VPS.
+    // Para probarlos en local: ENABLE_CRONS=true en .env.development.
+    if (process.env.NODE_ENV !== "production" && process.env.ENABLE_CRONS !== "true") {
+      console.log("⏸️  Cron jobs desactivados (NODE_ENV != production). Usa ENABLE_CRONS=true para activarlos.");
+      return;
+    }
+
     membershipCheckJob.start();
     console.log("⏰ Cron job iniciado: verificación de membresías (9 AM hora Colombia)");
     paypalSubscriptionSyncJob.start();
