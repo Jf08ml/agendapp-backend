@@ -52,3 +52,6 @@ yarn.lock
 /public
 .qodo
 .vercel
+
+# Migraciones únicas con datos de clientes reales
+scripts/importVibraEquinaPackages.js
