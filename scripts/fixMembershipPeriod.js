@@ -1,11 +1,16 @@
 // scripts/fixMembershipPeriod.js
 // Script para corregir membresías con currentPeriodEnd anterior a currentPeriodStart
 
+import { config } from "dotenv";
+import { fileURLToPath } from "url";
+import path from "path";
 import mongoose from "mongoose";
 import membershipModel from "../src/models/membershipModel.js";
 
-// Conectar a la base de datos de producción
-const MONGO_URI = "mongodb+srv://jfmosquera:0608@cluster0.nxpfanv.mongodb.net/galaxia_glamour?retryWrites=true&w=majority";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+config({ path: path.resolve(__dirname, `../.env.${process.env.NODE_ENV || "development"}`) });
+
+const MONGO_URI = process.env.DB_URI;
 
 async function fixMembershipPeriod() {
   try {
