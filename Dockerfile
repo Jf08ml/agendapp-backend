@@ -1,5 +1,5 @@
 # Build stage: transpile ES modules with Babel
-FROM node:22.15-alpine AS builder
+FROM node:24.21-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
@@ -7,7 +7,7 @@ COPY . .
 RUN npm run build
 
 # Production stage: only prod deps + compiled dist/
-FROM node:22.15-alpine AS production
+FROM node:24.21-alpine AS production
 WORKDIR /app
 
 RUN apk add --no-cache wget
