@@ -183,6 +183,22 @@ export function invalidateTemplateCache(orgId) {
 
 // ── Component builder ────────────────────────────────────────────────────────
 
+/**
+ * Meta rechaza (#132018) parámetros con saltos de línea, tabs o más de 4
+ * espacios seguidos — y rechaza el mensaje COMPLETO, no solo el parámetro.
+ * Los vars se construyen para Baileys (texto libre multilínea: manage_block
+ * termina en "\n\n", services_list es una lista con "\n" si hay 2+ servicios,
+ * recommendations es un bloque multilínea), así que se aplanan a una línea.
+ * Meta exige además que no quede vacío (#131008) → espacio como mínimo.
+ */
+function toMetaParamText(value) {
+  const text = String(value ?? "")
+    .trim()
+    .replace(/\s*[\r\n\t]+\s*/g, " · ")
+    .replace(/ {2,}/g, " ");
+  return text || " ";
+}
+
 function buildComponents(metaTemplateName, data, customOrder) {
   // customOrder: orden real de variables que el admin guardó al personalizar
   // su plantilla (ver metaTemplateController.handleCreateTemplate) — tiene
@@ -194,8 +210,7 @@ function buildComponents(metaTemplateName, data, customOrder) {
   const varMap = buildMetaVarMap(data);
   const parameters = order.map((varName) => ({
     type: "text",
-    // Meta rejects empty strings with #131008 — use a space as minimum fallback
-    text: String(varMap[varName] ?? "") || " ",
+    text: toMetaParamText(varMap[varName]),
   }));
 
   return [{ type: "body", parameters }];

@@ -1604,7 +1604,7 @@ const appointmentService = {
           // waAgentController.handleBaileysStatus) — un bucket puede agrupar
           // varias citas del mismo cliente/teléfono en un solo mensaje.
           const refKind = sentField === "secondReminderSent" ? "reminder2" : "reminder";
-          items.push({ phone: bucket.phone, vars, externalRef: `${refKind}:${Array.from(bucket.apptIds).join(",")}` });
+          items.push({ phone: bucket.phone, vars, apptIds: Array.from(bucket.apptIds), externalRef: `${refKind}:${Array.from(bucket.apptIds).join(",")}` });
           includedIds.push(...Array.from(bucket.apptIds));
         }
 
@@ -1642,19 +1642,38 @@ const appointmentService = {
           if (isMeta) {
             console.log(`[${org.name}] [${label}] 📤 Enviando vía Meta template: ${items.length} mensajes`);
             let metaSent = 0;
+            // Citas cuyo envío falló (plantilla rechazada y sin fallback, o error):
+            // se revierte sentField para que la próxima pasada (30 min) reintente,
+            // igual que en el camino Baileys — antes quedaban marcadas sin enviarse.
+            const failedIds = [];
             for (const item of items) {
               try {
-                await whatsappService.sendNotification(org._id, item.phone, templateType, item.vars);
-                metaSent++;
+                const result = await whatsappService.sendNotification(org._id, item.phone, templateType, item.vars);
+                if (result && !result.blocked) {
+                  metaSent++;
+                } else {
+                  console.warn(`[${org.name}] [${label}] Recordatorio a ${item.phone} no enviado vía Meta (sin plantilla/fallback disponible)`);
+                  failedIds.push(...item.apptIds);
+                }
               } catch (err) {
                 console.error(`[${org.name}] [${label}] Error enviando a ${item.phone} vía Meta:`, err.message);
+                failedIds.push(...item.apptIds);
               }
               await sleep(200);
             }
 
             console.log(`[${org.name}] [${label}] Envío Meta completado: ${metaSent}/${items.length} mensajes`);
 
-            return { ok: markedCount, skipped: 0 };
+            if (failedIds.length) {
+              await appointmentModel.updateMany(
+                { _id: { $in: failedIds } },
+                { $set: { [sentField]: false } }
+              ).catch((e) =>
+                console.error(`[${org.name}] [${label}] No se pudo revertir ${sentField} de envíos Meta fallidos:`, e?.message || e)
+              );
+            }
+
+            return { ok: Math.max(markedCount - failedIds.length, 0), skipped: failedIds.length };
           }
 
           console.log(`[${org.name}] [${label}] 📤 Enviando campaña: ${items.length} mensajes`);

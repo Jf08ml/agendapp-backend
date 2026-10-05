@@ -223,7 +223,7 @@ export const reminderService = {
         console.log(`[${_orgId}] 📋 Vars para ${bucket.names}:`, vars);
         
         // 🔧 FIX: Enviar vars igual que el cronjob, no message pre-renderizado
-        items.push({ phone: bucket.phone, vars });
+        items.push({ phone: bucket.phone, vars, apptIds: Array.from(bucket.apptIds) });
         includedIds.push(...Array.from(bucket.apptIds));
       }
 
@@ -246,22 +246,32 @@ export const reminderService = {
       if (isMeta) {
         console.log(`[${_orgId}] Enviando recordatorios vía Meta template (${items.length} destinatarios)`);
         let metaSent = 0;
+        // Solo se marcan las citas cuyo mensaje realmente salió: sendNotification
+        // devuelve null (o lanza) cuando fallan la plantilla Meta y los fallbacks —
+        // marcarlas igual dejaba el recordatorio perdido sin reintento posible.
+        const sentIds = [];
         for (const item of items) {
           try {
             if (!dryRun) {
-              await whatsappService.sendNotification(_orgId, item.phone, 'reminder', item.vars);
+              const result = await whatsappService.sendNotification(_orgId, item.phone, 'reminder', item.vars);
+              if (!result || result.blocked) {
+                console.warn(`[${_orgId}] Recordatorio Meta a ${item.phone} no enviado (sin plantilla/fallback disponible)`);
+                continue;
+              }
             }
             metaSent++;
+            sentIds.push(...item.apptIds);
           } catch (err) {
             console.error(`[${_orgId}] Error enviando recordatorio Meta a ${item.phone}:`, err.message);
+          } finally {
+            await sleep(200);
           }
-          await sleep(200);
         }
         console.log(`[${_orgId}] Meta recordatorios enviados: ${metaSent}/${items.length}`);
 
-        if (!dryRun && includedIds.length) {
+        if (!dryRun && sentIds.length) {
           await appointmentModel.updateMany(
-            { _id: { $in: includedIds } },
+            { _id: { $in: sentIds } },
             { $set: { reminderSent: true } }
           ).catch((e) => console.warn(`[${_orgId}] Error marcando reminderSent:`, e?.message));
         }
