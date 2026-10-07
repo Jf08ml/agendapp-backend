@@ -29,7 +29,7 @@ const appointmentController = {
       );
       sendResponse(res, 201, newAppointment, "Cita creada exitosamente");
     } catch (error) {
-      sendResponse(res, 500, null, error.message);
+      sendResponse(res, error.statusCode || 500, null, error.message);
     }
   },
 
@@ -87,7 +87,7 @@ const appointmentController = {
           conflictingAppointments: error.conflictingAppointments || [],
         }, error.message);
       }
-      sendResponse(res, 500, null, error.message);
+      sendResponse(res, error.statusCode || 500, null, error.message);
     }
   },
 
@@ -257,7 +257,7 @@ const appointmentController = {
           conflictingAppointments: error.conflictingAppointments || [],
         }, error.message);
       }
-      sendResponse(res, 404, null, error.message);
+      sendResponse(res, error.statusCode || 404, null, error.message);
     }
   },
 

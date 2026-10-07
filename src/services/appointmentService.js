@@ -122,6 +122,11 @@ const appointmentService = {
     });
     const parsedStartDate = moment.tz(startDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate();
     const parsedEndDate = moment.tz(endDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate();
+    if (parsedEndDate <= parsedStartDate) {
+      const err = new Error("La hora de fin debe ser posterior a la hora de inicio");
+      err.statusCode = 400;
+      throw err;
+    }
 
     // Comprobar citas superpuestas
     // const overlappingAppointments = await appointmentModel.find({
@@ -455,6 +460,14 @@ const appointmentService = {
         }
         // ⏱️ Truncar serviceEnd a minuto exacto para consistencia
         serviceEnd = new Date(Math.floor(serviceEnd.getTime() / 60000) * 60000);
+
+        // Una cita con fin <= inicio no ocupa espacio: no aparece en la vista semanal/diaria
+        // y la disponibilidad sigue ofreciendo ese horario (el solapamiento es estricto).
+        if (serviceEnd <= currentStart) {
+          const err = new Error(`La hora de fin debe ser posterior a la hora de inicio (${svc.name})`);
+          err.statusCode = 400;
+          throw err;
+        }
 
         // 🔍 VALIDACIÓN DE DISPONIBILIDAD - Verificar que el empleado no quede doble-agendado
         // Cualquier cita solapada de OTRO servicio siempre bloquea (el empleado no puede
@@ -1199,6 +1212,15 @@ const appointmentService = {
     } else {
       // No cambió servicio ni startDate ni endDate → mantener el actual
       newEnd = new Date(appt.endDate);
+    }
+
+    // Solo si cambia el horario: no bloquear cambios de estado/pago en citas viejas ya guardadas así
+    const scheduleChanged =
+      newStart.getTime() !== originalStartTime || newEnd.getTime() !== originalEndTime;
+    if (scheduleChanged && newEnd <= newStart) {
+      const err = new Error("La hora de fin debe ser posterior a la hora de inicio");
+      err.statusCode = 400;
+      throw err;
     }
 
     // 8) Set de campos básicos
