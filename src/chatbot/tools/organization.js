@@ -26,6 +26,14 @@ const validateScheduleDays = (days) => {
     if (!TIME_RE.test(d.start ?? "") || !TIME_RE.test(d.end ?? "")) {
       return `El día ${DAY_NAMES[day]} está abierto pero le falta una hora válida de apertura (start) o cierre (end) en formato "HH:mm". Si ese día no se atiende, envía isOpen: false.`;
     }
+    for (const b of d.breaks || []) {
+      if (!TIME_RE.test(b?.start ?? "") || !TIME_RE.test(b?.end ?? "") || b.start >= b.end) {
+        return `El descanso del ${DAY_NAMES[day]} debe tener start y end en formato "HH:mm" (start antes que end).`;
+      }
+      if (b.start <= d.start || b.end >= d.end) {
+        return `El descanso del ${DAY_NAMES[day]} (${b.start}–${b.end}) debe quedar dentro del horario del día (${d.start}–${d.end}).`;
+      }
+    }
   }
   return null;
 };
@@ -36,7 +44,13 @@ const formatWeeklySchedule = (weeklySchedule) => {
   return weeklySchedule.schedule
     .slice()
     .sort((a, b) => a.day - b.day)
-    .map((d) => (d.isOpen ? `${DAY_NAMES[d.day]}: ${d.start}–${d.end}` : `${DAY_NAMES[d.day]}: cerrado`));
+    .map((d) =>
+      d.isOpen
+        ? `${DAY_NAMES[d.day]}: ${d.start}–${d.end}${
+            d.breaks?.length ? ` (descanso ${d.breaks.map((b) => `${b.start}–${b.end}`).join(", ")})` : ""
+          }`
+        : `${DAY_NAMES[d.day]}: cerrado`
+    );
 };
 
 export default [
@@ -132,9 +146,12 @@ export default [
   },
   {
     name: "update_schedule",
-    description: `Configura el horario semanal de atención del negocio y el intervalo entre citas.
+    description: `Configura el horario semanal RECURRENTE de atención del negocio (aplica todas las semanas) y el intervalo entre citas.
 Úsalo cuando el usuario diga cosas como "atendemos lunes a viernes de 8am a 6pm" o "los sábados de 9 a 1".
-Cada día debe tener: day (0=domingo..6=sábado), isOpen (true/false), start ("HH:mm"), end ("HH:mm").`,
+Cada día debe tener: day (0=domingo, 1=lunes, 2=martes, 3=miércoles, 4=jueves, 5=viernes, 6=sábado), isOpen (true/false), start ("HH:mm"), end ("HH:mm").
+JORNADA PARTIDA: si un día tiene mañana y tarde (ej: 8:30–12:30 y 15:30–19:00), envía start "08:30", end "19:00" y breaks: [{ "start": "12:30", "end": "15:30" }] — el sistema SÍ soporta descansos; nunca digas que solo admite un horario continuo.
+Reemplaza el horario COMPLETO: incluye los 7 días copiando sin cambios los días que el usuario no mencionó (consulta el horario actual con get_setup_status o get_organization_info antes).
+NO la uses para cambios de una fecha puntual o "solo esta semana" (ej: "mañana abro a la 1", "esta semana atiendo desde la 1pm"): para eso usa block_employee_time con allEmployees: true en la franja que NO se atiende.`,
     parameters: {
       days: {
         type: "array",
@@ -163,7 +180,15 @@ Cada día debe tener: day (0=domingo..6=sábado), isOpen (true/false), start ("H
         const name = Object.keys(DAY_MAP).find((k) => DAY_MAP[k] === d.day) || d.day;
         return `${name} ${d.start}–${d.end}`;
       });
-      return { success: true, openDays, stepMinutes: params.stepMinutes || 30 };
+      return {
+        success: true,
+        openDays,
+        // Horario completo guardado, con nombres de día calculados aquí: el modelo
+        // debe resumirlo desde esto (en sep-2026 resumía con los días corridos uno).
+        savedSchedule: formatWeeklySchedule({ enabled: true, schedule: params.days }),
+        stepMinutes: params.stepMinutes || 30,
+        _instruction: "Resume al usuario EXACTAMENTE savedSchedule (no lo reconstruyas de memoria).",
+      };
     },
   },
 

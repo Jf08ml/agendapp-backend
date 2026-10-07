@@ -18,7 +18,30 @@ const MAX_TOOL_ROUNDS = 8;
 // llamado prepare_reservation. Cubre "reserva confirmada", tiempo pasado del verbo
 // ("reservé", "agendé") y el mensaje del botón que solo debe decirse DESPUÉS de la tool.
 const BOOKING_HALLUCINATION_PATTERN =
-  /\b(reserva|turno|cita)\b.{0,150}\b(confirmad[ao]|procesad[ao]|cread[ao]|agendad[ao]|registrad[ao]|complet[ao]|exitosa|realizada)\b|\bbotón\b.{0,80}\b(confirmar|verificar)\b|haz clic.{0,60}(confirmar|s[ií])|\b(reservé|agendé|confirmé)\b/i;
+  /\b(reserva|turno|cita)\b.{0,150}\b(confirmad[ao]|procesad[ao]|cread[ao]|agendad[ao]|registrad[ao]|complet[ao]|exitosa|realizada)\b|\bbotón\b.{0,80}\b(confirmar|verificar)\b|haz clic.{0,60}(confirmar|s[ií])|\b(reservé|agendé|confirmé)(?![\wáéíóúñ])/i;
+
+// Afirma que una cita YA EXISTENTE fue movida o cancelada. Caso real (Dulce Maria
+// Spa, 2026-09-10): "¡Listo! He movido ambas citas" sin haber llamado
+// reschedule_appointment — la clienta quedó creyendo que su cita cambió.
+const EXISTING_APPOINTMENT_CLAIM_PATTERN =
+  /\b(he|ya|hemos)\s+(movido|reprogramado|cambiado|corrido|adelantado|cancelado|anulado)\b|\b(cita|citas|turno|turnos)\b.{0,80}\b(movid|reprogramad|adelantad|cancelad|anulad)[ao]s?\b|\bcancelaci[oó]n\s+confirmada\b/i;
+
+// Tools de citas existentes: con cualquiera de ellas en el turno, el texto habla
+// de citas ya agendadas (consulta/cambio/cancelación), no de una reserva nueva —
+// "tienes 4 citas agendadas" NO es una alucinación de prepare_reservation.
+const EXISTING_APPOINTMENT_TOOLS = ["get_my_appointments", "reschedule_appointment", "cancel_appointment"];
+
+// Razonamiento interno filtrado al cliente (casos reales de logs: "Las instrucciones
+// dicen...", "el cliente acaba de decir...", "No puedo llamar prepare_reservation").
+const REASONING_LEAK_PATTERN =
+  /\[SISTEMA\]|\b(las|mis) instrucciones\b|\bel cliente (acaba|dijo|pide|quiere|contact)|\bpayload\b|\bstartDate\b/i;
+
+// Cómo pedirle al modelo que reescriba sin que la corrección se filtre: la
+// muletilla "Tienes razón..." de los logs era el modelo respondiéndole al aviso.
+const NO_LEAK_SUFFIX =
+  " Responde SOLO con el mensaje para el cliente: no menciones este aviso, ni herramientas, ni instrucciones, ni tu razonamiento, y no empieces con \"Tienes razón\" ni con disculpas.";
+
+const SAFE_FALLBACK_REPLY = "¿Me cuentas de nuevo qué necesitas? Así te ayudo con tu reserva. 😊";
 
 const extractText = (content) => {
   const block = content.find((b) => b.type === "text");
@@ -70,6 +93,10 @@ export const processBookingChat = async (organization, messages, options = {}) =
   let currentMessages = [...messages];
   let bookingPayload = null;
   const executedTools = new Set();
+  // Tools que devolvieron success: true en este turno (para no aceptar "cita
+  // movida/cancelada" cuando la tool se llamó pero falló).
+  const successfulTools = new Set();
+  const toolErrors = [];
   let inputTokens = 0;
   let outputTokens = 0;
   let rounds = 0;
@@ -106,8 +133,41 @@ export const processBookingChat = async (organization, messages, options = {}) =
       // Las negaciones ("no pudo ser creada") son mensajes de error legítimos,
       // nunca deben tratarse como alucinación de éxito.
       const isNegatedReply = /\bno (pudo|fue|se pudo|logr|qued)/i.test(rawReply);
-      const looksLikeSuccess = !isNegatedReply && BOOKING_HALLUCINATION_PATTERN.test(rawReply);
+      const handledExistingAppointments = EXISTING_APPOINTMENT_TOOLS.some((t) => executedTools.has(t));
+      // Si en este turno se consultaron/movieron/cancelaron citas existentes, el
+      // texto describe esas citas — no es una reserva nueva anunciada sin tool.
+      const looksLikeSuccess =
+        !isNegatedReply && !handledExistingAppointments && BOOKING_HALLUCINATION_PATTERN.test(rawReply);
       const leaksInternals = rawReply !== "" && toolNameLeakPattern.test(rawReply);
+      const leaksReasoning = rawReply !== "" && (leaksInternals || REASONING_LEAK_PATTERN.test(rawReply));
+      const claimsExistingChange =
+        !isNegatedReply &&
+        EXISTING_APPOINTMENT_CLAIM_PATTERN.test(rawReply) &&
+        !successfulTools.has("reschedule_appointment") &&
+        !successfulTools.has("cancel_appointment");
+
+      // Ambos canales: el bot afirma haber movido/cancelado una cita existente
+      // sin que la tool correspondiente lo haya confirmado en este turno.
+      if (claimsExistingChange) {
+        if (!isLastRound) {
+          currentMessages = [
+            ...currentMessages,
+            { role: "assistant", content: response.content },
+            {
+              role: "user",
+              content:
+                "[SISTEMA] Tu respuesta afirma que una cita existente fue movida o cancelada, pero en este turno ninguna herramienta lo confirmó. Si el cliente ya confirmó el cambio, llama reschedule_appointment o cancel_appointment AHORA (una llamada por cada cita) y responde según su resultado real. Si todavía no confirmó, reescribe tu respuesta sin afirmar el cambio." +
+                NO_LEAK_SUFFIX,
+            },
+          ];
+          continue;
+        }
+        return {
+          reply: "No pude completar el cambio de tu cita todavía. ¿Me confirmas de nuevo qué cita quieres mover o cancelar y para cuándo?",
+          bookingPayload,
+          _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors },
+        };
+      }
 
       // WhatsApp: el turno "debería" haber terminado en una reserva confirmada
       // pero no lo hizo — el modelo anunció éxito sin llamar confirm_reservation,
@@ -127,8 +187,13 @@ export const processBookingChat = async (organization, messages, options = {}) =
             {
               role: "user",
               content: pendingPayload
-                ? "[SISTEMA] La reserva AÚN NO fue creada. Llama confirm_reservation AHORA para crearla de verdad antes de anunciarla al cliente. Responde solo con el resultado dirigido al cliente, sin explicar tu razonamiento ni mencionar nombres de herramientas."
-                : "[SISTEMA] Aún no llamaste prepare_reservation. Debes llamarla AHORA con todos los datos recopilados (y luego confirm_reservation) antes de dar esa respuesta al cliente.",
+                ? "[SISTEMA] La reserva AÚN NO fue creada. Llama confirm_reservation AHORA para crearla de verdad antes de anunciarla al cliente." +
+                  NO_LEAK_SUFFIX
+                : leaksInternals && !looksLikeSuccess
+                ? "[SISTEMA] Tu respuesta incluía detalles internos que el cliente no debe ver. Reescríbela dirigida al cliente, breve y natural." +
+                  NO_LEAK_SUFFIX
+                : "[SISTEMA] Tu respuesta da a entender que una reserva nueva ya quedó hecha, pero no hay ninguna reserva preparada. Si el cliente completó todos los datos y confirmó el resumen, llama prepare_reservation (y luego confirm_reservation). Si faltan datos o el mensaje no trata de una reserva nueva, reescribe tu respuesta sin afirmar que la reserva quedó hecha." +
+                  NO_LEAK_SUFFIX,
             },
           ];
           continue;
@@ -151,18 +216,48 @@ export const processBookingChat = async (organization, messages, options = {}) =
               ? "✅ ¡Listo! Tu reserva quedó agendada. Te esperamos."
               : "Tuve un problema confirmando tu reserva. ¿La confirmas de nuevo, por favor?",
             bookingPayload,
-            _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false },
+            _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors },
           };
         }
         return {
           reply: "Necesito confirmar un par de datos más antes de agendar — ¿me cuentas de nuevo qué servicio y horario prefieres?",
           bookingPayload,
-          _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false },
+          _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors },
+        };
+      }
+
+      // Guard web de fuga de razonamiento: nombres de tools, "las instrucciones
+      // dicen...", el cliente en tercera persona. Antes solo existía en WhatsApp —
+      // en la web esos textos llegaban tal cual al cliente (7 sesiones en
+      // sep-2026). Se pide reescribir; en la última ronda se usa un texto seguro.
+      if (!isWhatsapp && leaksReasoning) {
+        if (!isLastRound) {
+          currentMessages = [
+            ...currentMessages,
+            { role: "assistant", content: response.content },
+            {
+              role: "user",
+              content:
+                "[SISTEMA] Tu respuesta incluía detalles internos que el cliente no debe ver. Reescríbela dirigida al cliente, breve y natural, respondiendo a su último mensaje." +
+                NO_LEAK_SUFFIX,
+            },
+          ];
+          continue;
+        }
+        return {
+          reply: bookingPayload !== null
+            ? "¡Listo! Toca el botón **'Sí, confirmar'** para finalizar tu reserva."
+            : SAFE_FALLBACK_REPLY,
+          bookingPayload,
+          _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors },
         };
       }
 
       // Guard web: el bot dice que la reserva fue confirmada sin haber llamado
-      // prepare_reservation. Inyecta una corrección y continúa el loop.
+      // prepare_reservation. La corrección es neutra a propósito: antes ordenaba
+      // "llama prepare_reservation AHORA" y, cuando el falso positivo venía de
+      // otro tema (ej. "tienes 4 citas agendadas"), el modelo respondía con su
+      // razonamiento ("Tienes razón... no puedo llamar prepare_reservation").
       if (!isWhatsapp && bookingPayload === null && looksLikeSuccess) {
         if (!isLastRound) {
           currentMessages = [
@@ -171,7 +266,8 @@ export const processBookingChat = async (organization, messages, options = {}) =
             {
               role: "user",
               content:
-                "[SISTEMA] Aún no llamaste prepare_reservation. Debes llamarla AHORA con todos los datos recopilados antes de dar esa respuesta al cliente.",
+                "[SISTEMA] Tu respuesta da a entender que una reserva nueva ya quedó hecha, pero no hay ninguna reserva preparada. Si el cliente completó todos los datos y confirmó el resumen, llama prepare_reservation. Si faltan datos o el mensaje no trata de una reserva nueva, reescribe tu respuesta sin afirmar que la reserva quedó hecha." +
+                NO_LEAK_SUFFIX,
             },
           ];
           continue;
@@ -179,7 +275,7 @@ export const processBookingChat = async (organization, messages, options = {}) =
         return {
           reply: "¡Ya casi! Confírmame el servicio, la fecha y la hora para prepararte el resumen de tu reserva.",
           bookingPayload,
-          _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false },
+          _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors },
         };
       }
 
@@ -201,7 +297,7 @@ export const processBookingChat = async (organization, messages, options = {}) =
         reply: noReply ? "" : reply,
         bookingPayload,
         noReply,
-        _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false },
+        _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors },
       };
     }
 
@@ -213,11 +309,15 @@ export const processBookingChat = async (organization, messages, options = {}) =
         let result;
         try {
           result = await executeBookingTool(block.name, block.input, context);
+          if (result?.success) successfulTools.add(block.name);
           if (block.name === "prepare_reservation" && result?.success) {
             bookingPayload = result.payload;
           }
         } catch (err) {
           result = { success: false, error: err.message };
+        }
+        if (result?.success === false && result?.error) {
+          toolErrors.push({ tool: block.name, error: String(result.error).slice(0, 300) });
         }
         return {
           type: "tool_result",
@@ -244,6 +344,6 @@ export const processBookingChat = async (organization, messages, options = {}) =
         ? "✅ ¡Listo! Tu reserva quedó agendada. Te esperamos."
         : "Lo siento, no pude completar el proceso. Por favor intenta de nuevo.",
     bookingPayload,
-    _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: true },
+    _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: true, toolErrors },
   };
 };

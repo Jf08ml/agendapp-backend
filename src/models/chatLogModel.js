@@ -48,6 +48,18 @@ const chatLogSchema = new mongoose.Schema(
     // Error si el proceso lanzó excepción
     error: { type: String },
 
+    // Errores devueltos por las tools (excepción o success:false con mensaje). Sin
+    // esto, un "error técnico" que el bot le reporta al usuario no se podía
+    // diagnosticar desde los logs (caso Camilash, 2026-10-01). Últimos 50.
+    toolErrors: [
+      {
+        _id: false,
+        tool: String,
+        error: String,
+        at: { type: Date, default: Date.now },
+      },
+    ],
+
     // Revisión manual (superadmin) para curar ejemplos de entrenamiento/mejora de prompts
     review: {
       reviewed: { type: Boolean, default: false },

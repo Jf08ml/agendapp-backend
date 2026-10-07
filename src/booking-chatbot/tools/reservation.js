@@ -179,8 +179,8 @@ export const prepareReservation = {
     },
     customerPhone: {
       type: "string",
-      description: "Teléfono del cliente (cualquier formato; se normaliza automáticamente)",
-      required: false,
+      description: "Teléfono del cliente (cualquier formato; se normaliza automáticamente). Obligatorio en todas las reservas.",
+      required: true,
     },
     customerEmail: {
       type: "string",
@@ -226,6 +226,33 @@ export const prepareReservation = {
       return { success: false, error: "Faltan datos requeridos para la reserva." };
     }
 
+    // El teléfono es obligatorio SIEMPRE: POST /reservations/multi lo exige aunque
+    // el identificador del negocio sea email o documento. Sin esta validación la
+    // tarjeta de confirmación fallaba con "Datos incompletos" (casos reales sep-2026).
+    if (!customerPhone) {
+      return {
+        success: false,
+        error: "Falta el teléfono del cliente.",
+        _instruction:
+          "El teléfono es obligatorio en todas las reservas (se usa para la confirmación por WhatsApp). Pídeselo al cliente y vuelve a llamar prepare_reservation.",
+      };
+    }
+    const identifierField = organization.clientFormConfig?.identifierField || "phone";
+    if (identifierField === "email" && !customerEmail) {
+      return {
+        success: false,
+        error: "Falta el correo del cliente (es el identificador de este negocio).",
+        _instruction: "Pídele al cliente su correo electrónico y vuelve a llamar prepare_reservation.",
+      };
+    }
+    if (identifierField === "documentId" && !customerDocumentId) {
+      return {
+        success: false,
+        error: "Falta el número de documento del cliente (es el identificador de este negocio).",
+        _instruction: "Pídele al cliente su número de documento y vuelve a llamar prepare_reservation.",
+      };
+    }
+
     // Validar campos personalizados de la organización (si tiene configurados) ANTES
     // de armar el payload — así el modelo recibe un error conversacional claro (ej.
     // "falta el número de siniestro") en vez de que la reserva falle más adelante.
@@ -259,11 +286,18 @@ export const prepareReservation = {
 
     // Normalizar teléfono a E.164 con el país del negocio (el cliente puede
     // escribirlo con espacios, guiones o sin código de país)
-    let normalizedPhone = customerPhone || "";
-    if (customerPhone) {
-      const result = normalizePhoneNumber(customerPhone, organization.default_country || "CO");
-      if (result.isValid) normalizedPhone = result.phone_e164;
+    // Un número inválido se rechaza aquí: antes pasaba tal cual y el cliente se
+    // enteraba recién al tocar el botón ("dice que el número está mal").
+    const phoneResult = normalizePhoneNumber(customerPhone, organization.default_country || "CO");
+    if (!phoneResult.isValid) {
+      return {
+        success: false,
+        error: `El teléfono "${customerPhone}" no parece válido.`,
+        _instruction:
+          "Pídele al cliente que verifique su número (sin dígitos de más ni de menos; con código de país si no es del país del negocio) y vuelve a llamar prepare_reservation.",
+      };
     }
+    const normalizedPhone = phoneResult.phone_e164;
 
     // Validar y normalizar birthDate si se proporcionó
     let parsedBirthDate = null;

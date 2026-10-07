@@ -66,6 +66,9 @@ export const chat = async (req, res) => {
           durationMs: Date.now() - startTime,
         },
         $addToSet: { toolsUsed: { $each: _meta.toolsUsed } },
+        ...(_meta.toolErrors?.length
+          ? { $push: { toolErrors: { $each: _meta.toolErrors, $slice: -50 } } }
+          : {}),
       },
       { upsert: true }
     ).catch(() => {});

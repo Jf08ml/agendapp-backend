@@ -2,6 +2,7 @@ import Employee from "../../models/employeeModel.js";
 import Service from "../../models/serviceModel.js";
 import employeeService from "../../services/employeeService.js";
 import bcrypt from "bcryptjs";
+import { findEmployeesByName } from "./appointments.js";
 
 const generateTempPassword = () => Math.random().toString(36).slice(-8) + "A1!";
 
@@ -147,6 +148,86 @@ export default [
           isActive: updated.isActive,
         },
         actualizados: Object.keys(update),
+      };
+    },
+  },
+  {
+    name: "block_employee_time",
+    description:
+      "Bloquea la agenda de un profesional (o de todos) en una fecha/rango y franja horaria — ej: 'ponle agenda ocupada a Leidy el viernes de 10 a 12', 'bloquea a todos el 24 de diciembre'. Crea el mismo bloqueo que el botón de bloquear agenda de Gestionar agenda: ese tiempo deja de ofrecerse en la reserva en línea. NUNCA simules un bloqueo creando una cita falsa.",
+    parameters: {
+      employeeName: { type: "string", description: "Nombre del profesional. Omítelo si allEmployees es true.", required: false },
+      allEmployees: { type: "boolean", description: "true para bloquear a todos los profesionales activos.", required: false },
+      startDate: { type: "string", description: "Fecha de inicio YYYY-MM-DD", required: true },
+      endDate: { type: "string", description: "Fecha de fin YYYY-MM-DD (igual a startDate si es un solo día)", required: false },
+      startTime: { type: "string", description: "Hora de inicio HH:mm (24h). Omítela junto con endTime para bloquear el día completo.", required: false },
+      endTime: { type: "string", description: "Hora de fin HH:mm (24h)", required: false },
+      reason: { type: "string", description: "Motivo (opcional, ej: 'Cita médica')", required: false },
+    },
+    handler: async (params, context) => {
+      const { organizationId } = context;
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      const timeRegex = /^([01]?\d|2[0-3]):[0-5]\d$/;
+      const startDate = params.startDate;
+      const endDate = params.endDate || params.startDate;
+      if (!dateRegex.test(startDate || "") || !dateRegex.test(endDate)) {
+        return { success: false, error: "Las fechas deben tener formato YYYY-MM-DD." };
+      }
+      if (startDate > endDate) {
+        return { success: false, error: "La fecha de inicio debe ser anterior o igual a la de fin." };
+      }
+      const allDay = !params.startTime && !params.endTime;
+      if (!allDay) {
+        if (!timeRegex.test(params.startTime || "") || !timeRegex.test(params.endTime || "")) {
+          return { success: false, error: "Indica hora de inicio y de fin en formato HH:mm (24h)." };
+        }
+        const toMin = (t) => Number(t.split(":")[0]) * 60 + Number(t.split(":")[1]);
+        if (toMin(params.startTime) >= toMin(params.endTime)) {
+          return { success: false, error: "La hora de inicio debe ser anterior a la hora de fin." };
+        }
+      }
+
+      let employees;
+      if (params.allEmployees) {
+        employees = await Employee.find({ organizationId, isActive: true });
+      } else {
+        if (!params.employeeName) {
+          return { success: false, error: "Indica el profesional o usa allEmployees: true." };
+        }
+        employees = await findEmployeesByName(organizationId, params.employeeName);
+        if (employees.length === 0) {
+          return { success: false, error: `No encontré un profesional activo llamado "${params.employeeName}".` };
+        }
+        if (employees.length > 1) {
+          return {
+            success: false,
+            multipleFound: true,
+            candidates: employees.map((e) => e.names),
+            _instruction: "Pregunta al usuario a cuál de estos profesionales se refiere y vuelve a llamar con el nombre completo.",
+          };
+        }
+      }
+
+      const exception = {
+        startDate,
+        endDate,
+        allDay,
+        ...(allDay ? {} : { startTime: params.startTime, endTime: params.endTime }),
+        ...(params.reason ? { reason: params.reason } : {}),
+        createdAt: new Date(),
+      };
+      for (const emp of employees) {
+        emp.scheduleExceptions.push(exception);
+        await emp.save();
+      }
+
+      return {
+        success: true,
+        blocked: employees.map((e) => e.names),
+        startDate,
+        endDate,
+        franja: allDay ? "día completo" : `${params.startTime}–${params.endTime}`,
+        note: "El bloqueo impide nuevas reservas en línea en ese tiempo. Las citas que ya existían en esa franja NO se cancelan; se quitan desde Gestionar agenda.",
       };
     },
   },

@@ -13,6 +13,7 @@ import membershipTools from "./membership.js";
 import auditLogTools from "./auditLog.js";
 import waStatusTools from "./waStatus.js";
 import expenseTools from "./expenses.js";
+import availabilityTools from "./availability.js";
 
 export default [
   ...organizationTools,
@@ -30,4 +31,5 @@ export default [
   ...auditLogTools,
   ...waStatusTools,
   ...expenseTools,
+  ...availabilityTools,
 ];

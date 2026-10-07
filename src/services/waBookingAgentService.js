@@ -230,6 +230,9 @@ export async function processClientBookingMessage(org, clientPhone, body) {
       outputTokens: meta.outputTokens || 0,
     },
     ...(meta.toolsUsed?.length ? { $addToSet: { toolsUsed: { $each: meta.toolsUsed } } } : {}),
+    ...(meta.toolErrors?.length
+      ? { $push: { toolErrors: { $each: meta.toolErrors, $slice: -50 } } }
+      : {}),
   };
 
   ChatLog.findOneAndUpdate({ sessionId: session.sessionId }, update, {

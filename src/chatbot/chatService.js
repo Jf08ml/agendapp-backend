@@ -86,13 +86,46 @@ const DESTRUCTIVE_CLAIM_PATTERN = new RegExp(
 );
 const DESTRUCTIVE_INTENT_PATTERN = /\b(elimina|eliminar|borra|borrar|cancela|cancelar|quita|quitar)\b/i;
 
+// "✓ Le envié el mensaje de confirmación a Erika" — caso real (MIMOS PARA TI,
+// 2026-10-02): no existe ninguna tool para enviar mensajes sueltos. Solo las tools
+// de citas envían WhatsApp como efecto secundario (crear/cancelar con aviso/reprogramar).
+const MESSAGE_SENDING_TOOLS = new Set(["create_appointments", "cancel_or_delete_appointment", "reschedule_appointment"]);
+const MESSAGE_SENT_CLAIM_PATTERN =
+  /\b(le\s+|les\s+)?(envi[eé]|reenvi[eé]|mand[eé]|he\s+enviado|he\s+reenviado|ya\s+(se\s+)?(envi[oó]|mand[oó]))(?![\wáéíóúñ]).{0,80}\b(mensaje|confirmaci[oó]n|recordatorio|whats\s?app|notificaci[oó]n)/i;
+
+// Clientes "registrados/actualizados" sin tool — caso real (María C Lashes,
+// 2026-09-10): "¡Todos registrados! He guardado estos 72 clientes" en una sola
+// respuesta, y "Voy a actualizar esa información en el sistema" (Camilash) sin
+// ninguna tool de edición.
+// find_clients / get_inactive_clients incluidas: tras consultarlas, "la clienta ya
+// está registrada" es una respuesta informativa legítima, no un claim de escritura.
+const CLIENT_TOOLS = new Set(["create_client", "update_client", "create_appointments", "find_clients", "get_inactive_clients"]);
+const CLIENT_CLAIM_PATTERN =
+  /\b(client[ae]s?)\b.{0,120}\b(registrad|cread|guardad|actualizad|agregad)[ao]s?\b|\b(registr[eé]|guard[eé]|actualic[eé]|he\s+(registrado|guardado|actualizado))(?![\wáéíóúñ]).{0,80}\b(client[ae]s?|datos|tel[eé]fono|correo)\b|\bvoy a actualizar\b.{0,60}\ben el sistema\b/i;
+
 // Claims de configuración afirmados en pasado sin haber llamado la tool:
 // "✅ Aprobación automática configurada", "la política de reserva quedó..." —
 // caso real observado en logs de onboarding (la org quedó en manual creyendo
 // que era automática). El patrón es estrecho a propósito: la pregunta del PASO 4
 // ("¿quieres aprobarla manualmente o que se confirme automáticamente?") no matchea.
 const POLICY_CLAIM_PATTERN =
-  /\b(aprobaci[oó]n|pol[ií]tica)\b.{0,60}\b(configurad|activad|establecid|guardad|qued[oó]|list[ao]\b)/i;
+  /\b(aprobaci[oó]n|pol[ií]tica)\b.{0,60}\b(configurad|activad|establecid|guardad|qued[oó]|list[ao]\b)|\breservas?\s+(en\s+l[ií]nea\s+)?(autom[aá]ticas?|manuales?)\b.{0,30}\b(configurad|activad)|\b(configur[eé]|activ[eé]|dej[eé])(?![\wáéíóúñ]).{0,40}\b(aprobaci[oó]n|reservas?)\b/i;
+
+// El usuario está eligiendo la política en su último mensaje ("automática",
+// "manual", "1"/"2" tras la pregunta del PASO 4). Necesario porque
+// autoCompleteSetupIfReady marca setupCompleted apenas hay servicio+profesional+
+// horario — ANTES del paso de política — y desde ese turno el guard (que solo
+// corría en onboarding) dejaba de aplicar. Casos reales sep-2026: 6 negocios
+// eligieron "automática", el bot dijo "✅ Reservas automáticas configuradas" y
+// quedaron en manual (Aruna, chiqui, NyE, Stilos wilrey, AP Peritaciones, María C Lashes).
+const POLICY_INTENT_PATTERN = /\b(autom[aá]tic[ao]s?|manual(es|mente)?|aprobar(las)?|aprobaci[oó]n)\b|^\s*[12]\s*\.?\s*$/i;
+
+// "✅ Color morado pastel (#D4A5D4) configurado" sin update_primary_color — caso
+// real (Judith 2026-09-02: quedó #00888f; Stilos wilrey, AP Peritaciones).
+const COLOR_INTENT_PATTERN =
+  /\bcolor|\b(azul|rojo|verde|rosa(do)?|morado|lila|violeta|negro|blanco|amarillo|dorado|plateado|celeste|naranja|gris|turquesa|beige|vinotinto|fucsia|caf[eé]|marr[oó]n|menta|pastel)\b|#[0-9a-f]{3,6}\b/i;
+const COLOR_CLAIM_PATTERN =
+  /\bcolor\b.{0,80}\b(configurad|activad|actualizad|aplicad|guardad|cambiad)[ao]\b|\b(apliqu[eé]|configur[eé]|cambi[eé]|actualic[eé])(?![\wáéíóúñ]).{0,40}\bcolor\b/i;
 
 // "¡Configuración inicial completada!" / "tu negocio ya está configurado" sin
 // mark_setup_complete — deja al usuario atrapado rebotando al wizard.
@@ -142,6 +175,7 @@ export const processChat = async (organization, user, messages) => {
 
   let currentMessages = [...messages];
   const executedTools = new Set();
+  const toolErrors = [];
   let inputTokens = 0;
   let outputTokens = 0;
   let rounds = 0;
@@ -205,17 +239,42 @@ export const processChat = async (organization, user, messages) => {
         correction =
           "[SISTEMA] No llamaste ninguna herramienta de eliminación/cancelación (delete_service o cancel_or_delete_appointment) todavía. Si ya tienes los datos para identificar qué eliminar/cancelar, llámala AHORA antes de confirmar. Si te faltan datos, pídelos de forma breve y natural — sin disculparte, sin mencionar herramientas, errores internos ni este mensaje. No digas que se eliminó/canceló algo si la herramienta no lo confirmó con success: true.";
       }
+      // 1c) Claim de mensaje enviado sin ninguna tool que envíe WhatsApp.
+      else if (
+        ![...executedTools].some((t) => MESSAGE_SENDING_TOOLS.has(t)) &&
+        MESSAGE_SENT_CLAIM_PATTERN.test(reply)
+      ) {
+        correction =
+          "[SISTEMA] Afirmaste que enviaste un mensaje, pero en este turno no se envió ninguno: desde este chat NO existe forma de enviar mensajes sueltos de WhatsApp (solo se envían al crear, cancelar con aviso o reprogramar una cita). Reescribe tu respuesta sin afirmar el envío y explica cómo hacerlo desde la interfaz si aplica. No menciones herramientas ni este mensaje, y no empieces con \"Tienes razón\".";
+      }
+      // 1d) Claim de cliente registrado/actualizado sin tool de clientes.
+      else if (
+        ![...executedTools].some((t) => CLIENT_TOOLS.has(t)) &&
+        CLIENT_CLAIM_PATTERN.test(reply)
+      ) {
+        correction =
+          "[SISTEMA] Afirmaste que registraste o actualizaste clientes, pero en este turno no se ejecutó create_client, update_client ni create_appointments. Si tienes los datos, llama la herramienta AHORA (una vez por cliente) y reporta solo lo que devolvió con success: true; si no, reescribe sin afirmarlo. Para verificar si un cliente existe usa find_clients. No menciones herramientas ni este mensaje, y no empieces con \"Tienes razón\".";
+      }
       // 2) Claim de política de reserva configurada sin update_booking_config —
       //    la política NO se guardó (queda en manual). Caso real de logs. Solo en
       //    onboarding: en modo soporte "tu política está configurada como X" es una
       //    respuesta informativa legítima y frecuente (falso positivo).
       else if (
-        !context.setupStatus.setupCompleted &&
+        (!context.setupStatus.setupCompleted || POLICY_INTENT_PATTERN.test(findLastUserText(currentMessages))) &&
         !executedTools.has("update_booking_config") &&
         POLICY_CLAIM_PATTERN.test(reply)
       ) {
         correction =
           "[SISTEMA] No llamaste update_booking_config — la política de reserva NO ha sido guardada realmente. Llámala AHORA con requiresApproval según lo que eligió el usuario, y confirma después con el resultado real. No menciones herramientas ni este mensaje al usuario.";
+      }
+      // 2b) Claim de color de marca aplicado sin update_primary_color.
+      else if (
+        !executedTools.has("update_primary_color") &&
+        COLOR_INTENT_PATTERN.test(findLastUserText(currentMessages)) &&
+        COLOR_CLAIM_PATTERN.test(reply)
+      ) {
+        correction =
+          "[SISTEMA] Afirmaste que el color de marca quedó configurado, pero no llamaste update_primary_color: el color NO se guardó. Llámala AHORA con el hex del color que eligió el usuario y confirma con el resultado real. No menciones herramientas ni este mensaje, y no empieces con \"Tienes razón\".";
       }
       // 3) Claim de configuración completada sin mark_setup_complete (solo aplica
       //    mientras el setup siga incompleto) — el usuario quedaría atrapado
@@ -251,7 +310,7 @@ export const processChat = async (organization, user, messages) => {
       return {
         reply,
         invalidates,
-        _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false },
+        _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors },
       };
     }
 
@@ -264,6 +323,9 @@ export const processChat = async (organization, user, messages) => {
           result = await executeTool(block.name, block.input, context);
         } catch (err) {
           result = { success: false, error: err.message };
+        }
+        if (result?.success === false && result?.error) {
+          toolErrors.push({ tool: block.name, error: String(result.error).slice(0, 300) });
         }
         return {
           type: "tool_result",
@@ -297,6 +359,6 @@ export const processChat = async (organization, user, messages) => {
   return {
     reply: `No pude completar la operación en el tiempo disponible.${manualHint} Por favor intenta de nuevo con una solicitud más específica o realízalo directamente desde la interfaz.`,
     invalidates: autoCompletedAtLimit ? ["organization"] : [],
-    _meta: { rounds, toolsUsed: usedTools, inputTokens, outputTokens, hitRoundLimit: true },
+    _meta: { rounds, toolsUsed: usedTools, inputTokens, outputTokens, hitRoundLimit: true, toolErrors },
   };
 };

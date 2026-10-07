@@ -9,6 +9,11 @@ import moment from "moment-timezone";
 
 const CANCELLED_STATUSES = ["cancelled", "cancelled_by_customer", "cancelled_by_admin"];
 
+const DAY_NAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+// Antepone el día de la semana calculado aquí ("jueves 08/10/2026 a las 11:00"):
+// sin él el modelo lo deducía y se equivocaba ("Martes 8 de octubre", sep-2026).
+const withWeekday = (m, fmt) => `${DAY_NAMES[m.day()]} ${m.format(fmt)}`;
+
 const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // Quita acentos, pasa a minúsculas y deja solo letras/números/espacios — para comparar nombres de forma flexible
@@ -23,7 +28,7 @@ const normalizeForSearch = (str) =>
 
 // Busca un servicio por nombre: primero coincidencia directa (regex), si no encuentra
 // intenta coincidencia difusa por palabras (ignora acentos, paréntesis, orden de palabras, etc.)
-const findServiceByName = async (organizationId, searchTerm) => {
+export const findServiceByName = async (organizationId, searchTerm) => {
   const direct = await Service.findOne({
     organizationId,
     name: { $regex: escapeRegex(searchTerm), $options: "i" },
@@ -48,7 +53,7 @@ const findServiceByName = async (organizationId, searchTerm) => {
 
 // Busca clientes por nombre: coincidencia directa primero, luego difusa por solapamiento de palabras
 // (tolera nombres incompletos, acentos distintos u orden de palabras diferente). Devuelve los mejores candidatos.
-const findClientsByName = async (organizationId, searchTerm) => {
+export const findClientsByName = async (organizationId, searchTerm) => {
   const direct = await Client.find({
     organizationId,
     name: { $regex: escapeRegex(searchTerm), $options: "i" },
@@ -77,7 +82,7 @@ const findClientsByName = async (organizationId, searchTerm) => {
 // u orden de palabras diferente). Antes de este helper, las búsquedas de
 // profesional usaban un regex crudo sin normalizar tildes, por lo que un nombre
 // con acento (muy común al escribir desde WhatsApp) nunca matcheaba el registro.
-const findEmployeesByName = async (organizationId, searchTerm) => {
+export const findEmployeesByName = async (organizationId, searchTerm) => {
   const direct = await Employee.find({
     organizationId,
     names: { $regex: escapeRegex(searchTerm), $options: "i" },
@@ -103,7 +108,7 @@ const findEmployeesByName = async (organizationId, searchTerm) => {
 };
 
 // Busca clientes por teléfono comparando los últimos 10 dígitos (ignora código de país y formato)
-const findClientsByPhone = async (organizationId, phone) => {
+export const findClientsByPhone = async (organizationId, phone) => {
   const digits = (phone || "").replace(/\D/g, "");
   if (!digits) return [];
   const last10 = digits.slice(-10);
@@ -232,7 +237,7 @@ const findMatchingAppointments = async (params, context) => {
 
   if (appointments.length > 1) {
     const lista = appointments.map((a) => {
-      const fecha = moment(a.startDate).tz(timezone).format("DD/MM/YYYY [a las] HH:mm");
+      const fecha = withWeekday(moment(a.startDate).tz(timezone), "DD/MM/YYYY [a las] HH:mm");
       return `• ${a.client?.name || "?"} — ${a.service?.name || "?"} con ${a.employee?.names || "?"} el ${fecha} (ID: ${a._id})`;
     });
     return {
@@ -346,7 +351,7 @@ Si el usuario menciona una fecha concreta (ej: "el martes 7 de abril"), conviér
       if (!params.includeDetails) return { success: true, resumen };
 
       const detalle = filtered.map((appt) => ({
-        fecha: moment(appt.startDate).tz(tz).format("DD/MM/YYYY hh:mm A"),
+        fecha: withWeekday(moment(appt.startDate).tz(tz), "DD/MM/YYYY hh:mm A"),
         cliente: appt.client?.name,
         servicio: appt.service?.name,
         profesional: appt.employee?.names,
@@ -402,7 +407,7 @@ Para dateFrom/dateTo acepta: "today", "yesterday", "this_week", "last_week", "th
       const totalPendiente = appointments.reduce((s, a) => s + computePending(a), 0);
 
       const base = {
-        periodo: `${moment(fromRange[0]).tz(tz).format("DD/MM/YYYY")} – ${moment(toRange[1]).tz(tz).format("DD/MM/YYYY")}`,
+        periodo: `${withWeekday(moment(fromRange[0]).tz(tz), "DD/MM/YYYY")} – ${withWeekday(moment(toRange[1]).tz(tz), "DD/MM/YYYY")}`,
         totalCitas: appointments.length,
         totalFacturado: formatCurrency(totalFacturado),
         totalCobrado: formatCurrency(totalFacturado - totalPendiente),
@@ -655,7 +660,7 @@ Si el cliente no existe y se proporciona clientPhone, se crea automáticamente. 
 
       if (toCreate.length === 0) {
         const lista = duplicates
-          .map((r) => `• ${r.serviceName} con ${r.employeeName} el ${moment(r.startDate).tz(timezone).format("DD/MM/YYYY [a las] HH:mm")}`)
+          .map((r) => `• ${r.serviceName} con ${r.employeeName} el ${withWeekday(moment(r.startDate).tz(timezone), "DD/MM/YYYY [a las] HH:mm")}`)
           .join("\n");
         return {
           success: true,
@@ -700,7 +705,7 @@ Si el cliente no existe y se proporciona clientPhone, se crea automáticamente. 
       // 7. Respuesta
       const resumen = toCreate
         .map((r) => {
-          const hora = moment(r.startDate).tz(timezone).format("DD/MM/YYYY [a las] HH:mm");
+          const hora = withWeekday(moment(r.startDate).tz(timezone), "DD/MM/YYYY [a las] HH:mm");
           return `• ${r.serviceName} con ${r.employeeName} el ${hora}`;
         })
         .join("\n");
@@ -777,7 +782,7 @@ Busca la cita por criterios (cliente, fecha, servicio, profesional). Si encuentr
 
       // Exactamente una cita — ejecutar acción
       const appt = found.appt;
-      const fecha = moment(appt.startDate).tz(timezone).format("DD/MM/YYYY [a las] HH:mm");
+      const fecha = withWeekday(moment(appt.startDate).tz(timezone), "DD/MM/YYYY [a las] HH:mm");
       const resumen = `${appt.service?.name || "?"} de ${appt.client?.name || "?"} con ${appt.employee?.names || "?"} el ${fecha}`;
 
       if (params.action === "cancel") {
@@ -889,8 +894,8 @@ Si hay solapamiento en el nuevo horario, NO reprograma: devuelve overlapConflict
         `${o.service?.name || "?"} con ${o.client?.name || "?"} a las ${moment(o.startDate).tz(timezone).format("HH:mm")}`
       );
 
-      const fechaAnterior = moment(appt.startDate).tz(timezone).format("DD/MM/YYYY [a las] HH:mm");
-      const fechaNueva = newStart.format("DD/MM/YYYY [a las] HH:mm");
+      const fechaAnterior = withWeekday(moment(appt.startDate).tz(timezone), "DD/MM/YYYY [a las] HH:mm");
+      const fechaNueva = withWeekday(newStart, "DD/MM/YYYY [a las] HH:mm");
 
       // Si hay conflicto de horario sin confirmar todavía, no reprogramar — pedir confirmación
       if (warnings.length > 0 && !params.force) {
@@ -1040,7 +1045,7 @@ Si no se especifica cliente, busca en TODOS los clientes de la organización den
       }
 
       const notas = appointments.map((a) => ({
-        fecha: moment(a.startDate).tz(tz).format("DD/MM/YYYY"),
+        fecha: withWeekday(moment(a.startDate).tz(tz), "DD/MM/YYYY"),
         cliente: a.client?.name || "?",
         servicio: a.service?.name || "?",
         profesional: a.employee?.names || "?",
@@ -1179,7 +1184,7 @@ Busca la cita por cliente, fecha, servicio o profesional — igual que cancel_or
 
         if (appointments.length > 1) {
           const lista = appointments.map((a) => {
-            const fecha = moment(a.startDate).tz(timezone).format("DD/MM/YYYY [a las] HH:mm");
+            const fecha = withWeekday(moment(a.startDate).tz(timezone), "DD/MM/YYYY [a las] HH:mm");
             return `• ${a.client?.name || "?"} — ${a.service?.name || "?"} con ${a.employee?.names || "?"} el ${fecha} (ID: ${a._id})`;
           });
           return {
@@ -1201,7 +1206,7 @@ Busca la cita por cliente, fecha, servicio o profesional — igual que cancel_or
         note: params.note || "",
       });
 
-      const fecha = moment(appt.startDate).tz(timezone).format("DD/MM/YYYY [a las] HH:mm");
+      const fecha = withWeekday(moment(appt.startDate).tz(timezone), "DD/MM/YYYY [a las] HH:mm");
       const pendienteDespues = computePending(updated);
 
       return {
@@ -1302,7 +1307,7 @@ Busca la cita por cliente, fecha, servicio o profesional — igual que register_
         }
         if (appointments.length > 1) {
           const lista = appointments.map((a) => {
-            const fecha = moment(a.startDate).tz(timezone).format("DD/MM/YYYY [a las] HH:mm");
+            const fecha = withWeekday(moment(a.startDate).tz(timezone), "DD/MM/YYYY [a las] HH:mm");
             return `• ${a.client?.name || "?"} — ${a.service?.name || "?"} con ${a.employee?.names || "?"} el ${fecha} (ID: ${a._id})`;
           });
           return {
@@ -1321,7 +1326,7 @@ Busca la cita por cliente, fecha, servicio o profesional — igual que register_
         return { success: false, error: err.message };
       }
 
-      const fecha = moment(appt.startDate).tz(timezone).format("DD/MM/YYYY [a las] HH:mm");
+      const fecha = withWeekday(moment(appt.startDate).tz(timezone), "DD/MM/YYYY [a las] HH:mm");
       return {
         success: true,
         resumen: `${appt.service?.name || "?"} de ${appt.client?.name || "?"} con ${appt.employee?.names || "?"} el ${fecha}`,

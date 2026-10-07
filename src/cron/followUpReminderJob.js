@@ -268,8 +268,15 @@ export async function runFollowUpReminders() {
         for (let i = 0; i < toSend.length; i++) {
           const item = toSend[i];
           try {
-            await whatsappService.sendNotification(org._id.toString(), item.phone, "followUpReminder", item.vars);
-            succeeded.push(dueToSend[i]);
+            // sendNotification devuelve null (sin lanzar) cuando fallan la
+            // plantilla Meta y los fallbacks — no es un envío exitoso.
+            const result = await whatsappService.sendNotification(org._id.toString(), item.phone, "followUpReminder", item.vars);
+            if (result && !result.blocked) {
+              succeeded.push(dueToSend[i]);
+            } else {
+              console.warn(`🔁 [followUpReminderJob] [${org.name}] No enviado a ${item.phone} (sin plantilla Meta/fallback disponible)`);
+              failed.push(dueToSend[i]);
+            }
           } catch (err) {
             console.error(
               `🔁 [followUpReminderJob] Error enviando a ${item.phone} (${org._id}):`,

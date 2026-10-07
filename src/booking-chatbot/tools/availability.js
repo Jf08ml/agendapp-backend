@@ -5,6 +5,18 @@ import Employee from "../../models/employeeModel.js";
 import Service from "../../models/serviceModel.js";
 import scheduleService from "../../services/scheduleService.js";
 
+const DAY_NAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+const MONTH_NAMES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+                     "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+
+// Etiqueta legible calculada en el servidor ("martes 20 de octubre"). Antes las
+// tools devolvían solo "2026-10-20" y el modelo deducía el día de la semana —
+// en sep-2026 lo hizo mal en varias sesiones (usaba el calendario de 2025).
+export const dateLabel = (dateStr, timezone) => {
+  const m = moment.tz(dateStr, "YYYY-MM-DD", timezone);
+  return `${DAY_NAMES[m.day()]} ${m.date()} de ${MONTH_NAMES[m.month()]}`;
+};
+
 // Resolve serviceId: accepts ObjectId or partial name
 async function resolveService(value, organizationId) {
   if (!value) return null;
@@ -191,7 +203,11 @@ export const getAvailableDates = {
       }
     }
 
-    return { availableDates };
+    return {
+      availableDates: availableDates.map((d) => ({ date: d, label: dateLabel(d, timezone) })),
+      _instruction:
+        "Al mostrar estas fechas usa EXACTAMENTE el campo label (día de la semana incluido). Nunca calcules tú el día de la semana de una fecha.",
+    };
   },
 };
 
@@ -331,6 +347,12 @@ export const getAvailableSlots = {
     }
     // Caso mixto (parcialmente especificado): se devuelven slots sin info de empleado
 
-    return { date, slots };
+    return {
+      date,
+      dateLabel: dateLabel(date, timezone),
+      slots,
+      _instruction:
+        "Solo existen estos horarios. Si el cliente pide una hora que no está en la lista, dile que no está disponible y ofrécele las más cercanas — nunca la aceptes ni la agendes aunque el cliente insista o diga que ya lo habló con el negocio.",
+    };
   },
 };
