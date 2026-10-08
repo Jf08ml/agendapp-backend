@@ -134,30 +134,36 @@ const membershipSchema = new mongoose.Schema(
 membershipSchema.index({ organizationId: 1, status: 1 });
 membershipSchema.index({ currentPeriodEnd: 1, status: 1 });
 
-// Método para verificar si está en período past_due
-membershipSchema.methods.isInPastDue = function() {
-  if (this.status !== "past_due") return false;
-  const now = new Date();
-  const pastDueEnd = new Date(this.currentPeriodEnd);
-  pastDueEnd.setDate(pastDueEnd.getDate() + 3); // 3 días de past_due
-  return now <= pastDueEnd;
+const DAY_MS = 1000 * 60 * 60 * 24;
+export const PAST_DUE_GRACE_DAYS = 3;
+// Suscripciones PayPal: el cobro de renovación (y su webhook PAYMENT.SALE.COMPLETED)
+// puede llegar horas después de currentPeriodEnd; no castigar a quien sí va a pagar.
+const SUBSCRIPTION_RENEWAL_TOLERANCE_MS = DAY_MS;
+
+// Momento exacto en que se pierde el acceso completo (inicio de past_due).
+membershipSchema.methods.accessEndsAt = function() {
+  if (!this.currentPeriodEnd) return null;
+  const tolerance =
+    this.autoRenew && this.paypalSubscriptionId ? SUBSCRIPTION_RENEWAL_TOLERANCE_MS : 0;
+  return new Date(new Date(this.currentPeriodEnd).getTime() + tolerance);
 };
 
-// Método para verificar si debe ser suspendida
-membershipSchema.methods.shouldBeSuspended = function() {
-  if (this.status === "suspended" || this.status === "cancelled") return false;
-  if (this.status !== "past_due") return false;
-  const now = new Date();
-  const pastDueEnd = new Date(this.currentPeriodEnd);
-  pastDueEnd.setDate(pastDueEnd.getDate() + 3);
-  return now > pastDueEnd;
+// Estado real según las fechas, sin esperar al cron diario (que solo avisa y persiste).
+// Solo escala (active → past_due → suspended), nunca relaja un estado guardado.
+membershipSchema.methods.effectiveStatus = function(now = new Date()) {
+  if (this.status !== "active" && this.status !== "past_due") return this.status;
+  const accessEnd = this.accessEndsAt();
+  if (!accessEnd || now < accessEnd) return this.status;
+  if (now - accessEnd >= PAST_DUE_GRACE_DAYS * DAY_MS) return "suspended";
+  return "past_due";
 };
 
 // Método para calcular días hasta vencimiento
 membershipSchema.methods.daysUntilExpiration = function() {
   const now = new Date();
   const diff = this.currentPeriodEnd - now;
-  return Math.floor(diff / (1000 * 60 * 60 * 24));
+  // ceil: con 0–24h restantes aún queda 1 día (igual que el frontend)
+  return Math.ceil(diff / DAY_MS);
 };
 
 export default mongoose.model("Membership", membershipSchema);

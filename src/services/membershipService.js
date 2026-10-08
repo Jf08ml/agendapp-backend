@@ -1,4 +1,5 @@
 // services/membershipService.js
+import moment from "moment-timezone";
 import membershipModel from "../models/membershipModel.js";
 import organizationModel from "../models/organizationModel.js";
 import planModel from "../models/planModel.js";
@@ -79,13 +80,31 @@ const membershipService = {
    * Incluye suspended para poder mostrar mensajes claros.
    */
   getCurrentMembership: async (organizationId) => {
-    return await membershipModel
+    const membership = await membershipModel
       .findOne({
         organizationId,
         status: { $in: ["active", "trial", "past_due", "suspended"] },
       })
       .populate("planId")
       .sort({ createdAt: -1 });
+
+    // El acceso lo decide la fecha, no la hora del cron: si ya venció, persistir
+    // active → past_due en cuanto se detecta (el banner del frontend lee
+    // organization.membershipStatus). El aviso "expired" lo sigue enviando el cron
+    // (notifications.expirationSent); la suspensión la persiste el cron con su aviso.
+    if (membership?.status === "active" && membership.effectiveStatus() !== "active") {
+      await membershipModel.updateOne(
+        { _id: membership._id, status: "active" },
+        { $set: { status: "past_due" } }
+      );
+      await organizationModel.updateOne(
+        { _id: membership.organizationId },
+        { $set: { membershipStatus: "past_due" } }
+      );
+      membership.status = "past_due";
+    }
+
+    return membership;
   },
 
   /**
@@ -166,6 +185,9 @@ const membershipService = {
     const threeDaysAgo = new Date(now);
     threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
 
+    const tenDaysAgo = new Date(now);
+    tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+
     // Para trials vencidos: buscar hasta 60 días atrás (por si el cron no corrió varios días)
     const sixtyDaysAgo = new Date(now);
     sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
@@ -190,11 +212,19 @@ const membershipService = {
           ...idempotencyFilter,
         })
         .populate("organizationId planId"),
+      // past_due necesita ventana más amplia: se suspende al cumplir 3 días COMPLETOS
+      // vencida, que puede caer después de threeDaysAgo según la hora del vencimiento.
       membershipModel
         .find({
-          status: { $in: ["active", "past_due"] },
-          currentPeriodEnd: { $lte: threeDaysFromNow, $gte: threeDaysAgo },
-          ...idempotencyFilter,
+          $and: [
+            {
+              $or: [
+                { status: "active", currentPeriodEnd: { $lte: threeDaysFromNow, $gte: threeDaysAgo } },
+                { status: "past_due", currentPeriodEnd: { $lte: threeDaysFromNow, $gte: tenDaysAgo } },
+              ],
+            },
+            idempotencyFilter,
+          ],
         })
         .populate("organizationId planId"),
     ]);
@@ -237,8 +267,8 @@ const membershipService = {
         }
       }
 
-      // 1 día antes de vencer
-      if (daysLeft <= 1 && daysLeft > 0 && !membership.notifications.oneDaySent) {
+      // Último día (vence en las próximas 24h → el próximo cron lo pasa a past_due)
+      if (daysLeft === 1 && !membership.notifications.oneDaySent) {
         const claimed = await membershipModel.findOneAndUpdate(
           { _id: membership._id, "notifications.oneDaySent": { $ne: true } },
           { $set: { "notifications.oneDaySent": true } }
@@ -262,10 +292,17 @@ const membershipService = {
         }
       }
 
-      // Día de vencimiento (planes pagos): transición a past_due
-      // daysLeft === 0 con Math.floor significa entre 0 y 24h restantes
-      if (daysLeft === 0 && !isTrial && membership.status !== "past_due") {
-        // Planes pagos que vencen → past_due (3 días de gracia, solo lectura)
+      // El acceso ya lo corta requireActiveMembership en el instante exacto (effectiveStatus);
+      // aquí solo se persiste el estado y se envían los avisos.
+      const effective = membership.effectiveStatus(now);
+
+      // Planes pagos vencidos → past_due (3 días de gracia, solo lectura). Puede que
+      // getCurrentMembership ya lo haya pasado a past_due: el aviso sale igual (expirationSent).
+      if (
+        !isTrial &&
+        effective !== "active" &&
+        (membership.status === "active" || !membership.notifications.expirationSent)
+      ) {
         results.expired.push(membership);
         membership.status = "past_due";
         membership.notifications.expirationSent = true;
@@ -273,11 +310,9 @@ const membershipService = {
         await organizationModel.findByIdAndUpdate(membership.organizationId._id, {
           membershipStatus: "past_due",
         });
-      }
-
-      // Período past_due (día 1 y 2 después de vencer)
-      if (daysLeft <= -1 && membership.status === "past_due") {
-        const pastDueDays = Math.abs(daysLeft);
+      } else if (membership.status === "past_due" && effective !== "active") {
+        // Días COMPLETOS desde que se perdió el acceso: 3 = gracia agotada
+        const pastDueDays = Math.floor((now - membership.accessEndsAt()) / (1000 * 60 * 60 * 24));
 
         if (pastDueDays === 1 && !membership.notifications.pastDueDay1Sent) {
           results.pastDuePeriod.push({ membership, day: 1 });
@@ -290,7 +325,7 @@ const membershipService = {
         }
 
         // Después de 3 días de past_due → suspender
-        if (pastDueDays >= 3) {
+        if (effective === "suspended") {
           results.toSuspend.push(membership);
         }
       }
@@ -573,6 +608,16 @@ const membershipService = {
   updateMembership: async (membershipId, updates) => {
     const membership = await membershipModel.findById(membershipId);
     if (!membership) throw new Error("Membresía no encontrada");
+
+    // Fecha de calendario ("YYYY-MM-DD") elegida en el panel → fin de ese día en la zona
+    // de la org: "vence el 13" = acceso todo el 13. Un Date a medianoche cortaba al empezar el día.
+    if (typeof updates.currentPeriodEnd === "string" && /^\d{4}-\d{2}-\d{2}$/.test(updates.currentPeriodEnd)) {
+      const org = await organizationModel.findById(membership.organizationId).select("timezone");
+      updates.currentPeriodEnd = moment
+        .tz(updates.currentPeriodEnd, "YYYY-MM-DD", org?.timezone || "America/Bogota")
+        .endOf("day")
+        .toDate();
+    }
 
     const allowedFields = [
       'planId',

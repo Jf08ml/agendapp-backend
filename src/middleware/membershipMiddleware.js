@@ -4,7 +4,8 @@ import organizationModel from "../models/organizationModel.js";
 
 /**
  * Middleware para verificar que la organización tenga una membresía activa.
- * Usa getCurrentMembership (trae la vigente sin importar estado) y decide:
+ * Usa getCurrentMembership (trae la vigente sin importar estado) y decide según
+ * membership.effectiveStatus() — derivado de currentPeriodEnd, no de la hora del cron:
  *   - TRIAL / ACTIVE → acceso full
  *   - PAST_DUE → solo lectura (GET/HEAD/OPTIONS)
  *   - SUSPENDED / CANCELLED / EXPIRED → sin acceso
@@ -33,7 +34,8 @@ export const requireActiveMembership = async (req, res, next) => {
       });
     }
 
-    const { status } = membership;
+    // Estado según las fechas (corta en el instante del vencimiento, no cuando corre el cron)
+    const status = membership.effectiveStatus();
 
     // TRIAL / ACTIVE → acceso completo
     if (status === "active" || status === "trial") {
