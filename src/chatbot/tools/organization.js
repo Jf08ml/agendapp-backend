@@ -26,6 +26,9 @@ const validateScheduleDays = (days) => {
     if (!TIME_RE.test(d.start ?? "") || !TIME_RE.test(d.end ?? "")) {
       return `El día ${DAY_NAMES[day]} está abierto pero le falta una hora válida de apertura (start) o cierre (end) en formato "HH:mm". Si ese día no se atiende, envía isOpen: false.`;
     }
+    if (d.start >= d.end) {
+      return `El día ${DAY_NAMES[day]} cierra (${d.end}) antes de abrir (${d.start}). Usa formato 24 h: las 7 de la noche son "19:00".`;
+    }
     for (const b of d.breaks || []) {
       if (!TIME_RE.test(b?.start ?? "") || !TIME_RE.test(b?.end ?? "") || b.start >= b.end) {
         return `El descanso del ${DAY_NAMES[day]} debe tener start y end en formato "HH:mm" (start antes que end).`;

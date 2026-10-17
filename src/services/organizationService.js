@@ -7,6 +7,7 @@ import Employee from "../models/employeeModel.js";
 import { sendTemplateMessage } from "./metaApiService.js";
 import { normalizePhone } from "./waAgentService.js";
 import { getVerticalCatalog } from "../utils/verticalCatalogs.js";
+import { validateTimeRange, validateWeeklyScheduleDays } from "../utils/scheduleValidation.js";
 
 // Monedas de denominación grande (sin centavos en la práctica): los precios
 // de ejemplo se multiplican ×1000 para que se vean realistas (ej: $40.000 COP vs $40 USD)
@@ -242,6 +243,18 @@ const organizationService = {
       serviceTiers !== undefined ? serviceTiers : organization.serviceTiers;
     organization.referralTiers =
       referralTiers !== undefined ? referralTiers : organization.referralTiers;
+    // El panel de horarios guarda por aquí (no por /schedule): sin esta validación un
+    // cierre "07:00" en vez de 19:00 se guardaba y el día quedaba sin cupos en línea.
+    const scheduleError =
+      (weeklySchedule?.schedule && validateWeeklyScheduleDays(weeklySchedule.schedule)) ||
+      (openingHours?.start !== undefined && openingHours?.end !== undefined &&
+        validateTimeRange(openingHours.start, openingHours.end, "Horario base"));
+    if (scheduleError) {
+      const error = new Error(scheduleError);
+      error.statusCode = 400;
+      throw error;
+    }
+
     if (openingHours !== undefined) {
       organization.openingHours = {
         ...(organization.openingHours?.toObject?.() ??

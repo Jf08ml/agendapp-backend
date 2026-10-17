@@ -53,7 +53,7 @@ const organizationController = {
 
       sendResponse(res, 200, orgData, "Organización actualizada exitosamente");
     } catch (error) {
-      sendResponse(res, 404, null, error.message);
+      sendResponse(res, error.statusCode || 404, null, error.message);
     }
   },
 
