@@ -245,9 +245,12 @@ const organizationService = {
       referralTiers !== undefined ? referralTiers : organization.referralTiers;
     // El panel de horarios guarda por aquí (no por /schedule): sin esta validación un
     // cierre "07:00" en vez de 19:00 se guardaba y el día quedaba sin cupos en línea.
+    // El horario base es opcional (las orgs con horarios por día no lo llenan) y el
+    // formulario lo manda como "" cuando no existe: solo se valida si trae alguna hora.
+    const baseHoursSet = Boolean(openingHours?.start || openingHours?.end);
     const scheduleError =
       (weeklySchedule?.schedule && validateWeeklyScheduleDays(weeklySchedule.schedule)) ||
-      (openingHours?.start !== undefined && openingHours?.end !== undefined &&
+      (baseHoursSet &&
         validateTimeRange(openingHours.start, openingHours.end, "Horario base"));
     if (scheduleError) {
       const error = new Error(scheduleError);
