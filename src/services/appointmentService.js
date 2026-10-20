@@ -14,6 +14,7 @@ import packageService from "./packageService.js";
 import { generateCancellationLink } from "../utils/cancellationUtils.js";
 import notificationService from "./notificationService.js";
 import { markOnboardingMilestone } from "../utils/onboardingMilestones.js";
+import { weekdayEs } from "../utils/timeAndPhones.js";
 import mongoose from "mongoose";
 import moment from "moment-timezone";
 
@@ -46,7 +47,7 @@ function getBogotaTodayWindowUTC(baseDate = new Date()) {
 // Helpers de formato (añádelos arriba, cerca de getBogotaTodayWindowUTC)
 // 🔧 FIX: Helpers de formato que aceptan timezone dinámico
 const fmt = (d, tz = "America/Bogota", timeFormat = '12h') =>
-  new Intl.DateTimeFormat("es-ES", {
+  `${weekdayEs(d, tz)} ` + new Intl.DateTimeFormat("es-ES", {
     day: "numeric",
     month: "long",
     hour: "2-digit",
@@ -196,7 +197,7 @@ const appointmentService = {
     });
 
     // Formatear fecha para la confirmación
-    const appointmentDate = new Intl.DateTimeFormat("es-ES", {
+    const appointmentDate = `${weekdayEs(parsedStartDate, timezone)} ` + new Intl.DateTimeFormat("es-ES", {
       day: "numeric",
       month: "long",
       hour: "2-digit",
@@ -1526,11 +1527,14 @@ const appointmentService = {
           hour12: (org.timeFormat || '12h') !== '24h',
           timeZone: timezone,
         });
-        const fmtDay = new Intl.DateTimeFormat("es-ES", {
+        const fmtDayIntl = new Intl.DateTimeFormat("es-ES", {
+          weekday: "long",
           day: "numeric",
           month: "long",
           timeZone: timezone,
         });
+        // Intl devuelve "martes, 20 de octubre"; el mensaje usa "martes 20 de octubre"
+        const fmtDay = { format: (d) => fmtDayIntl.format(d).replace(",", "") };
 
         for (const appt of appointments) {
           // Usar phone_e164 (ya tiene código de país correcto) con fallback

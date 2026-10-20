@@ -430,9 +430,9 @@ const whatsappTemplateController = {
       // Datos de ejemplo para preview
       const sampleData = {
         names: "María García",
-        date: "15 de enero a las 3:00 PM",
-        dateRange: "15 de enero a las 2:00 PM – 4:30 PM",
-        date_range: "15 de enero a las 2:00 PM – 4:30 PM",
+        date: "jueves 15 de enero a las 3:00 PM",
+        dateRange: "jueves 15 de enero a las 2:00 PM – 4:30 PM",
+        date_range: "jueves 15 de enero a las 2:00 PM – 4:30 PM",
         organization: "Salón Bella Vista",
         address: "Calle 123 #45-67, Centro Comercial Plaza",
         service: "Corte y Color",

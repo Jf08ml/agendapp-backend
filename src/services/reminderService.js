@@ -102,11 +102,14 @@ export const reminderService = {
         hour12: (org?.timeFormat || '12h') !== '24h',
         timeZone: timezone,
       });
-      const fmtDay = new Intl.DateTimeFormat("es-ES", {
+      const fmtDayIntl = new Intl.DateTimeFormat("es-ES", {
+        weekday: "long",
         day: "numeric",
         month: "long",
         timeZone: timezone,
       });
+      // Intl devuelve "martes, 20 de octubre"; el mensaje usa "martes 20 de octubre"
+      const fmtDay = { format: (d) => fmtDayIntl.format(d).replace(",", "") };
 
       // --- Unificar por teléfono ---
       const byPhone = new Map();

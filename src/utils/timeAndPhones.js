@@ -204,3 +204,8 @@ export function getDayWindowUTC(targetDate, timezone = "America/Bogota") {
 
   return { dayStartUTC, dayEndUTC };
 }
+// Día de la semana en español ("martes") en la timezone de la org — para anteponerlo
+// a fechas de mensajes: "martes 20 de octubre a las 2:00 p. m."
+export function weekdayEs(date, timezone = "America/Bogota") {
+  return new Intl.DateTimeFormat("es-ES", { weekday: "long", timeZone: timezone }).format(new Date(date));
+}

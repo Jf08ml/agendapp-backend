@@ -15,6 +15,7 @@ import cancellationService from "../services/cancellationService.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
 import whatsappService from "../services/sendWhatsappService.js";
 import { generateCancellationLink } from "../utils/cancellationUtils.js";
+import { weekdayEs } from "../utils/timeAndPhones.js";
 import appointmentSeriesService from "../services/appointmentSeriesService.js";
 import appointmentModel from "../models/appointmentModel.js";
 import ChatLog from "../models/chatLogModel.js";
@@ -865,7 +866,7 @@ const reservationController = {
             const lastEnd = allAppointments[allAppointments.length - 1].endDate;
             
             const fmt = (d, tz = timezone) =>
-              new Intl.DateTimeFormat("es-ES", {
+              `${weekdayEs(d, tz)} ` + new Intl.DateTimeFormat("es-ES", {
                 day: "numeric",
                 month: "long",
                 hour: "2-digit",

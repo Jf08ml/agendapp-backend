@@ -18,10 +18,11 @@ import whatsappService from './sendWhatsappService.js';
 import { recordConfirmationOutcome } from './appointmentService.js';
 import cancellationService from './cancellationService.js';
 import { generateCancellationLink } from '../utils/cancellationUtils.js';
+import { weekdayEs } from '../utils/timeAndPhones.js';
 
 // 📅 Helpers de formato para mensajes
 const fmt = (d, tz = "America/Bogota", timeFormat = '12h') =>
-  new Intl.DateTimeFormat("es-ES", {
+  `${weekdayEs(d, tz)} ` + new Intl.DateTimeFormat("es-ES", {
     day: "numeric",
     month: "long",
     hour: "2-digit",
