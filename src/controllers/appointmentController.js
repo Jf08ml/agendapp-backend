@@ -1,6 +1,7 @@
 import appointmentService from "../services/appointmentService.js";
 import appointmentSeriesService from "../services/appointmentSeriesService.js";
 import cancellationService from "../services/cancellationService.js";
+import packageService from "../services/packageService.js";
 import organizationService from "../services/organizationService.js";
 import subscriptionService from "../services/subscriptionService.js";
 import sendResponse from "../utils/sendResponse.js";
@@ -122,10 +123,20 @@ const appointmentController = {
           endDate,
           parsedEmployeeIds
         );
+
+      // 🔢 "Sesión N de M" para las citas cubiertas por paquete
+      const sessionLabels = await packageService.getPackageSessionLabels(appointments);
+      const withLabels = sessionLabels.size === 0
+        ? appointments
+        : appointments.map((a) => {
+            const label = sessionLabels.get(String(a._id));
+            return label ? { ...a.toJSON(), packageSession: label } : a;
+          });
+
       sendResponse(
         res,
         200,
-        appointments,
+        withLabels,
         "Citas de la organización obtenidas exitosamente"
       );
     } catch (error) {
@@ -349,6 +360,7 @@ const appointmentController = {
         employeeRequestedByClient,
         customPrices,
         additionalItemsByService,
+        usePackageForServices, // 📦 { serviceId: clientPackageId }
         recurrencePattern,
         previewOnly,
         notifyAllAppointments // 📨 Nueva opción para controlar tipo de notificación
@@ -370,7 +382,8 @@ const appointmentController = {
         advancePayment: advancePayment || 0,
         employeeRequestedByClient: employeeRequestedByClient || false,
         customPrices,
-        additionalItemsByService
+        additionalItemsByService,
+        usePackageForServices
       };
 
       const options = { 
@@ -403,11 +416,14 @@ const appointmentController = {
           {
             totalOccurrences: preview.summary.total,
             availableCount: preview.summary.available,
+            packageCovered: preview.summary.packageCovered,
+            packageCharged: preview.summary.packageCharged,
             occurrences: preview.occurrences.map(occ => ({
               startDate: occ.date,
               endDate: occ.endDate,
               status: occ.status,
-              reason: occ.reason
+              reason: occ.reason,
+              package: occ.package
             }))
           },
           "Preview de serie generado exitosamente"

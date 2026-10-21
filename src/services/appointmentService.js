@@ -1322,6 +1322,17 @@ const appointmentService = {
     );
 
     await appointment.deleteOne();
+
+    // 📦 Devolver la sesión del paquete (no-op si ya se devolvió al cancelarla).
+    // Una cita ya atendida sí gastó la sesión: borrarla no la devuelve.
+    if (appointment.clientPackageId && appointment.status !== "attended") {
+      try {
+        await packageService.refundSession(appointment.clientPackageId, appointment.service, appointment._id);
+      } catch (refundErr) {
+        console.error(`⚠️ Error reembolsando sesión de la cita ${appointment._id}:`, refundErr.message);
+      }
+    }
+
     return { message: "Cita eliminada correctamente" };
   },
 
@@ -1536,6 +1547,9 @@ const appointmentService = {
         // Intl devuelve "martes, 20 de octubre"; el mensaje usa "martes 20 de octubre"
         const fmtDay = { format: (d) => fmtDayIntl.format(d).replace(",", "") };
 
+        // 🔢 "Sesión N de M" para las citas cubiertas por paquete
+        const sessionLabels = await packageService.getPackageSessionLabels(appointments);
+
         for (const appt of appointments) {
           // Usar phone_e164 (ya tiene código de país correcto) con fallback
           const clientPhone = appt?.client?.phone_e164 || appt?.client?.phoneNumber;
@@ -1548,9 +1562,10 @@ const appointmentService = {
           const start = new Date(appt.startDate);
           const end = appt.endDate ? new Date(appt.endDate) : null;
 
-          const serviceName = appt?.service
+          const session = sessionLabels.get(String(appt._id));
+          const serviceName = (appt?.service
             ? `${appt.service.type || ""} - ${appt.service.name || ""}`.trim()
-            : "Servicio";
+            : "Servicio") + (session ? ` · Sesión ${session.number} de ${session.total}` : "");
 
           const timeLabel = end
             ? `${fmtHour.format(start)} – ${fmtHour.format(end)}`

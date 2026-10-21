@@ -1123,6 +1123,15 @@ const cancellationService = {
       appointment.cancelledBy = cancelledBy;
       await appointment.save();
 
+      // 📦 Devolver la sesión del paquete si aplica
+      if (appointment.clientPackageId) {
+        try {
+          await packageService.refundSession(appointment.clientPackageId, appointment.service?._id || appointment.service, appointment._id);
+        } catch (refundErr) {
+          console.error(`⚠️ Error reembolsando sesión:`, refundErr.message);
+        }
+      }
+
       // Buscar y cancelar la reserva asociada si existe
       const reservation = await Reservation.findOne({ appointmentId: appointmentId });
       if (reservation) {

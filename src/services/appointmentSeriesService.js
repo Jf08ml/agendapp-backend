@@ -19,6 +19,7 @@ import { recordConfirmationOutcome } from './appointmentService.js';
 import cancellationService from './cancellationService.js';
 import { generateCancellationLink } from '../utils/cancellationUtils.js';
 import { weekdayEs } from '../utils/timeAndPhones.js';
+import packageService from './packageService.js';
 
 // 📅 Helpers de formato para mensajes
 const fmt = (d, tz = "America/Bogota", timeFormat = '12h') =>
@@ -401,6 +402,39 @@ async function previewSeriesAppointments(baseAppointment, recurrencePattern, opt
 
   summary.willBeCreated = summary.available; // Por defecto solo se crean las disponibles
 
+  // 📦 Cobertura del paquete: las sesiones se gastan en orden cronológico entre
+  // las ocurrencias que sí se crearán; las que excedan el saldo se cobran normal.
+  const budget = await packageService.getSeriesPackageBudget(baseAppointment.usePackageForServices, {
+    clientId: baseAppointment.client,
+    organizationId,
+  });
+  if (Object.keys(budget).length > 0) {
+    const consumed = {};
+    let covered = 0;
+    let charged = 0;
+    const chronological = [...validations].sort((a, b) => a.date.localeCompare(b.date));
+    for (const occ of chronological) {
+      if (occ.status !== 'available') continue;
+      let firstSession = null;
+      let fullyCovered = true;
+      for (const serviceId of services) {
+        const b = budget[String(serviceId)];
+        if (!b) continue;
+        const k = consumed[serviceId] || 0;
+        if (k < b.remaining) {
+          consumed[serviceId] = k + 1;
+          if (!firstSession) firstSession = { number: b.used + k + 1, total: b.included };
+        } else {
+          fullyCovered = false;
+        }
+      }
+      occ.package = { covered: fullyCovered, session: firstSession };
+      if (fullyCovered) covered++; else charged++;
+    }
+    summary.packageCovered = covered;
+    summary.packageCharged = charged;
+  }
+
   return {
     occurrences: validations,
     summary
@@ -446,6 +480,19 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
   if (toCreate.length === 0) {
     throw new Error('No hay ocurrencias válidas para crear. Todas fueron omitidas.');
   }
+
+  // Orden cronológico: define occurrenceNumber y en qué citas se gastan las
+  // sesiones del paquete (weekdays puede venir desordenado, ej. [4, 1]).
+  toCreate = [...toCreate].sort((a, b) => a.date.localeCompare(b.date));
+
+  // 📦 Sesiones disponibles por servicio; las citas que excedan el saldo se cobran normal
+  const packageBudget = await packageService.getSeriesPackageBudget(baseAppointment.usePackageForServices, {
+    clientId: baseAppointment.client,
+    organizationId: baseAppointment.organizationId,
+  });
+  const packageLeft = Object.fromEntries(
+    Object.entries(packageBudget).map(([serviceId, b]) => [serviceId, b.remaining])
+  );
 
   console.log(`✅ Se crearán ${toCreate.length} de ${occurrences.length} citas`);
 
@@ -499,7 +546,18 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
         );
         const totalPrice = basePrice + additionalCost;
 
+        // 📦 ¿Esta cita la cubre el paquete? (mismo criterio de precio que createAppointmentsBatch)
+        const pkg = packageBudget[String(serviceId)];
+        const usingPackage = !!pkg && packageLeft[String(serviceId)] > 0;
+        const appointmentId = new mongoose.Types.ObjectId();
+        if (usingPackage) {
+          // Dentro de la transacción: si falla, no se crea ninguna cita de la serie
+          await packageService.consumeSession(pkg.clientPackageId, serviceId, appointmentId, { session });
+          packageLeft[String(serviceId)]--;
+        }
+
         const appointmentData = {
+          _id: appointmentId,
           service: serviceId,
           employee: baseAppointment.employee,
           employeeRequestedByClient: baseAppointment.employeeRequestedByClient || false,
@@ -507,10 +565,11 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
           startDate: currentStartDate.toDate(),
           endDate: endDate,
           organizationId: baseAppointment.organizationId,
-          advancePayment: baseAppointment.advancePayment || 0,
-          customPrice: baseAppointment.customPrices?.[serviceId],
-          additionalItems: additionalItemsForService,
-          totalPrice,
+          advancePayment: usingPackage ? 0 : baseAppointment.advancePayment || 0,
+          customPrice: usingPackage ? 0 : baseAppointment.customPrices?.[serviceId],
+          additionalItems: usingPackage ? [] : additionalItemsForService,
+          totalPrice: usingPackage ? 0 : totalPrice,
+          clientPackageId: usingPackage ? pkg.clientPackageId : undefined,
           status: 'confirmed',
           // 🔁 Campos de serie
           seriesId,
@@ -556,6 +615,13 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
   // 📱 Enviar mensaje de WhatsApp según configuración
   if (!skipNotification && created.length > 0) {
     try {
+      // 🔢 "Drenaje · Sesión 3 de 15" en las citas cubiertas por paquete
+      const sessionLabels = await packageService.getPackageSessionLabels(created);
+      const withSession = (cita, name) => {
+        const s = sessionLabels.get(String(cita._id));
+        return s ? `${name} · Sesión ${s.number} de ${s.total}` : name;
+      };
+
       // Cargar datos del cliente y empleado
       const clientDoc = typeof baseAppointment.client === 'string'
         ? await clientService.getClientById(baseAppointment.client)
@@ -622,7 +688,7 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
               const svc = await serviceService.getServiceById(cita.service);
               const horaInicio = fmtTime(cita.startDate, timezone, seriesTimeFormat);
               const horaFin = fmtTime(cita.endDate, timezone, seriesTimeFormat);
-              serviciosTexto.push(`     • ${svc.name} (${horaInicio} - ${horaFin})`);
+              serviciosTexto.push(`     • ${withSession(cita, svc.name)} (${horaInicio} - ${horaFin})`);
             }
             
             appointmentsList.push(`\n${occNum}. ${fecha}\n${serviciosTexto.join('\n')}`);
@@ -702,7 +768,7 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
                 primerasCitas.map(async (cita) => {
                   const svc = await serviceService.getServiceById(cita.service);
                   return {
-                    name: svc.name,
+                    name: withSession(cita, svc.name),
                     start: fmtTime(cita.startDate, timezone, organization.timeFormat || '12h'),
                     end: fmtTime(cita.endDate, timezone, organization.timeFormat || '12h'),
                   };

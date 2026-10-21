@@ -292,8 +292,13 @@ const packageService = {
       organizationId,
       status: "active",
       expirationDate: { $gt: now },
-      "services.serviceId": new mongoose.Types.ObjectId(serviceId),
-      "services.sessionsRemaining": { $gt: 0 },
+      // $elemMatch: el saldo > 0 tiene que ser de ESTE servicio, no de otro del paquete
+      services: {
+        $elemMatch: {
+          serviceId: new mongoose.Types.ObjectId(serviceId),
+          sessionsRemaining: { $gt: 0 },
+        },
+      },
     })
       .populate("servicePackageId", "name description")
       .populate("services.serviceId", "name price duration")
@@ -478,13 +483,14 @@ const packageService = {
   consumeSession: async (clientPackageId, serviceId, appointmentId, { session: dbSession } = {}) => {
     const serviceObjId = new mongoose.Types.ObjectId(serviceId);
 
-    // Operación atómica: decrementar sessionsRemaining solo si > 0
+    // Operación atómica: decrementar sessionsRemaining solo si > 0.
+    // $elemMatch es obligatorio: con dos condiciones sueltas sobre `services`, el
+    // saldo > 0 podía ser de OTRO servicio y el `$` posicional apuntar a ese otro.
     const updated = await ClientPackage.findOneAndUpdate(
       {
         _id: clientPackageId,
         status: { $in: ["active", "exhausted"] },
-        "services.serviceId": serviceObjId,
-        "services.sessionsRemaining": { $gt: 0 },
+        services: { $elemMatch: { serviceId: serviceObjId, sessionsRemaining: { $gt: 0 } } },
       },
       {
         $inc: {
@@ -610,6 +616,19 @@ const packageService = {
   refundSession: async (clientPackageId, serviceId, appointmentId) => {
     const serviceObjId = new mongoose.Types.ObjectId(serviceId);
 
+    // Idempotente por cita: solo se devuelve lo que esa cita consumió y no se le
+    // devolvió ya (ej. el admin cancela la cita y después la elimina).
+    if (appointmentId) {
+      const pkg = await ClientPackage.findById(clientPackageId).select("consumptionHistory").lean();
+      if (!pkg) {
+        throw new Error("No se pudo reembolsar la sesión del paquete");
+      }
+      const net = (pkg.consumptionHistory || [])
+        .filter((h) => String(h.appointmentId) === String(appointmentId))
+        .reduce((acc, h) => acc + (h.action === "consume" ? 1 : -1), 0);
+      if (net <= 0) return null;
+    }
+
     const updated = await ClientPackage.findOneAndUpdate(
       {
         _id: clientPackageId,
@@ -648,6 +667,89 @@ const packageService = {
     }
 
     return updated;
+  },
+
+  // 🔁 Saldo de sesiones para una serie recurrente. `usePackageForServices` es el
+  // mapeo { serviceId: clientPackageId } que manda el modal de citas. Solo se
+  // aceptan paquetes activos y vigentes de ESE cliente y organización.
+  // Devuelve { [serviceId]: { clientPackageId, included, used, remaining } }.
+  getSeriesPackageBudget: async (usePackageForServices, { clientId, organizationId }) => {
+    const budget = {};
+    const entries = Object.entries(usePackageForServices || {}).filter(([, pkgId]) => pkgId);
+    for (const [serviceId, clientPackageId] of entries) {
+      const pkg = await ClientPackage.findOne({
+        _id: clientPackageId,
+        clientId,
+        organizationId,
+        status: "active",
+        expirationDate: { $gt: new Date() },
+      }).select("services").lean();
+      const svc = pkg?.services?.find((s) => String(s.serviceId) === String(serviceId));
+      if (!svc) continue;
+      budget[serviceId] = {
+        clientPackageId: String(clientPackageId),
+        included: svc.sessionsIncluded,
+        used: svc.sessionsIncluded - svc.sessionsRemaining,
+        remaining: svc.sessionsRemaining,
+      };
+    }
+    return budget;
+  },
+
+  // 🔢 "Sesión N de M" para citas cubiertas por paquete. N sale del orden
+  // cronológico de las citas activas de ese paquete+servicio, desplazado por el
+  // consumo que no tiene cita detrás (ajustes manuales del paquete). Solo se
+  // etiqueta cuando el servicio trae más de 1 sesión en el paquete.
+  // Devuelve Map<appointmentId, { number, total }>.
+  getPackageSessionLabels: async (appointments) => {
+    const labels = new Map();
+    const pkgIds = [
+      ...new Set(
+        (appointments || [])
+          .map((a) => a?.clientPackageId?._id || a?.clientPackageId)
+          .filter(Boolean)
+          .map(String)
+      ),
+    ];
+    if (pkgIds.length === 0) return labels;
+
+    const [pkgs, linked] = await Promise.all([
+      ClientPackage.find({ _id: { $in: pkgIds } }).select("services").lean(),
+      Appointment.find({
+        clientPackageId: { $in: pkgIds },
+        status: { $nin: ["cancelled", "cancelled_by_customer", "cancelled_by_admin"] },
+      })
+        .select("_id clientPackageId service startDate")
+        .sort({ startDate: 1, _id: 1 })
+        .lean(),
+    ]);
+
+    const svcInfo = new Map();
+    for (const p of pkgs) {
+      for (const s of p.services || []) {
+        svcInfo.set(`${p._id}:${s.serviceId}`, {
+          total: s.sessionsIncluded,
+          used: s.sessionsIncluded - s.sessionsRemaining,
+        });
+      }
+    }
+
+    const byKey = new Map();
+    for (const a of linked) {
+      const key = `${a.clientPackageId}:${a.service}`;
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key).push(a);
+    }
+
+    for (const [key, appts] of byKey) {
+      const info = svcInfo.get(key);
+      if (!info || info.total <= 1) continue;
+      const offset = Math.max(0, info.used - appts.length);
+      appts.forEach((a, i) => {
+        labels.set(String(a._id), { number: offset + i + 1, total: info.total });
+      });
+    }
+    return labels;
   },
 
   // =============================================

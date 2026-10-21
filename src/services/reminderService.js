@@ -6,6 +6,7 @@ import WhatsappTemplate from "../models/whatsappTemplateModel.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
 import { toWhatsappFormat } from "../utils/phoneUtils.js";
 import whatsappService from "./sendWhatsappService.js";
+import packageService from "./packageService.js";
 import {
   getBogotaDayWindowUTC,
   getDayWindowUTC,
@@ -111,10 +112,13 @@ export const reminderService = {
       // Intl devuelve "martes, 20 de octubre"; el mensaje usa "martes 20 de octubre"
       const fmtDay = { format: (d) => fmtDayIntl.format(d).replace(",", "") };
 
+      // 🔢 "Sesión N de M" para las citas cubiertas por paquete
+      const sessionLabels = await packageService.getPackageSessionLabels(appts);
+
       // --- Unificar por teléfono ---
       const byPhone = new Map();
       let skippedNoPhone = 0;
-      
+
       for (const a of appts) {
         // Usar phone_e164 (ya tiene código de país correcto) con fallback al phoneNumber
         const clientPhone = a?.client?.phone_e164 || a?.client?.phoneNumber;
@@ -130,9 +134,10 @@ export const reminderService = {
         const start = new Date(a.startDate);
         const end = a.endDate ? new Date(a.endDate) : null;
 
-        const serviceName = a?.service
+        const session = sessionLabels.get(String(a._id));
+        const serviceName = (a?.service
           ? `${a.service.type || ""} - ${a.service.name || ""}`.trim()
-          : "Servicio";
+          : "Servicio") + (session ? ` · Sesión ${session.number} de ${session.total}` : "");
 
         const timeLabel = end
           ? `${fmtHour.format(start)} – ${fmtHour.format(end)}`
