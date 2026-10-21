@@ -6,10 +6,10 @@ import Organization from "../models/organizationModel.js";
 import Appointment from "../models/appointmentModel.js";
 import Service from "../models/serviceModel.js";
 import Employee from "../models/employeeModel.js";
-import appointmentService from "./appointmentService.js";
+import appointmentService, { recordConfirmationOutcome } from "./appointmentService.js";
 import whatsappService from "./sendWhatsappService.js";
+import waQuotaService, { WA_QUOTA_BLOCKED_REASON } from "./waQuotaService.js";
 import cancellationService from "./cancellationService.js";
-import { waIntegrationService } from "./waIntegrationService.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
 import { generateCancellationLink } from "../utils/cancellationUtils.js";
 import { normalizePhoneNumber } from "../utils/phoneUtils.js";
@@ -70,18 +70,38 @@ async function _sendRecurringApprovalWhatsApp({ allCreatedAppts, customerDetails
     cancellationLink: cancellationLink || '',
   };
 
+  // Plan + plantilla + tope mensual de citas con WhatsApp
+  const { allowed, reason } = await waQuotaService.confirmationGate(organizationId, appointments, { templateType: 'recurringAppointmentSeries', timezone });
+  const ids = appointments.map(a => a._id);
+  if (reason) {
+    console.log(`⏭️  WhatsApp recurrente al aprobar NO enviado: ${reason}`);
+    await recordConfirmationOutcome(ids, "blocked", reason);
+    return;
+  }
+
   const msg = await whatsappTemplates.getRenderedTemplate(
     organizationId,
     'recurringAppointmentSeries',
     templateData
   );
 
-  await waIntegrationService.sendMessage({
-    orgId: organizationId,
-    phone: customerDetails.phone,
-    message: msg,
-    image: null,
-  });
+  // sendNotification enruta Meta (plantilla citas_recurrentes) o Baileys
+  const notifyResult = await whatsappService.sendNotification(
+    organizationId,
+    customerDetails.phone,
+    'recurringAppointmentSeries',
+    templateData,
+    { fallbackMessage: msg, externalRef: `confirmation:${ids.join(",")}` }
+  );
+  const outcome = !notifyResult ? "failed" : notifyResult.blocked ? "blocked" : "sent";
+  await recordConfirmationOutcome(
+    ids.filter(id => allowed.has(String(id))),
+    outcome,
+    outcome === "sent" ? undefined : notifyResult?.reason || "Sin template aprobado ni canal disponible",
+    notifyResult?.messageId || notifyResult?.id || null
+  );
+  const overQuota = ids.filter(id => !allowed.has(String(id)));
+  if (overQuota.length) await recordConfirmationOutcome(overQuota, "blocked", WA_QUOTA_BLOCKED_REASON);
 
   console.log(`✅ WhatsApp recurrente enviado al aprobar: ${Object.keys(citasPorOcurrencia).length} ocurrencias`);
 }
@@ -688,23 +708,28 @@ const reservationService = {
             return `• ${apt.service?.name || "Servicio"} - ${date}`;
           }).join("\n");
 
-          const msg = await whatsappTemplates.getRenderedTemplate(
-            organizationId,
-            "clientCancellationAck",
-            {
-              names: clientName,
-              appointments_list: appointmentsList,
-            }
-          );
+          const templateData = {
+            names: clientName,
+            appointments_list: appointmentsList,
+            organization: org?.name || "",
+          };
+          const msg = await whatsappTemplates.getRenderedTemplate(organizationId, "clientCancellationAck", templateData);
 
           if (clientPhone) {
-            await waIntegrationService.sendMessage({
-              orgId: organizationId,
-              phone: clientPhone,
-              message: msg,
-              image: null,
-            });
-            console.log(`✅ WhatsApp de cancelación consolidado enviado: ${cancelledAppointmentIds.length} citas`);
+            // sendNotification enruta Meta (plantilla) o Baileys; antes iba solo por
+            // Baileys y en orgs con Meta el aviso no llegaba.
+            const notifyResult = await whatsappService.sendNotification(
+              organizationId,
+              clientPhone,
+              "clientCancellationAck",
+              templateData,
+              ...(msg ? [{ fallbackMessage: msg }] : [])
+            );
+            if (notifyResult && !notifyResult.blocked) {
+              console.log(`✅ WhatsApp de cancelación consolidado enviado: ${cancelledAppointmentIds.length} citas`);
+            } else {
+              console.warn(`⚠️  WhatsApp de cancelación NO enviado (${notifyResult?.reason || "sin plantilla ni canal disponible"})`);
+            }
           }
         }
       } catch (whatsappErr) {

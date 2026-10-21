@@ -20,6 +20,7 @@ import cancellationService from './cancellationService.js';
 import { generateCancellationLink } from '../utils/cancellationUtils.js';
 import { weekdayEs } from '../utils/timeAndPhones.js';
 import packageService from './packageService.js';
+import waQuotaService, { WA_QUOTA_BLOCKED_REASON } from './waQuotaService.js';
 
 // 📅 Helpers de formato para mensajes
 const fmt = (d, tz = "America/Bogota", timeFormat = '12h') =>
@@ -703,7 +704,17 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
             cancellationLink,
           };
           
-          if (planAllowsSeriesConfirmations && isRecurringConfirmationEnabled) {
+          // 📊 Tope mensual de citas con WhatsApp: cada ocurrencia es una visita;
+          // el mensaje sale si al menos una tiene cupo y las demás quedan bloqueadas.
+          const quotaAllowed = planAllowsSeriesConfirmations && isRecurringConfirmationEnabled
+            ? await waQuotaService.reserve(baseAppointment.organizationId, created, { limits: seriesPlanLimits, timezone })
+            : null;
+          const overQuotaIds = quotaAllowed ? created.filter(c => !quotaAllowed.has(String(c._id))).map(c => c._id) : [];
+
+          if (quotaAllowed && quotaAllowed.size === 0) {
+            console.log(`⏭️  Confirmación de serie NO enviada (tope mensual de WhatsApp del plan)`);
+            await recordConfirmationOutcome(created.map(c => c._id), "blocked", WA_QUOTA_BLOCKED_REASON);
+          } else if (planAllowsSeriesConfirmations && isRecurringConfirmationEnabled) {
             const notifyResult = await whatsappService.sendNotification(
               baseAppointment.organizationId,
               phoneE164,
@@ -713,7 +724,8 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
             );
             const messageId = notifyResult?.messageId || notifyResult?.id || null;
             console.log(`✅ Confirmación de serie recurrente enviada: ${Object.keys(citasPorOcurrencia).length} ocurrencias (${created.length} citas totales) — messageId: ${messageId || "?"}`);
-            await recordConfirmationOutcome(created.map(c => c._id), "sent", undefined, messageId);
+            await recordConfirmationOutcome(created.filter(c => quotaAllowed.has(String(c._id))).map(c => c._id), "sent", undefined, messageId);
+            if (overQuotaIds.length) await recordConfirmationOutcome(overQuotaIds, "blocked", WA_QUOTA_BLOCKED_REASON);
           } else {
             console.log(`⏭️  Confirmación de serie recurrente deshabilitada`);
             await recordConfirmationOutcome(
@@ -738,6 +750,11 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
               "blocked",
               !planAllowsSeriesConfirmations ? "Bloqueada por límite del plan (autoConfirmations)" : "Deshabilitada en plantillas de WhatsApp (enabledTypes.recurringAppointmentSeries)"
             );
+          } else if (primerasCitas.length > 0
+            && (await waQuotaService.reserve(baseAppointment.organizationId, primerasCitas, { limits: seriesPlanLimits, timezone })).size === 0) {
+            // 📊 Tope mensual de citas con WhatsApp del plan alcanzado
+            console.log(`⏭️  Confirmación de primera ocurrencia NO enviada (tope mensual de WhatsApp del plan)`);
+            await recordConfirmationOutcome(primerasCitas.map(c => c._id), "blocked", WA_QUOTA_BLOCKED_REASON);
           } else {
             if (primerasCitas.length === 0) {
               console.warn('⚠️ No se encontraron citas de la primera ocurrencia');

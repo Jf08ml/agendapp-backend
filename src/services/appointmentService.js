@@ -15,6 +15,7 @@ import { generateCancellationLink } from "../utils/cancellationUtils.js";
 import notificationService from "./notificationService.js";
 import { markOnboardingMilestone } from "../utils/onboardingMilestones.js";
 import { weekdayEs } from "../utils/timeAndPhones.js";
+import waQuotaService, { WA_QUOTA_BLOCKED_REASON } from "./waQuotaService.js";
 import mongoose from "mongoose";
 import moment from "moment-timezone";
 
@@ -231,7 +232,17 @@ const appointmentService = {
       const whatsappTemplate = await WhatsappTemplate.findOne({ organizationId });
       const isConfirmationEnabled = whatsappTemplate?.enabledTypes?.scheduleAppointment !== false;
 
-      if (isConfirmationEnabled && (client?.phone_e164 || client?.phoneNumber)) {
+      // 📊 Tope mensual de citas con WhatsApp (planes de entrada)
+      const withinQuota = isConfirmationEnabled && (client?.phone_e164 || client?.phoneNumber)
+        ? (await waQuotaService.reserve(organizationId, [newAppointment], { limits: planLimits, timezone })).size > 0
+        : true;
+
+      if (!withinQuota) {
+        console.log(`⏭️  Confirmación NO enviada (tope mensual de WhatsApp del plan) para cita ${newAppointment._id}`);
+        newAppointment.waConfirmationStatus = "blocked";
+        newAppointment.waConfirmationSentAt = new Date();
+        newAppointment.waConfirmationError = WA_QUOTA_BLOCKED_REASON;
+      } else if (isConfirmationEnabled && (client?.phone_e164 || client?.phoneNumber)) {
         const templateData = { ...appointmentDetails, cancellationLink };
         const fallbackMessage = await whatsappTemplates.getRenderedTemplate(organizationId, 'scheduleAppointment', templateData).catch(() => null);
         const notifyResult = await whatsappService.sendNotification(
@@ -718,8 +729,15 @@ const appointmentService = {
         // 🆕 Verificar si el envío de confirmación batch está habilitado
         const whatsappTemplate = await WhatsappTemplate.findOne({ organizationId });
         const isBatchConfirmationEnabled = whatsappTemplate?.enabledTypes?.scheduleAppointmentBatch !== false;
+        // 📊 Tope mensual de citas con WhatsApp: el mensaje sale si la visita tiene cupo
+        const withinQuota = planAllowsConfirmations && isBatchConfirmationEnabled
+          ? (await waQuotaService.reserve(organizationId, allGroupAppointments.map((c) => c.saved), { limits: batchPlanLimits, timezone })).size > 0
+          : true;
 
-        if (planAllowsConfirmations && isBatchConfirmationEnabled) {
+        if (planAllowsConfirmations && isBatchConfirmationEnabled && !withinQuota) {
+          console.log(`⏭️  Confirmación batch NO enviada (tope mensual de WhatsApp del plan)`);
+          await recordConfirmationOutcome(groupApptIds, "blocked", WA_QUOTA_BLOCKED_REASON);
+        } else if (planAllowsConfirmations && isBatchConfirmationEnabled) {
           const notifyResult = await whatsappService.sendNotification(
             organizationId,
             phoneE164,
@@ -867,8 +885,15 @@ const appointmentService = {
         const planAllowsConfirmations = !(batchPlanLimits && batchPlanLimits.autoConfirmations === false);
         const whatsappTemplate = await WhatsappTemplate.findOne({ organizationId });
         const isBatchConfirmationEnabled = whatsappTemplate?.enabledTypes?.scheduleAppointmentBatch !== false;
+        // 📊 Tope mensual de citas con WhatsApp: el mensaje sale si la visita tiene cupo
+        const withinQuota = planAllowsConfirmations && isBatchConfirmationEnabled
+          ? (await waQuotaService.reserve(organizationId, groupAppts, { limits: batchPlanLimits, timezone })).size > 0
+          : true;
 
-        if (planAllowsConfirmations && isBatchConfirmationEnabled) {
+        if (planAllowsConfirmations && isBatchConfirmationEnabled && !withinQuota) {
+          console.log('⏭️  Confirmación multi-profesional NO enviada (tope mensual de WhatsApp del plan)');
+          await recordConfirmationOutcome(allCreatedIds, "blocked", WA_QUOTA_BLOCKED_REASON);
+        } else if (planAllowsConfirmations && isBatchConfirmationEnabled) {
           const notifyResult = await whatsappService.sendNotification(
             organizationId,
             phoneE164,
@@ -1496,7 +1521,7 @@ const appointmentService = {
         const dayEnd = moment.tz(targetDateStr, timezone).endOf('day').toDate();
 
         // Buscar TODAS las citas en el rango para estos clientes
-        const appointments = await appointmentModel
+        let appointments = await appointmentModel
           .find({
             organizationId: orgId,
             client: { $in: clientIds },
@@ -1528,6 +1553,17 @@ const appointmentService = {
             `[${org.name}] [${label}] Sin Meta ni clientIdWhatsapp configurado. Se omiten ${appointments.length} recordatorios.`
           );
           return { ok: 0, skipped: appointments.length };
+        }
+
+        // 📊 Tope mensual de citas con WhatsApp: fuera del cupo no se recuerda.
+        // reminderSent no se marca, pero el cupo del mes no se libera, así que
+        // esas citas simplemente se vuelven a descartar en las pasadas siguientes.
+        const allowedIds = await waQuotaService.reserve(orgId, appointments, { timezone });
+        const overQuota = appointments.length - allowedIds.size;
+        if (overQuota > 0) {
+          console.log(`[${org.name}] [${label}] ${overQuota} cita(s) sin recordatorio por tope mensual de WhatsApp del plan`);
+          appointments = appointments.filter((appt) => allowedIds.has(String(appt._id)));
+          if (!appointments.length) return { ok: 0, skipped: overQuota };
         }
 
         // Agrupar por teléfono (cliente)

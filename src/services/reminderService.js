@@ -7,6 +7,7 @@ import whatsappTemplates from "../utils/whatsappTemplates.js";
 import { toWhatsappFormat } from "../utils/phoneUtils.js";
 import whatsappService from "./sendWhatsappService.js";
 import packageService from "./packageService.js";
+import waQuotaService from "./waQuotaService.js";
 import {
   getBogotaDayWindowUTC,
   getDayWindowUTC,
@@ -83,7 +84,7 @@ export const reminderService = {
     const results = [];
 
     // 3) Por cada organización, construir campañas con items unificados por teléfono
-    for (const [_orgId, appts] of byOrg.entries()) {
+    for (let [_orgId, appts] of byOrg.entries()) {
       const org = appts[0]?.organizationId;
       const clientId = org?.clientIdWhatsapp;
       const isMeta = org?.waConnectionType === "meta";
@@ -95,7 +96,15 @@ export const reminderService = {
 
       // 🔧 FIX: Usar la timezone de la organización para los formatos de fecha
       const timezone = org?.timezone || "America/Bogota";
-      
+
+      // 📊 Tope mensual de citas con WhatsApp del plan (el envío manual también cuenta)
+      const allowedIds = await waQuotaService.reserve(_orgId, appts, { timezone });
+      if (allowedIds.size < appts.length) {
+        console.log(`[${_orgId}] ${appts.length - allowedIds.size} cita(s) sin recordatorio por tope mensual de WhatsApp del plan`);
+        appts = appts.filter((a) => allowedIds.has(String(a._id)));
+        if (!appts.length) continue;
+      }
+
       // Formatters con la timezone correcta de la organización
       const fmtHour = new Intl.DateTimeFormat("es-ES", {
         hour: "2-digit",

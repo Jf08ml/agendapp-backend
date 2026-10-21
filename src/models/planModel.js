@@ -75,6 +75,9 @@ const planSchema = new mongoose.Schema(
       professionalLanding: { type: Boolean, default: false },
       brandingVisible: { type: Boolean, default: false },
       maxRemindersPerAppointment: { type: Number, default: 0 },
+      // Tope mensual de citas (visitas) con confirmación/recordatorio automático
+      // por WhatsApp — ver services/waQuotaService.js. null = sin tope.
+      maxWhatsappAppointmentsPerMonth: { type: Number, default: null },
     },
     
     // PayPal Subscription Plan ID (one per plan, created in PayPal dashboard)

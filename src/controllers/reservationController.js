@@ -5,7 +5,8 @@ import reservationModel from "../models/reservationModel.js";
 import notificationService from "../services/notificationService.js";
 import organizationService from "../services/organizationService.js";
 import reservationService from "../services/reservationService.js";
-import appointmentService from "../services/appointmentService.js";
+import appointmentService, { recordConfirmationOutcome } from "../services/appointmentService.js";
+import waQuotaService, { WA_QUOTA_BLOCKED_REASON } from "../services/waQuotaService.js";
 import subscriptionService from "../services/subscriptionService.js";
 import sendResponse from "../utils/sendResponse.js";
 import employeeService from "../services/employeeService.js";
@@ -415,18 +416,39 @@ async function _sendRecurringWhatsApp({ allAppointments, customerDetails, org, o
     cancellationLink,
   };
 
+  // Plan + plantilla + tope mensual de citas con WhatsApp
+  const { allowed, reason } = await waQuotaService.confirmationGate(organizationId, allAppointments, { templateType: 'recurringAppointmentSeries', timezone });
+  const ids = allAppointments.map(a => a._id);
+  if (reason) {
+    console.log(`⏭️  WhatsApp recurrente NO enviado: ${reason}`);
+    await recordConfirmationOutcome(ids, "blocked", reason);
+    return;
+  }
+
   const msg = await whatsappTemplates.getRenderedTemplate(
     organizationId,
     'recurringAppointmentSeries',
     templateData
   );
 
-  await waIntegrationService.sendMessage({
-    orgId: organizationId,
-    phone: customerDetails.phone,
-    message: msg,
-    image: null,
-  });
+  // sendNotification enruta Meta (plantilla citas_recurrentes) o Baileys
+  const notifyResult = await whatsappService.sendNotification(
+    organizationId,
+    customerDetails.phone,
+    'recurringAppointmentSeries',
+    templateData,
+    { fallbackMessage: msg, externalRef: `confirmation:${ids.join(",")}` }
+  );
+  const messageId = notifyResult?.messageId || notifyResult?.id || null;
+  const outcome = !notifyResult ? "failed" : notifyResult.blocked ? "blocked" : "sent";
+  await recordConfirmationOutcome(
+    ids.filter(id => allowed.has(String(id))),
+    outcome,
+    outcome === "sent" ? undefined : notifyResult?.reason || "Sin template aprobado ni canal disponible",
+    messageId
+  );
+  const overQuota = ids.filter(id => !allowed.has(String(id)));
+  if (overQuota.length) await recordConfirmationOutcome(overQuota, "blocked", WA_QUOTA_BLOCKED_REASON);
 
   console.log(`✅ WhatsApp recurrente enviado: ${Object.keys(citasPorOcurrencia).length} ocurrencias`);
 }
@@ -893,18 +915,33 @@ const reservationController = {
             };
 
             if (customerDetails.phone) {
-              const renderedMsg = await whatsappTemplates.getRenderedTemplate(
-                organizationId,
-                'scheduleAppointmentBatch',
-                templateData
-              );
-              await whatsappService.sendNotification(
-                organizationId,
-                customerDetails.phone,
-                'scheduleAppointmentBatch',
-                templateData,
-                { fallbackMessage: renderedMsg }
-              );
+              // Plan + plantilla + tope mensual de citas con WhatsApp
+              const apptIds = allAppointments.map(a => a._id);
+              const { reason } = await waQuotaService.confirmationGate(organizationId, allAppointments, { templateType: 'scheduleAppointmentBatch', timezone });
+              if (reason) {
+                console.log(`⏭️  Confirmación de reserva NO enviada: ${reason}`);
+                await recordConfirmationOutcome(apptIds, "blocked", reason);
+              } else {
+                const renderedMsg = await whatsappTemplates.getRenderedTemplate(
+                  organizationId,
+                  'scheduleAppointmentBatch',
+                  templateData
+                );
+                const notifyResult = await whatsappService.sendNotification(
+                  organizationId,
+                  customerDetails.phone,
+                  'scheduleAppointmentBatch',
+                  templateData,
+                  { fallbackMessage: renderedMsg, externalRef: `confirmation:${apptIds.join(",")}` }
+                );
+                const outcome = !notifyResult ? "failed" : notifyResult.blocked ? "blocked" : "sent";
+                await recordConfirmationOutcome(
+                  apptIds,
+                  outcome,
+                  outcome === "sent" ? undefined : notifyResult?.reason || "Sin template aprobado ni canal disponible",
+                  notifyResult?.messageId || notifyResult?.id || null
+                );
+              }
             }
           } catch (error) {
             console.error('[createMultipleReservations] Error enviando WhatsApp:', error);

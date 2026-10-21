@@ -6,6 +6,7 @@ import { runMembershipCheck } from "../cron/membershipCheckJob.js";
 import Employee from "../models/employeeModel.js";
 import Service from "../models/serviceModel.js";
 import Appointment from "../models/appointmentModel.js";
+import waQuotaService from "../services/waQuotaService.js";
 
 const membershipController = {
   /**
@@ -321,13 +322,14 @@ const membershipController = {
       const now = new Date();
       const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-      const [employeeCount, serviceCount, appointmentsThisMonth] = await Promise.all([
+      const [employeeCount, serviceCount, appointmentsThisMonth, waUsage] = await Promise.all([
         Employee.countDocuments({ organizationId, isActive: true }),
         Service.countDocuments({ organizationId }),
         Appointment.countDocuments({
           organizationId,
           createdAt: { $gte: startOfMonth },
         }),
+        waQuotaService.getUsage(organizationId, { timezone: req.organization?.timezone }),
       ]);
 
       const limits = membership?.planId?.limits || {};
@@ -346,6 +348,8 @@ const membershipController = {
             current: appointmentsThisMonth,
             max: limits.maxAppointmentsPerMonth ?? null,
           },
+          // 📊 Citas (visitas) con WhatsApp automático este mes — ver waQuotaService
+          whatsappAppointmentsThisMonth: { current: waUsage.used, max: waUsage.limit },
         },
       }, "Info de plan obtenida");
     } catch (error) {

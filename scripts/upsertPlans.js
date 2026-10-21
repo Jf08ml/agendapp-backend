@@ -74,46 +74,52 @@ const plans = [
     isActive: true,
   },
 
-  // ─── EDITAR IN-PLACE: Plan Básico → Starter ──────────────────────────────
+  // ─── EDITAR IN-PLACE: Plan Básico → Starter (renovado oct-2026) ──────────
+  // Plan de entrada para quien trabaja solo: 1 profesional y WhatsApp
+  // automático (confirmación + 1 recordatorio) con tope de 50 citas al mes
+  // (services/waQuotaService.js). Pasado el tope la agenda sigue igual; solo
+  // dejan de salir los mensajes → el paso natural es el Esencial.
+  // ⚠️ El precio cobrado vive en la pasarela (payment.productId / lsVariantId):
+  // actualizarlo allí ANTES de correr este script.
   {
     slug: "plan-basico",
     name: "Plan Starter",
     displayName: "Plan Starter",
-    price: 10,
+    price: 12,
     currency: "USD",
     billingCycle: "monthly",
     domainType: "subdomain",
-    description: "Ideal para negocios que quieren profesionalizar su operación.",
+    description: "Ideal para quien trabaja solo y está empezando.",
     characteristics: [
-      "Profesionales ilimitados",
-      "Servicios ilimitados",
-      "Clientes ilimitados",
+      "1 profesional",
+      "Servicios y clientes ilimitados",
       "Reservas online",
       "Agenda virtual completa",
-      "Gestión de caja e ingresos",
-      "Gestión de gastos",
+      "WhatsApp automático: confirmación y 1 recordatorio por cita",
+      "Hasta 50 citas al mes con WhatsApp",
+      "Gestión de caja, ingresos y gastos",
       "Sistema de fidelización (servicios y referidos)",
-      "Analíticas generales",
       "Subdominio tunegocio.agenditapp.com",
     ],
     limits: {
-      maxEmployees: null,
+      maxEmployees: 1,
       maxServices: null,
       maxAppointmentsPerMonth: null,
       maxStorageGB: 5,
       customBranding: true,
-      whatsappIntegration: false,
+      whatsappIntegration: true,
       analyticsAdvanced: true,
       prioritySupport: false,
-      autoReminders: false,
-      autoConfirmations: false,
+      autoReminders: true,
+      autoConfirmations: true,
       servicePackages: false,
       campaignsWhatsapp: false,
       classesModule: false,
       loyaltyProgram: true,
       professionalLanding: false,
       brandingVisible: false,
-      maxRemindersPerAppointment: 0,
+      maxRemindersPerAppointment: 1,
+      maxWhatsappAppointmentsPerMonth: 50,
     },
     isActive: true,
   },
@@ -130,7 +136,8 @@ const plans = [
     description: "Ideal para negocios que quieren reducir ausencias y ahorrar tiempo.",
     characteristics: [
       "Todo lo del Plan Starter",
-      "WhatsApp automático",
+      "Profesionales ilimitados",
+      "WhatsApp automático sin tope de citas",
       "1 recordatorio automático por cita",
       "Confirmación de cita",
       "Nueva cita agendada",
