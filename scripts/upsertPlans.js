@@ -82,7 +82,7 @@ const plans = [
   // ⚠️ El precio cobrado vive en la pasarela (payment.productId / lsVariantId):
   // actualizarlo allí ANTES de correr este script.
   {
-    slug: "plan-basico",
+    slug: "plan-starter", // era "plan-basico"; el editor del superadmin lo regeneró al renombrarlo (oct-2026)
     name: "Plan Starter",
     displayName: "Plan Starter",
     price: 12,
