@@ -43,6 +43,22 @@ const NO_LEAK_SUFFIX =
 
 const SAFE_FALLBACK_REPLY = "¿Me cuentas de nuevo qué necesitas? Así te ayudo con tu reserva. 😊";
 
+const SUMMARY_QUESTION = "¿Todo está correcto? ¿Confirmo tu reserva?";
+
+// Respuesta afirmativa del cliente al resumen ("sí", "dale", "confirmo"...).
+const AFFIRMATIVE_PATTERN =
+  /^\s*(s[ií]+|dale|ok(ay)?|listo|confirm[oa]?|claro|perfecto|h[aá]gale|de una|correcto|est[aá] bien)(?![\wáéíóúñ])/i;
+
+const depositLinkText = (checkout) =>
+  `👉 Paga el abono de *${checkout.depositAmount}* aquí para confirmar tu reserva (tienes ${checkout.holdMinutes} minutos):\n${checkout.paymentUrl}`;
+
+// Texto al cliente tras un confirm_reservation exitoso: con abono, la reserva
+// queda apartada hasta que pague; sin abono, ya quedó agendada.
+const confirmedReply = (confirmResult) =>
+  confirmResult?.paymentUrl
+    ? `✅ Tu reserva quedó apartada.\n\n${depositLinkText(confirmResult)}`
+    : "✅ ¡Listo! Tu reserva quedó agendada. Te esperamos.";
+
 const extractText = (content) => {
   const block = content.find((b) => b.type === "text");
   return block?.text || "";
@@ -72,6 +88,7 @@ export const processBookingChat = async (organization, messages, options = {}) =
     // Señal persistente (no one-shot, a diferencia de session.reservationCreated):
     // ya se confirmó una reserva en algún turno anterior de esta misma conversación.
     hasConfirmedBooking: isWhatsapp && options.session?.hasConfirmedBookingThisSession === true,
+    pendingDeposit: isWhatsapp ? options.session?.pendingDeposit : null,
   });
   const context = {
     organizationId: organization._id,
@@ -100,6 +117,12 @@ export const processBookingChat = async (organization, messages, options = {}) =
   let inputTokens = 0;
   let outputTokens = 0;
   let rounds = 0;
+  // WhatsApp: resumen oficial devuelto por prepare_reservation en este turno, y
+  // resultado de confirm_reservation cuando abrió el cobro del abono.
+  let preparedSummary = null;
+  let depositCheckout = null;
+  const lastUserText =
+    [...messages].reverse().find((m) => m.role === "user" && typeof m.content === "string")?.content || "";
 
   const toolsWithCache = baseTools.map((t, i) =>
     i === baseTools.length - 1
@@ -126,7 +149,18 @@ export const processBookingChat = async (organization, messages, options = {}) =
 
     if (response.stop_reason !== "tool_use") {
       const rawReply = extractText(response.content);
-      const reservationWasCreated = options.session?.reservationCreated === true;
+      const meta = { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors };
+
+      // WhatsApp: si en este turno se preparó una reserva, el cliente recibe el
+      // resumen armado por el servidor (nombres, fecha, precio y abono reales),
+      // no el texto del modelo. Su "sí" llega en el próximo mensaje.
+      if (isWhatsapp && preparedSummary && !successfulTools.has("confirm_reservation")) {
+        options.session.pendingSummaryShown = true;
+        return { reply: `${preparedSummary}\n\n${SUMMARY_QUESTION}`, bookingPayload, _meta: meta };
+      }
+
+      const reservationWasCreated =
+        options.session?.reservationCreated === true || successfulTools.has("confirm_reservation");
       const pendingPayload = (isWhatsapp && options.session?.pendingPayload) || bookingPayload;
       const isLastRound = round === MAX_TOOL_ROUNDS - 1;
 
@@ -187,7 +221,7 @@ export const processBookingChat = async (organization, messages, options = {}) =
             {
               role: "user",
               content: pendingPayload
-                ? "[SISTEMA] La reserva AÚN NO fue creada. Llama confirm_reservation AHORA para crearla de verdad antes de anunciarla al cliente." +
+                ? "[SISTEMA] La reserva AÚN NO fue creada. Si el cliente acaba de confirmar el resumen, llama confirm_reservation AHORA y responde según su resultado real. Si no lo confirmó, reescribe tu respuesta sin decir que la reserva quedó hecha." +
                   NO_LEAK_SUFFIX
                 : leaksInternals && !looksLikeSuccess
                 ? "[SISTEMA] Tu respuesta incluía detalles internos que el cliente no debe ver. Reescríbela dirigida al cliente, breve y natural." +
@@ -200,10 +234,11 @@ export const processBookingChat = async (organization, messages, options = {}) =
         }
 
         // Última ronda disponible: no hay más turnos para que el modelo
-        // reintente. Si ya hay una reserva preparada, la confirmamos nosotros
-        // mismos y respondemos según el resultado REAL — nunca según el texto
-        // (potencialmente alucinado) que generó el modelo.
-        if (pendingPayload) {
+        // reintente. Si ya hay una reserva preparada y el cliente acaba de
+        // decir que sí, la confirmamos nosotros mismos y respondemos según el
+        // resultado REAL — nunca según el texto (potencialmente alucinado) que
+        // generó el modelo. Sin un "sí" explícito nunca se confirma.
+        if (pendingPayload && AFFIRMATIVE_PATTERN.test(lastUserText)) {
           let confirmResult;
           try {
             confirmResult = await executeBookingTool("confirm_reservation", {}, context);
@@ -213,7 +248,7 @@ export const processBookingChat = async (organization, messages, options = {}) =
           executedTools.add("confirm_reservation");
           return {
             reply: confirmResult?.success
-              ? "✅ ¡Listo! Tu reserva quedó agendada. Te esperamos."
+              ? confirmedReply(confirmResult)
               : "Tuve un problema confirmando tu reserva. ¿La confirmas de nuevo, por favor?",
             bookingPayload,
             _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors },
@@ -283,11 +318,17 @@ export const processBookingChat = async (organization, messages, options = {}) =
       // (el modelo generó el mensaje del botón en la misma ronda que la tool call) —
       // solo aplica al canal web; en WhatsApp ese caso ya lo resuelve el bloque de
       // arriba (whatsappNeedsResolution).
-      const reply =
+      let reply =
         rawReply ||
         (bookingPayload !== null && !isWhatsapp
           ? "¡Listo! Toca el botón **'Sí, confirmar'** para finalizar tu reserva."
           : "");
+
+      // El enlace de pago del abono tiene que llegar sí o sí: el modelo puede
+      // resumirlo, recortarlo u olvidarlo.
+      if (depositCheckout && !reply.includes(depositCheckout.paymentUrl)) {
+        reply = reply ? `${reply}\n\n${depositLinkText(depositCheckout)}` : confirmedReply(depositCheckout);
+      }
 
       // Canal WhatsApp: el modelo puede optar por no responder (mensaje sin
       // intención de agendar — ver FILTRO DE INTENCIÓN en el prompt).
@@ -310,8 +351,12 @@ export const processBookingChat = async (organization, messages, options = {}) =
         try {
           result = await executeBookingTool(block.name, block.input, context);
           if (result?.success) successfulTools.add(block.name);
-          if (block.name === "prepare_reservation" && result?.success) {
-            bookingPayload = result.payload;
+          if (block.name === "prepare_reservation") {
+            if (result?.success) bookingPayload = result.payload;
+            preparedSummary = result?.success ? result.summaryText || null : null;
+          }
+          if (block.name === "confirm_reservation" && result?.success && result.paymentUrl) {
+            depositCheckout = result;
           }
         } catch (err) {
           result = { success: false, error: err.message };
@@ -337,11 +382,19 @@ export const processBookingChat = async (organization, messages, options = {}) =
   // Se agotaron las rondas sin llegar a una respuesta de texto (todas fueron
   // tool_use). Si la última tool ejecutada sí confirmó la reserva, no le digamos
   // al cliente que fracasó — eso generaría el mensaje contradictorio inverso.
+  if (isWhatsapp && preparedSummary && !successfulTools.has("confirm_reservation")) {
+    options.session.pendingSummaryShown = true;
+    return {
+      reply: `${preparedSummary}\n\n${SUMMARY_QUESTION}`,
+      bookingPayload,
+      _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: true, toolErrors },
+    };
+  }
   const reservationWasCreated = options.session?.reservationCreated === true;
   return {
     reply:
-      isWhatsapp && reservationWasCreated
-        ? "✅ ¡Listo! Tu reserva quedó agendada. Te esperamos."
+      isWhatsapp && (reservationWasCreated || depositCheckout)
+        ? confirmedReply(depositCheckout)
         : "Lo siento, no pude completar el proceso. Por favor intenta de nuevo.",
     bookingPayload,
     _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: true, toolErrors },

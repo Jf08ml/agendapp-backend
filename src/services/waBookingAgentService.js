@@ -68,7 +68,10 @@ setInterval(() => {
 }, PAUSE_TTL_MS).unref();
 
 // Historial en memoria: `${orgId}:${clientPhone}` →
-// { messages, lastActivity, sessionId, pendingPayload, reservationCreated }
+// { messages, lastActivity, sessionId, pendingPayload, pendingSummary,
+//   pendingSummaryShown, pendingDeposit, reservationCreated, hasConfirmedBookingThisSession }
+// pendingSummary* y pendingDeposit los manejan prepare_reservation / confirm_reservation
+// (booking-chatbot/tools/reservation.js): resumen oficial mostrado y abono por pagar.
 const sessions = new Map();
 
 function getOrCreateSession(orgId, clientPhone) {

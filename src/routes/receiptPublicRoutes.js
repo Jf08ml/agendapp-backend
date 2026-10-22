@@ -4,6 +4,7 @@ import {
   createReceiptReservationCheckout,
   createReceiptClassCheckout,
   createReceiptPackageCheckout,
+  getReceiptCheckout,
   submitReceipt,
 } from "../controllers/receiptController.js";
 import { getOrderStatus } from "../controllers/collectionController.js";
@@ -18,6 +19,7 @@ router.post("/receipt/reservation", createReceiptReservationCheckout);
 router.post("/receipt/class", createReceiptClassCheckout);
 router.post("/receipt/package", createReceiptPackageCheckout);
 router.post("/receipt/store", createReceiptStoreCheckout); // pedido de tienda pública
+router.get("/receipt/:externalReference", getReceiptCheckout); // enlace del bot de WhatsApp
 router.post("/receipt/:externalReference", upload.single("image"), submitReceipt);
 router.get("/order/:externalReference", getOrderStatus);
 

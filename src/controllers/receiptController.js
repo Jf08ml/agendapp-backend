@@ -132,6 +132,9 @@ export const createReceiptReservationCheckout = async (req, res) => {
 
     const timezone = org.timezone || "America/Bogota";
     const bookingSource = ["ai_chatbot", "manual_booking", "admin"].includes(source) ? source : "manual_booking";
+    if (reservationService.isStartInPast(startDate, timezone)) {
+      return sendResponse(res, 400, null, "Ese horario ya pasó. Elige un horario disponible.");
+    }
 
     const customer = await reservationService.ensureClientExists({
       name: customerDetails.name,
@@ -188,6 +191,7 @@ export const createReceiptReservationCheckout = async (req, res) => {
         externalReference: order.externalReference,
         amount: deposit.total,
         currency: deposit.currency,
+        expiresAt,
         paymentMethods: publicPaymentMethods(org),
       },
       "Checkout manual de reserva creado."
@@ -330,6 +334,39 @@ export const createReceiptPackageCheckout = async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // POST /collection/receipt/:externalReference  (multipart: campo "image")
+// GET /collection/receipt/:externalReference
+// Datos para pintar /pago/comprobante?ref=... sin el state de react-router: el
+// bot de WhatsApp envía ese enlace al cliente, que lo abre fuera del flujo web.
+export const getReceiptCheckout = async (req, res) => {
+  try {
+    const order = await Order.findOne({ externalReference: req.params.externalReference })
+      .select("organizationId provider status amount currency type externalReference expiresAt")
+      .lean();
+    if (!order || order.provider !== "receipt") {
+      return sendResponse(res, 404, null, "Orden no encontrada.");
+    }
+    const org = await Organization.findById(order.organizationId).select("paymentMethods").lean();
+    if (!org) return sendResponse(res, 404, null, "Organización no encontrada.");
+
+    return sendResponse(
+      res,
+      200,
+      {
+        externalReference: order.externalReference,
+        status: order.status,
+        amount: order.amount,
+        currency: order.currency,
+        orderType: order.type,
+        expiresAt: order.expiresAt,
+        paymentMethods: publicPaymentMethods(org),
+      },
+      "Checkout de comprobante."
+    );
+  } catch (err) {
+    return sendResponse(res, 400, null, err.message);
+  }
+};
+
 export const submitReceipt = async (req, res) => {
   try {
     const { externalReference } = req.params;

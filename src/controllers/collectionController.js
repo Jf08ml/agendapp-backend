@@ -146,6 +146,9 @@ export const createReservationCheckout = async (req, res) => {
 
     const timezone = org.timezone || "America/Bogota";
     const bookingSource = ["ai_chatbot", "manual_booking", "admin"].includes(source) ? source : "manual_booking";
+    if (reservationService.isStartInPast(startDate, timezone)) {
+      return sendResponse(res, 400, null, "Ese horario ya pasó. Elige un horario disponible.");
+    }
 
     // Asegurar cliente.
     const customer = await reservationService.ensureClientExists({
@@ -210,6 +213,7 @@ export const createReservationCheckout = async (req, res) => {
         externalReference: order.externalReference,
         amount: deposit.total,
         currency: deposit.currency,
+        expiresAt,
       },
       "Checkout de depósito creado."
     );

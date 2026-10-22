@@ -7,6 +7,66 @@ import scheduleService from "../../services/scheduleService.js";
 import packageService from "../../services/packageService.js";
 import { normalizePhoneNumber } from "../../utils/phoneUtils.js";
 import { getCustomFieldDefinitions, validateAndSplitCustomFieldValues } from "../../utils/customFieldUtils.js";
+import { resolveBaseUrl } from "../../utils/cancellationUtils.js";
+import { computeDepositForServices } from "../../services/collection/orderService.js";
+import { dateLabel } from "./availability.js";
+import { isPriceHidden } from "./services.js";
+
+const ACTIVE_APPOINTMENT_FILTER = { $nin: ["cancelled_by_customer", "cancelled_by_admin"] };
+
+const formatMoney = (amount, currency) =>
+  `$${Number(amount).toLocaleString("es-CO", { maximumFractionDigits: 2 })} ${currency}`;
+
+// Cómo se cobra el abono de una reserva: misma regla que BookingChatPanel.tsx
+// (web) — Mercado Pago si está conectado salvo que el negocio prefiera
+// comprobante; si no, transferencia + comprobante. null = no se cobra abono.
+async function resolveDepositPlan(organization, services) {
+  if (!organization.requireReservationDeposit) return null;
+  const hasMp = !!organization.mpCollect?.connected;
+  const hasReceipt = (organization.paymentMethods || []).length > 0;
+  if (!hasMp && !hasReceipt) return null;
+
+  const docs = await Service.find({ _id: { $in: services.map((s) => s.serviceId) } }).lean();
+  const byId = new Map(docs.map((d) => [String(d._id), d]));
+  const deposit = computeDepositForServices(
+    organization,
+    services.map((s) => {
+      const doc = byId.get(String(s.serviceId));
+      return { _id: doc?._id, price: Number(doc?.price || 0), deposit: doc?.deposit };
+    })
+  );
+  if (!deposit.required || deposit.total <= 0) return null;
+
+  const useReceipt = hasReceipt && (organization.depositPreferredMethod === "receipt" || !hasMp);
+  return { amount: deposit.total, currency: deposit.currency, method: useReceipt ? "receipt" : "mercadopago" };
+}
+
+// ¿La cadena de servicios cabe en `start` con los profesionales ya asignados?
+// Misma fuente que get_available_slots: horario del negocio y del profesional,
+// descansos, citas existentes y horas ya pasadas.
+async function isSlotAvailable(resolved, start, organization) {
+  const timezone = organization.timezone || "America/Bogota";
+  const date = start.slice(0, 10);
+  const employeeIds = [...new Set(resolved.map((r) => r.employeeId))];
+  const employees = await Employee.find({ _id: { $in: employeeIds } }).lean();
+  const dayAppointments = await Appointment.find({
+    organizationId: organization._id,
+    employee: { $in: employeeIds },
+    startDate: {
+      $gte: moment.tz(date, timezone).startOf("day").toDate(),
+      $lte: moment.tz(date, timezone).endOf("day").toDate(),
+    },
+    status: ACTIVE_APPOINTMENT_FILTER,
+  }).lean();
+  const blocks = scheduleService.findAvailableMultiServiceBlocks(
+    date,
+    organization,
+    resolved,
+    employees,
+    dayAppointments
+  );
+  return blocks.some((b) => b.start === start);
+}
 
 // Busca un paquete de sesiones activo del cliente que cubra TODOS los
 // servicios solicitados (con sesiones disponibles en cada uno). El endpoint
@@ -45,7 +105,7 @@ async function findCoveringPackage(phone_e164, serviceIds, organizationId) {
 // Resuelve un servicio: acepta ObjectId válido o nombre parcial. Devuelve el doc completo.
 async function resolveService(value, organizationId) {
   if (mongoose.Types.ObjectId.isValid(value)) {
-    const byId = await Service.findById(value).lean();
+    const byId = await Service.findOne({ _id: value, organizationId }).lean();
     if (byId) return byId;
   }
   // Intenta buscar por nombre (case-insensitive, coincidencia parcial)
@@ -56,15 +116,19 @@ async function resolveService(value, organizationId) {
   }).lean();
 }
 
-// Resuelve un employeeId: acepta ObjectId válido o nombre parcial.
-async function resolveEmployeeId(value, organizationId) {
+// Resuelve un employeeId: acepta ObjectId válido o nombre parcial. Solo devuelve
+// profesionales activos del negocio que atienden el servicio — antes cualquier
+// ObjectId pasaba tal cual. Un nombre inventado (caso real 2026-10-22: "Diana
+// Vargas", tomado del nombre del negocio) queda en null y se auto-asigna.
+async function resolveEmployeeId(value, organizationId, serviceId) {
   if (!value) return null;
-  if (mongoose.Types.ObjectId.isValid(value)) return value;
-  const found = await Employee.findOne({
-    organizationId,
-    names: { $regex: String(value).replace(/-/g, " "), $options: "i" },
-    isActive: true,
-  }).lean();
+  const filter = { organizationId, isActive: true, services: serviceId };
+  const found = mongoose.Types.ObjectId.isValid(value)
+    ? await Employee.findOne({ ...filter, _id: value }).select("_id").lean()
+    : await Employee.findOne({
+        ...filter,
+        names: { $regex: String(value).replace(/-/g, " "), $options: "i" },
+      }).select("_id").lean();
   return found ? found._id.toString() : null;
 }
 
@@ -156,7 +220,9 @@ async function autoAssignAvailableEmployees(resolved, startDate, organization, o
 export const prepareReservation = {
   name: "prepare_reservation",
   description:
-    "Llama esto cuando tengas TODA la información necesaria y el usuario haya dicho que sí al resumen, para crear una reserva NUEVA. Prepara el payload final para que el frontend cree la reserva al hacer clic en el botón de confirmación. " +
+    "Prepara una reserva NUEVA cuando tengas TODA la información necesaria. Valida que el horario esté realmente disponible y no crea nada. " +
+    "Web: llámala cuando el usuario diga que sí al resumen — el frontend crea la reserva con el botón de confirmación. " +
+    "WhatsApp: llámala ANTES de mostrar el resumen — devuelve summaryText, el resumen oficial que debes enviarle al cliente. " +
     "NO la uses para mover una cita que el cliente ya tiene agendada — eso crearía una cita duplicada. Para reprogramar una cita existente usa reschedule_appointment.",
   parameters: {
     services: {
@@ -222,6 +288,14 @@ export const prepareReservation = {
       customFieldValues: rawCustomFieldValues,
     } = params;
 
+    // WhatsApp: una preparación nueva reemplaza a la anterior, también si falla —
+    // así un "sí" posterior nunca confirma un resumen viejo.
+    if (context.session) {
+      context.session.pendingPayload = null;
+      context.session.pendingSummary = null;
+      context.session.pendingSummaryShown = false;
+    }
+
     if (!services?.length || !startDate || !customerName) {
       return { success: false, error: "Faltan datos requeridos para la reserva." };
     }
@@ -265,6 +339,22 @@ export const prepareReservation = {
       }
     }
 
+    const timezone = organization.timezone || "America/Bogota";
+    const startMoment = moment.tz(
+      String(startDate).slice(0, 19),
+      ["YYYY-MM-DDTHH:mm:ss", "YYYY-MM-DDTHH:mm"],
+      true,
+      timezone
+    );
+    if (!startMoment.isValid()) {
+      return {
+        success: false,
+        error: `Fecha/hora inválida: ${startDate}.`,
+        _instruction: "Usa como startDate el campo isoString exacto que devolvió get_available_slots.",
+      };
+    }
+    const start = startMoment.format("YYYY-MM-DDTHH:mm:ss");
+
     // Resolver IDs (el AI a veces usa nombres en lugar de ObjectIds)
     const resolved = [];
     for (const s of services) {
@@ -272,17 +362,40 @@ export const prepareReservation = {
       if (!svcDoc) {
         return { success: false, error: `No se encontró el servicio: ${s.serviceId}. Usa el campo 'id' exacto que devolvió get_services.` };
       }
-      const employeeId = await resolveEmployeeId(s.employeeId, organizationId);
+      const employeeId = await resolveEmployeeId(s.employeeId, organizationId, svcDoc._id);
       resolved.push({
         serviceId: svcDoc._id.toString(),
         employeeId,
         duration: svcDoc.duration || 30,
         maxConcurrentAppointments: svcDoc.maxConcurrentAppointments ?? 1,
+        name: svcDoc.name,
+        price: Number(svcDoc.price || 0),
+        priceHidden: isPriceHidden(svcDoc, String(organization.currency || "COP").toUpperCase()),
       });
     }
 
     // Auto-asignar empleados disponibles en el slot a los servicios sin preferencia
-    await autoAssignAvailableEmployees(resolved, startDate, organization, organizationId);
+    await autoAssignAvailableEmployees(resolved, start, organization, organizationId);
+
+    if (resolved.some((r) => !r.employeeId)) {
+      return {
+        success: false,
+        error: "Ningún profesional activo atiende este servicio.",
+        _instruction:
+          "Este servicio no se puede reservar en línea. Díselo al cliente con amabilidad y ofrécele otro servicio o el contacto del negocio (get_organization_info). NO inventes profesionales.",
+      };
+    }
+
+    // El modelo puede proponer una hora que nunca consultó (caso real 2026-10-22:
+    // "jueves 9am" agendado hoy a las 3 p. m., sin llamar get_available_slots).
+    if (!(await isSlotAvailable(resolved, start, organization))) {
+      return {
+        success: false,
+        error: `El horario ${start} no está disponible (ya pasó, está fuera del horario o está ocupado).`,
+        _instruction:
+          "NO ofrezcas ni confirmes ese horario. Llama get_available_slots para esa fecha (o get_available_dates si ya no hay cupos ese día) y ofrécele al cliente los horarios reales.",
+      };
+    }
 
     // Normalizar teléfono a E.164 con el país del negocio (el cliente puede
     // escribirlo con espacios, guiones o sin código de país)
@@ -318,7 +431,7 @@ export const prepareReservation = {
 
     const payload = {
       services: resolved.map(({ serviceId, employeeId }) => ({ serviceId, employeeId })),
-      startDate,
+      startDate: start,
       customerDetails: {
         name: customerName,
         phone: normalizedPhone,
@@ -343,16 +456,69 @@ export const prepareReservation = {
       ? ` Esta reserva se paga con ${coveringPackage.packageName} del cliente — el costo es $0, NO menciones un precio a pagar ni pidas depósito, solo confirma que se descuenta de su paquete.`
       : "";
 
+    if (context.channel !== "whatsapp") {
+      return {
+        success: true,
+        payload,
+        usingPackage: !!coveringPackage,
+        packageName: coveringPackage?.packageName || null,
+        _instruction:
+          "PAYLOAD LISTO. La reserva NO ha sido creada todavía. El frontend mostrará un botón al cliente. NO digas que la reserva fue creada, confirmada ni procesada. Di ÚNICAMENTE que el botón de confirmación ya está listo para que el cliente haga clic." +
+          packageNote,
+      };
+    }
+
+    // WhatsApp: no hay tarjeta de confirmación, así que el resumen que ve el
+    // cliente se arma aquí con los datos ya resueltos. Antes lo redactaba el
+    // modelo de memoria ANTES de esta tool y llegó a nombrar a una profesional
+    // que no existe (caso real 2026-10-22).
+    const currency = String(organization.currency || "COP").toUpperCase();
+    const employeeNames = new Map(
+      (await Employee.find({ _id: { $in: resolved.map((r) => r.employeeId) } }).select("names").lean())
+        .map((e) => [e._id.toString(), e.names])
+    );
+    const timeLabel = new Intl.DateTimeFormat("es-ES", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: (organization.timeFormat || "12h") !== "24h",
+      timeZone: timezone,
+    }).format(startMoment.toDate());
+    const dayLabel = dateLabel(start.slice(0, 10), timezone);
+    const depositPlan = coveringPackage ? null : await resolveDepositPlan(organization, payload.services);
+
+    const lines = ["📋 *Resumen de tu reserva*", ""];
+    for (const r of resolved) {
+      lines.push(`✨ *${r.name}* con ${employeeNames.get(r.employeeId) || "nuestro equipo"}`);
+    }
+    lines.push(`📅 ${dayLabel.charAt(0).toUpperCase()}${dayLabel.slice(1)}, ${timeLabel}`);
+    lines.push(`👤 ${customerName}`);
+    lines.push(`📱 ${normalizedPhone}`);
+    for (const def of customFieldDefs) {
+      const value = rawCustomFieldValues?.[def.key];
+      if (value !== undefined && value !== null && value !== "") lines.push(`📝 ${def.label || def.key}: ${value}`);
+    }
+    if (coveringPackage) {
+      lines.push(`📦 Se descuenta de ${coveringPackage.packageName} (sin costo)`);
+    } else if (resolved.every((r) => !r.priceHidden)) {
+      lines.push(`💰 Precio: ${formatMoney(resolved.reduce((sum, r) => sum + r.price, 0), currency)}`);
+    } else {
+      lines.push("💰 Precio: se confirma directamente con el negocio");
+    }
+    if (depositPlan) {
+      lines.push(
+        `💳 Abono para confirmar: *${formatMoney(depositPlan.amount, depositPlan.currency)}* — apenas confirmes te envío el enlace para pagarlo.`
+      );
+    }
+    const summaryText = lines.join("\n");
+    if (context.session) context.session.pendingSummary = summaryText;
+
     return {
       success: true,
       payload,
+      summaryText,
       usingPackage: !!coveringPackage,
-      packageName: coveringPackage?.packageName || null,
       _instruction:
-        (context.channel === "whatsapp"
-          ? "PAYLOAD LISTO. La reserva NO ha sido creada todavía. El cliente YA confirmó el resumen — llama confirm_reservation AHORA MISMO, en esta misma respuesta, sin escribir texto al cliente todavía."
-          : "PAYLOAD LISTO. La reserva NO ha sido creada todavía. El frontend mostrará un botón al cliente. NO digas que la reserva fue creada, confirmada ni procesada. Di ÚNICAMENTE que el botón de confirmación ya está listo para que el cliente haga clic.") +
-        packageNote,
+        "RESUMEN LISTO — la reserva NO está creada. Envía al cliente summaryText tal cual y pregúntale \"¿Todo está correcto? ¿Confirmo tu reserva?\". NO llames confirm_reservation en esta respuesta: espera a que el cliente responda que sí.",
     };
   },
 };
@@ -377,6 +543,62 @@ function makeMockRes() {
   return res;
 }
 
+// Crea el checkout del abono reutilizando los mismos controllers que la web
+// (POST /mp/... y /collection/receipt/reservation) con un req/res simulado. Las
+// reservas quedan en pending y se aprueban solas cuando el pago se valida.
+async function startDepositCheckout(payload, depositPlan, context) {
+  const isMp = depositPlan.method === "mercadopago";
+  const { createReservationCheckout } = await import("../../controllers/collectionController.js");
+  const { createReceiptReservationCheckout } = await import("../../controllers/receiptController.js");
+
+  const res = makeMockRes();
+  try {
+    await (isMp ? createReservationCheckout : createReceiptReservationCheckout)(
+      { body: { ...payload, source: "ai_chatbot" } },
+      res
+    );
+  } catch (err) {
+    console.error("[confirm_reservation] Error creando el cobro del abono:", err);
+    return { success: false, error: err.message || "No se pudo generar el pago del abono." };
+  }
+
+  const data = res.body?.data;
+  if (res.statusCode < 200 || res.statusCode >= 300 || !data) {
+    return {
+      success: false,
+      error: res.body?.message || "No se pudo generar el pago del abono.",
+      _instruction:
+        "La reserva NO se apartó. Explica el problema al cliente y ofrece buscar otro horario con get_available_slots.",
+    };
+  }
+
+  const paymentUrl = isMp
+    ? data.checkoutUrl
+    : `${resolveBaseUrl(context.organization)}/pago/comprobante?ref=${data.externalReference}`;
+  const holdMinutes = Math.max(1, Math.round((new Date(data.expiresAt).getTime() - Date.now()) / 60000));
+  const amountLabel = formatMoney(data.amount, data.currency);
+
+  context.session.pendingPayload = null;
+  context.session.pendingSummary = null;
+  context.session.pendingDeposit = { paymentUrl, amountLabel, expiresAt: data.expiresAt, method: depositPlan.method };
+  context.session.hasConfirmedBookingThisSession = true;
+
+  return {
+    success: true,
+    paymentRequired: true,
+    paymentUrl,
+    depositAmount: amountLabel,
+    holdMinutes,
+    _instruction:
+      `La reserva quedó APARTADA, todavía NO confirmada: se confirma cuando el cliente pague el abono de ${amountLabel}. ` +
+      `Dile que tiene ${holdMinutes} minutos para pagarlo en el enlace paymentUrl (cópialo completo, tal cual) — ` +
+      (isMp
+        ? "puede pagar con Mercado Pago. "
+        : "ahí verá los datos para transferir y sube la foto del comprobante. ") +
+      "Si no lo paga a tiempo el horario se libera. Cuando el pago se valide recibirá la confirmación por WhatsApp. NO digas que la reserva ya está confirmada.",
+  };
+}
+
 export const confirmReservation = {
   name: "confirm_reservation",
   description:
@@ -390,6 +612,26 @@ export const confirmReservation = {
         error:
           "No hay ninguna reserva preparada en esta conversación. Llama prepare_reservation primero con todos los datos.",
       };
+    }
+    // El cliente tiene que haber visto el resumen oficial antes de confirmar.
+    if (context.session.pendingSummaryShown === false) {
+      return {
+        success: false,
+        error: "El cliente todavía no ha visto el resumen de esta reserva.",
+        _instruction:
+          "Envíale el resumen (summaryText de prepare_reservation) y espera a que responda que sí antes de llamar confirm_reservation.",
+      };
+    }
+
+    // 💳 Pay-to-confirm: igual que en la web, si el negocio exige abono la reserva
+    // no se crea directo — se abre el cobro (reserva apartada con hold) y se le
+    // envía el enlace al cliente. Antes el bot prometía "el abono lo pagas en el
+    // siguiente paso" y la cita quedaba confirmada sin cobrar nada.
+    const depositPlan = payload.clientPackageId
+      ? null
+      : await resolveDepositPlan(context.organization, payload.services);
+    if (depositPlan) {
+      return startDepositCheckout(payload, depositPlan, context);
     }
 
     // Import diferido para evitar ciclo de dependencias en la carga del módulo
@@ -417,6 +659,7 @@ export const confirmReservation = {
     if (res.statusCode >= 200 && res.statusCode < 300) {
       const usedPackage = !!payload.clientPackageId;
       context.session.pendingPayload = null;
+      context.session.pendingSummary = null;
       context.session.reservationCreated = true;
       context.session.hasConfirmedBookingThisSession = true;
       return {

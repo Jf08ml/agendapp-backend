@@ -155,6 +155,14 @@ async function assertConcurrencyNotExceeded(reservation) {
 }
 
 const reservationService = {
+  // ¿La hora local de inicio ("YYYY-MM-DDTHH:mm:ss" en la zona del negocio) ya pasó?
+  // Los endpoints públicos de reserva no lo validaban: el bot de WhatsApp agendó
+  // "hoy 9:00 a. m." a las 3 p. m. y la cita quedó confirmada (2026-10-22).
+  isStartInPast: (startDate, timezone) => {
+    const start = moment.tz(startDate, "YYYY-MM-DDTHH:mm:ss", timezone);
+    return start.isValid() && start.isBefore(moment());
+  },
+
   // Crear una nueva reserva
   createReservation: async (reservationData, session = null) => {
     // 🔐 Generar token de cancelación

@@ -3,6 +3,10 @@ import Service from "../../models/serviceModel.js";
 // Monedas donde un precio de 1 puede ser real (no se interpreta como placeholder).
 const HARD_CURRENCIES = new Set(["USD", "EUR", "GBP", "PEN", "CAD", "AUD", "CHF", "BRL"]);
 
+// Precio que no se le muestra al cliente (ver comentario en get_services).
+export const isPriceHidden = (service, currency) =>
+  service.hidePrice === true || (!HARD_CURRENCIES.has(currency) && service.price === 1);
+
 export const getServices = {
   name: "get_services",
   description:
@@ -10,8 +14,6 @@ export const getServices = {
   parameters: {},
   handler: async (_params, { organizationId, organization }) => {
     const currency = (organization?.currency || "COP").toUpperCase();
-    const isPlaceholderPrice = (price) =>
-      !HARD_CURRENCIES.has(currency) && price === 1;
     const services = await Service.find({ organizationId, isActive: true })
       .select("_id name type duration price description featured hidePrice")
       .sort({ _id: 1 })
@@ -30,8 +32,8 @@ export const getServices = {
         // el placeholder que usan los negocios para "precio a confirmar" (el bot
         // mostraba "Blower y planchado — $1"): se trata como precio oculto. En USD/EUR
         // $1 puede ser un precio real (ej. "Cejas $1"), así que ahí no aplica.
-        price: s.hidePrice || isPlaceholderPrice(s.price) ? null : s.price,
-        priceHidden: s.hidePrice === true || isPlaceholderPrice(s.price),
+        price: isPriceHidden(s, currency) ? null : s.price,
+        priceHidden: isPriceHidden(s, currency),
         description: s.description || "",
         featured: s.featured === true,
       })),

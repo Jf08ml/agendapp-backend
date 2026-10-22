@@ -696,6 +696,10 @@ const reservationController = {
       // Obtener la zona horaria de la organización
       const timezone = org.timezone || 'America/Bogota';
 
+      if (bookingSource !== "admin" && reservationService.isStartInPast(startDate, timezone)) {
+        return sendResponse(res, 400, null, "Ese horario ya pasó. Elige un horario disponible.");
+      }
+
       // 🧩 Campos personalizados (Organization.clientFormConfig.fields)
       const customFieldDefs = getCustomFieldDefinitions(org.clientFormConfig?.fields);
       const { clientValues, bookingValues } = validateAndSplitCustomFieldValues(
