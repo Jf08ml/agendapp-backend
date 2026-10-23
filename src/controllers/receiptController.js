@@ -474,12 +474,30 @@ export const submitReceipt = async (req, res) => {
       try {
         await fulfillOrder(claimed);
       } catch (e) {
-        // Revertir el claim si el cumplimiento falla, para no dejarla "paid" sin citas.
+        // El comprobante es válido pero la cita no se pudo crear (ej. el profesional
+        // ya tiene otra cita a esa hora). Antes se lanzaba el error: el cliente veía
+        // "no se pudo procesar" y el admin no se enteraba. Ahora queda en revisión
+        // con el motivo, se avisa al admin para resolverlo y al cliente se le dice
+        // que está en revisión.
+        const fulfillError = e.message || "No se pudo confirmar la reserva.";
+        console.warn(`[submitReceipt] Comprobante válido pero falló la confirmación (${externalReference}):`, fulfillError);
         await Order.updateOne(
           { _id: order._id },
-          { $set: { status: "in_review", "receipt.reviewStatus": "pending_review" }, $unset: { paidAt: 1 } }
+          {
+            $set: { status: "in_review", "receipt.reviewStatus": "pending_review", "receipt.fulfillError": fulfillError },
+            $unset: { paidAt: 1 },
+          }
         );
-        throw e;
+        notifyAdminReceipt({ org, order: claimed, autoApproved: false, fulfillError }).catch((err) =>
+          console.warn("[submitReceipt] notify falló:", err?.message || err)
+        );
+        notifyClientReceipt({ org, order, outcome: "in_review" });
+        return sendResponse(
+          res,
+          200,
+          { status: "in_review", autoApproved: false, externalReference },
+          "Recibimos tu comprobante. Lo estamos validando y te confirmaremos pronto."
+        );
       }
       notifyAdminReceipt({ org, order: claimed, autoApproved: true }).catch((err) =>
         console.warn("[submitReceipt] notify falló:", err?.message || err)
@@ -540,6 +558,39 @@ export const listReceiptOrders = async (req, res) => {
       .limit(200)
       .lean();
 
+    // Reserva vinculada (cliente, servicio, profesional, fecha y estado) para que
+    // el admin sepa qué está aprobando sin ir a Gestionar reservas.
+    const groupIds = orders.filter((o) => o.type === "reservation" && o.refId).map((o) => o.refId);
+    if (groupIds.length) {
+      const reservations = await Reservation.find({ groupId: { $in: groupIds } })
+        .populate("serviceId", "name")
+        .populate("employeeId", "names")
+        .select("groupId serviceId employeeId startDate status customerDetails")
+        .sort({ startDate: 1 })
+        .lean();
+      const byGroup = new Map();
+      for (const r of reservations) {
+        const key = String(r.groupId);
+        if (!byGroup.has(key)) byGroup.set(key, []);
+        byGroup.get(key).push(r);
+      }
+      for (const o of orders) {
+        const rs = byGroup.get(String(o.refId));
+        if (!rs?.length) continue;
+        o.linkedReservation = {
+          customerName: rs[0].customerDetails?.name || "",
+          customerPhone: rs[0].customerDetails?.phone || "",
+          items: rs.map((r) => ({
+            reservationId: r._id,
+            service: r.serviceId?.name || "",
+            employee: r.employeeId?.names?.trim() || null,
+            startDate: r.startDate,
+            status: r.status,
+          })),
+        };
+      }
+    }
+
     return sendResponse(res, 200, { orders }, "Comprobantes.");
   } catch (err) {
     return sendResponse(res, 400, null, err.message);
@@ -586,15 +637,27 @@ export const reviewReceiptOrder = async (req, res) => {
     try {
       if (decision === "approve") {
         await fulfillOrder(order);
+        await Order.updateOne({ _id: order._id }, { $set: { "receipt.fulfillError": null } });
       } else {
         await releaseOrderHold(order, "El comprobante de pago fue rechazado por el negocio.");
       }
     } catch (e) {
-      // Revertir el claim si falla el cumplimiento/liberación.
+      // Revertir el claim si falla el cumplimiento/liberación, guardando el motivo
+      // para mostrarlo en la bandeja de comprobantes.
       await Order.updateOne(
         { _id: order._id },
-        { $set: { status: "in_review", "receipt.reviewStatus": "pending_review" }, $unset: { paidAt: 1 } }
+        {
+          $set: {
+            status: "in_review",
+            "receipt.reviewStatus": "pending_review",
+            ...(decision === "approve" ? { "receipt.fulfillError": e.message } : {}),
+          },
+          $unset: { paidAt: 1 },
+        }
       );
+      if (decision === "approve") {
+        e.message = `${e.message}. Cambia el profesional u horario en Gestionar reservas y aprueba la reserva allí junto con el pago.`;
+      }
       throw e;
     }
     // La aprobación ya le llega como confirmación de su cita; el rechazo no le llegaba.

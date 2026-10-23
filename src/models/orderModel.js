@@ -130,6 +130,10 @@ const orderSchema = new mongoose.Schema(
       reviewedBy: { type: String }, // id/nombre del admin que decidió
       reviewedAt: { type: Date },
       reviewNotes: { type: String }, // motivo del rechazo, opcional
+      // El pago se validó (IA o admin) pero no se pudo confirmar la reserva al
+      // crear la cita (ej. el profesional ya tiene otra cita a esa hora). Queda en
+      // in_review hasta que el admin lo resuelva en Gestionar reservas; null al cumplirse.
+      fulfillError: { type: String, default: null },
     },
 
     // Nº de comprobantes subidos para esta orden (anti-abuso: cada subida llama

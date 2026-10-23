@@ -266,6 +266,12 @@ const reservationService = {
 
     const reservations = await Reservation.find({ _id: { $in: allIds } })
       .populate("serviceId employeeId customer appointmentId")
+      // Pago del abono (comprobante en revisión, pagado…) para resolverlo desde
+      // Gestionar reservas sin ir a la bandeja de comprobantes.
+      .populate(
+        "orderId",
+        "status amount currency provider externalReference receipt.imageUrl receipt.aiVerdict receipt.aiNotes receipt.reviewStatus receipt.uploadedAt receipt.fulfillError"
+      )
       .sort({ startDate: 1, createdAt: -1 });
 
     // Reordenar según el orden de filas/grupos calculado arriba (sort estable:

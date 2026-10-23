@@ -37,19 +37,29 @@ const TYPE_LABEL = {
  * @param {Object} p.order      Order con el comprobante
  * @param {boolean} p.autoApproved  true si la IA confirmó sola; false si requiere revisión
  */
-export async function notifyAdminReceipt({ org, order, autoApproved }) {
+export async function notifyAdminReceipt({ org, order, autoApproved, fulfillError }) {
   const label = TYPE_LABEL[order.type] || "pago";
   const amount = `${order.amount} ${order.currency || ""}`.trim();
 
+  // fulfillError: el comprobante es válido pero la reserva no se pudo confirmar
+  // (ej. el profesional ya tiene otra cita) — hay que resolverla en Gestionar reservas.
   const title = autoApproved
     ? "Pago confirmado ✅"
+    : fulfillError
+    ? "Pago recibido, reserva sin confirmar ⚠️"
     : "Comprobante por revisar 🧾";
   const message = autoApproved
     ? `Se confirmó automáticamente un pago de ${label} por ${amount}.`
+    : fulfillError
+    ? `El comprobante de ${label} por ${amount} es válido, pero no se pudo confirmar la reserva: ${fulfillError}. Cambia el profesional u horario en Gestionar reservas y apruébala junto con el pago.`
     : `Recibiste un comprobante de ${label} por ${amount} que requiere tu revisión.`;
 
-  // Ruta del panel admin (lista de comprobantes / agenda).
-  const frontendRoute = autoApproved ? "/gestionar-agenda" : "/gestionar-pagos";
+  // Ruta del panel admin (lista de comprobantes / agenda / reservas).
+  const frontendRoute = autoApproved
+    ? "/gestionar-agenda"
+    : fulfillError && order.type === "reservation"
+    ? "/gestionar-reservas-online"
+    : "/gestionar-pagos";
 
   // 1) In-app + 2) Push (no se interrumpen entre sí).
   await Promise.allSettled([
@@ -97,6 +107,8 @@ export async function notifyAdminReceipt({ org, order, autoApproved }) {
       .join(" · ") || "—";
     const estado = autoApproved
       ? "Validado automáticamente con IA ✅"
+      : fulfillError
+      ? `Pago válido, pero la reserva no se confirmó (${fulfillError}). Resuélvelo en panel → Gestionar reservas ⚠️`
       : "Requiere tu revisión: panel → Comprobantes de pago 🧾";
 
     // b) Canal de la org (mismo ruteo Baileys/Meta del resto de notificaciones).
