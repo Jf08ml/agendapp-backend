@@ -23,6 +23,7 @@ import * as orderService from "../services/collection/orderService.js";
 import * as receiptValidation from "../services/collection/receiptValidationService.js";
 import { fulfillOrder, releaseOrderHold } from "../services/collection/fulfillmentService.js";
 import { notifyAdminReceipt } from "../services/collection/adminPaymentNotifier.js";
+import { notifyClientReceipt } from "../services/collection/clientReceiptNotifier.js";
 import reservationService from "../services/reservationService.js";
 import enrollmentService from "../services/enrollmentService.js";
 import Organization from "../models/organizationModel.js";
@@ -501,6 +502,7 @@ export const submitReceipt = async (req, res) => {
       order: { type: order.type, amount: order.amount, currency: order.currency, receipt: receiptDoc },
       autoApproved: false,
     }).catch((err) => console.warn("[submitReceipt] notify falló:", err?.message || err));
+    notifyClientReceipt({ org, order, outcome: "in_review" });
 
     return sendResponse(
       res,
@@ -594,6 +596,10 @@ export const reviewReceiptOrder = async (req, res) => {
         { $set: { status: "in_review", "receipt.reviewStatus": "pending_review" }, $unset: { paidAt: 1 } }
       );
       throw e;
+    }
+    // La aprobación ya le llega como confirmación de su cita; el rechazo no le llegaba.
+    if (decision === "reject") {
+      notifyClientReceipt({ org: req.organization, order, outcome: "rejected" });
     }
 
     return sendResponse(res, 200, { status: order.status }, decision === "approve" ? "Pago aprobado." : "Comprobante rechazado.");
