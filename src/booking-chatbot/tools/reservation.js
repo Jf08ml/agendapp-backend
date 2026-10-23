@@ -599,6 +599,17 @@ async function startDepositCheckout(payload, depositPlan, context) {
   };
 }
 
+// Respuesta afirmativa explícita del cliente al resumen ("sí", "dale",
+// "confirmo", "agéndeme"...). Caso real (Diana Vargas Studio, 2026-10-23): a
+// "¿Confirmo tu reserva?" la clienta respondió "Ya está echo un abono de 25" y el
+// modelo lo tomó como un sí — se apartó la reserva y se le dijo que ya había pagado.
+const AFFIRMATIVE_PATTERN =
+  /^\s*(s[ií]+|dale|ok(ay|i)?|listo|confirm[oa]?|claro|perfecto|h[aá]gale|de una|correcto|est[aá] bien|de acuerdo|por ?favor|ag[eé]nd[ae]me|ag[eé]nd[ae]la|reserv[ae]la|va|vale|bueno,? s[ií])(?![\wáéíóúñ])/i;
+
+export function isExplicitConfirmation(text) {
+  return AFFIRMATIVE_PATTERN.test(String(text || ""));
+}
+
 export const confirmReservation = {
   name: "confirm_reservation",
   description:
@@ -620,6 +631,19 @@ export const confirmReservation = {
         error: "El cliente todavía no ha visto el resumen de esta reserva.",
         _instruction:
           "Envíale el resumen (summaryText de prepare_reservation) y espera a que responda que sí antes de llamar confirm_reservation.",
+      };
+    }
+    // Y su último mensaje tiene que ser un sí explícito — una pregunta, un
+    // comentario o un "ya pagué" no confirman nada.
+    const lastUserText = [...(context.session.messages || [])]
+      .reverse()
+      .find((m) => m.role === "user" && typeof m.content === "string")?.content;
+    if (!isExplicitConfirmation(lastUserText)) {
+      return {
+        success: false,
+        error: "El cliente no confirmó explícitamente el resumen en su último mensaje.",
+        _instruction:
+          "NO se creó nada. Responde a lo que el cliente dijo en su último mensaje y, si sigue interesado, pregúntale de nuevo si confirma la reserva.",
       };
     }
 

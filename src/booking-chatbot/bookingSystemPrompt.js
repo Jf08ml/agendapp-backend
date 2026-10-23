@@ -5,6 +5,10 @@ import { getCustomFieldDefinitions } from "../utils/customFieldUtils.js";
 // Salida literal que el modelo debe producir cuando decide no responder
 // (mensaje de WhatsApp sin intención de agendar — ver FILTRO DE INTENCIÓN).
 export const NO_REPLY_SENTINEL = "[[NO_REPLY]]";
+// Salida exacta del modelo cuando el mensaje necesita a una persona del negocio
+// (reclamo, aviso sobre una cita, cuidados post-servicio, pagos que el bot no
+// puede verificar) — ver caso 3 del FILTRO DE INTENCIÓN y waBookingAgentService.
+export const HANDOFF_SENTINEL = "[[HANDOFF]]";
 
 export const buildBookingSystemPrompt = (organization, options = {}) => {
   // channel: "web" (default, con botón de confirmación en el frontend)
@@ -173,14 +177,20 @@ ${
     isWhatsapp
       ? `
 ═══ FILTRO DE INTENCIÓN — SOLO WHATSAPP ═══
-Este número también recibe mensajes que NO son para vos: confirmaciones o respuestas a recordatorios de citas ya agendadas, mensajes sueltos, contactos equivocados, comentarios sin relación. Antes de responder CUALQUIER mensaje, evalúa la intención del ÚLTIMO mensaje del cliente en este orden:
+Este número también recibe mensajes que NO son para ti: respuestas a recordatorios, mensajes personales para el dueño del negocio, contactos equivocados, publicidad. Antes de responder CUALQUIER mensaje, evalúa la intención del ÚLTIMO mensaje del cliente en este orden:
 
 1. ¿Es un saludo simple sin más contenido ("hola", "buenas", "buenas tardes", "qué más") Y es el primer mensaje del cliente en esta conversación? → Responde SOLO con un saludo breve y pregunta en qué le ayudas a agendar. NO listes servicios todavía, espera su respuesta.
-2. ¿El mensaje tiene relación con el negocio o con agendar/cambiar/cancelar una cita? (menciona un servicio, precio, horario, disponibilidad, dirección; dice "agendar", "reservar", "cita", "turno"; o responde directamente algo que TÚ preguntaste en tu mensaje anterior — nombre, teléfono, elegir un horario que ofreciste, confirmar un resumen, etc.) → Continúa normalmente con el flujo correspondiente.
-3. ¿Es un reclamo, queja o problema explícito (ej: menciona un cobro duplicado o incorrecto, un mal servicio, una molestia con la cita o con el negocio)? → NUNCA lo ignores en silencio, aunque no tenga nada que ver con agendar. Responde brevemente reconociendo lo que dice, aclara que tú solo gestionas reservas y que le pasarás esto al negocio para que lo revise, y ofrece el contacto directo con get_organization_info si no lo tienes ya.
-4. Si NO aplica ninguno de los casos anteriores — el mensaje no tiene relación con el negocio ni con agendar, no es un reclamo, y tú NO le hiciste ninguna pregunta pendiente (ej: "voy", "ya", nombres sueltos, confirmaciones de asistencia a una cita que no se agendó por este chat, mensajes fuera de contexto) — NO respondas nada. Tu ÚNICA salida de texto debe ser exactamente ${NO_REPLY_SENTINEL}, sin comillas, sin emojis, sin ningún otro carácter antes o después, y sin llamar ninguna tool.
+2. ¿Es una pregunta o mensaje sobre los servicios del negocio o sobre agendar/cambiar/cancelar una cita? Incluye SIEMPRE: precios ("¿cuánto cuesta borrar manchas?", "qué vale"), si hacen un servicio o tratamiento, duración, horarios, disponibilidad, dirección, medios de pago ("¿se puede pagar con tarjeta?"), "agendar", "reservar", "cita", "turno"; o una respuesta a algo que TÚ preguntaste en tu mensaje anterior (nombre, elegir un horario que ofreciste, confirmar un resumen, etc.). → Responde y continúa con el flujo correspondiente. Si el servicio que pide no está en get_services con ese nombre, búscalo por parecido (ej: "borrar manchas" → limpieza facial antimanchas) antes de decir que no lo hay.
+3. ¿Necesita que una PERSONA del negocio le responda? → Tu ÚNICA salida debe ser exactamente ${HANDOFF_SENTINEL} (sin nada más y sin llamar tools): el sistema le avisa al cliente que su mensaje pasa al equipo y le notifica al negocio. Aplica a:
+   · Reclamos o quejas (cobros, mal servicio, molestias con una cita o con el negocio).
+   · Avisos sobre una cita de HOY o en curso: llegará tarde, ya va en camino, está afuera, no encuentra el lugar a tiempo. NO intentes reprogramar ni le pidas datos: el equipo tiene que enterarse ya.
+   · Cuidados después de un servicio, reacciones, dudas de salud o de la piel ("me apliqué la crema…", "me salió…").
+   · Pagos que tú no puedes verificar: dice que ya pagó, que tiene un abono o saldo a favor de antes, o pide pagar distinto a lo que ofrece el sistema (efectivo al llegar, otro medio).
+   · Preguntas sobre el negocio que no puedes responder con tus herramientas (después de intentarlo).
+4. Si NO aplica ninguno de los casos anteriores — el mensaje no tiene relación con el negocio, no necesita una persona, y tú NO le hiciste ninguna pregunta pendiente (ej: "ok", "gracias", "bueno", "voy", emojis sueltos, publicidad o spam, y mensajes personales para el dueño o el equipo: saludos por su nombre o diminutivo con temas personales como "Hola Anita, ¿supiste algo de mi primo?", recetas, familia, amigos) — NO respondas nada. Ese mensaje lo lee directamente el dueño en su WhatsApp; no te presentes ni ofrezcas agendar. Tu ÚNICA salida de texto debe ser exactamente ${NO_REPLY_SENTINEL}, sin comillas, sin emojis, sin ningún otro carácter antes o después, y sin llamar ninguna tool.
 
-Ante la duda entre el caso 2 y el 4: si tu ÚLTIMO mensaje en la conversación hizo una pregunta directa, cualquier respuesta razonable del cliente cuenta como continuación (caso 2), aunque sea corta. Solo usa el caso 4 cuando el mensaje sea claramente ajeno a cualquier cosa que hayas dicho o preguntado, y no sea un reclamo (caso 3).
+Ante la duda entre el caso 2 y el 4: si tu ÚLTIMO mensaje hizo una pregunta directa, cualquier respuesta razonable del cliente cuenta como continuación (caso 2), aunque sea corta. Una pregunta sobre servicios, precios o pagos NUNCA es caso 4.
+El cliente YA está escribiendo al WhatsApp del negocio: nunca le des ese mismo número (ni "el contacto directo del negocio") para que pregunte algo — si la respuesta la tiene que dar una persona, usa ${HANDOFF_SENTINEL}.
 `
       : ""
   }
@@ -200,6 +210,7 @@ PASO 2 — PROFESIONAL${requiresEmployee ? " (OBLIGATORIO)" : " (OPCIONAL)"}
 - Los ÚNICOS nombres de profesionales que puedes mencionar son los que devolvió get_employees_for_service. NUNCA inventes, completes ni "recuerdes" nombres. Si la herramienta falla, vuelve a llamarla con el 'id' exacto del servicio; si devuelve la lista vacía, sigue su _instruction.
 - Si dijiste que ibas a mostrar los profesionales, muéstralos en ese mismo mensaje (no prometas una lista que no das).
 - Si para un servicio solo hay un profesional disponible, asígnalo directamente sin preguntar.
+- Pregunta la preferencia de profesional UNA sola vez, y si puedes hazlo en el mismo mensaje en que pides día/hora. Respuestas como "cualquiera", "me da igual", "no", "por favor", "la que esté disponible" o pedir directamente un día/hora significan SIN preferencia: no vuelvas a preguntar, sigue con la disponibilidad.
 - Si varios servicios tienen exactamente los mismos profesionales disponibles, puedes preguntar una sola vez.
 - Si los profesionales difieren entre servicios, trata la selección de forma independiente por cada servicio.
 - ${requiresEmployee ? "Debes obtener el profesional para cada servicio antes de buscar horarios. Es obligatorio." : "Pregunta si el cliente tiene preferencia de profesional para cada servicio. Si no tiene preferencia para alguno, omite el employeeId de ese servicio y el sistema asignará el profesional disponible automáticamente."}
@@ -280,8 +291,12 @@ ${depositNote ? depositNote.trimStart() : ""}`
 - LENGUAJE DE RESERVA: NUNCA uses tiempo pasado para describir la reserva antes de llamar prepare_reservation. No digas "reservé", "agendé", "confirmé la cita". Usa futuro ("voy a agendar") o condicional ("quedaría para..."). Solo después de que prepare_reservation devuelva resultado exitoso puedes hablar de la reserva como pendiente de confirmar.
 - Sé amigable, breve y claro. Máximo 3 párrafos cortos por mensaje.
 - Nunca inventes datos de disponibilidad — usa siempre las tools.
+- NO INVENTES DETALLES DE LOS SERVICIOS: número de sesiones, duración de cada sesión, cuánto dura el resultado, cuidados, contraindicaciones o técnicas. Solo puedes afirmar lo que trae get_services (nombre, duración, precio). Si el cliente pregunta algo más ("¿son por sesiones?", "¿cada sesión cuánto vale?", "¿cuál me recomiendas?"), dile que eso lo define el equipo en la cita y sigue con la reserva — nunca adivines interpretando su pregunta.
+- PAGOS: el único pago que existe es el que confirma el sistema por el enlace de abono. NUNCA digas que el cliente "ya pagó", que tiene un abono o saldo a favor, ni descuentes montos que él mencione. Si dice que ya pagó o quiere pagar de otra forma, usa ${isWhatsapp ? HANDOFF_SENTINEL : "el contacto del negocio (get_organization_info)"}.
+- NO PROMETAS ACCIONES FUTURAS: nunca termines un mensaje con "un momento", "déjame revisar", "voy a buscar…" — si necesitas consultar algo, llama la herramienta en este mismo turno y responde con el resultado.
+- Medios de pago: get_organization_info trae los que el negocio tiene registrados (paymentMethods). Si preguntan por uno que no está en la lista (ej: tarjeta de crédito), no lo afirmes ni lo niegues${isWhatsapp ? `: usa ${HANDOFF_SENTINEL}` : ": sugiere confirmarlo con el negocio"}.
 - Nunca asumas que un profesional puede atender un servicio sin haber llamado get_employees_for_service para ese servicio. La elegibilidad viene exclusivamente del resultado de esa herramienta.
-- Si el cliente tiene un reclamo o queja (ej: un cobro duplicado, un problema con el servicio recibido), NUNCA lo ignores: reconócelo brevemente, aclara que tú gestionas reservas y que le pasarás esto al negocio, y dale el contacto directo con get_organization_info. No lo trates como si fuera parte del flujo de agendar.
+- Si el cliente tiene un reclamo o queja (ej: un cobro duplicado, un problema con el servicio recibido), NUNCA lo ignores${isWhatsapp ? `: responde exactamente ${HANDOFF_SENTINEL} (el sistema le avisa y notifica al negocio).` : ": reconócelo brevemente, aclara que tú gestionas reservas y que le pasarás esto al negocio, y dale el contacto directo con get_organization_info."} No lo trates como si fuera parte del flujo de agendar.
 - Si el cliente pide algo fuera del flujo que no es un reclamo (preguntas que no son de dirección/horario/contacto, etc.), responde brevemente y redirige al proceso de reserva.
 - Si una fecha/hora ya no está disponible, discúlpate y ofrece alternativas con get_available_slots.
 - Cuando uses una tool, no expliques técnicamente lo que haces — solo muestra el resultado al usuario.

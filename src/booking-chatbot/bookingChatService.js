@@ -1,10 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { buildBookingSystemPrompt, NO_REPLY_SENTINEL } from "./bookingSystemPrompt.js";
+import { buildBookingSystemPrompt, NO_REPLY_SENTINEL, HANDOFF_SENTINEL } from "./bookingSystemPrompt.js";
 import {
   bookingClaudeTools,
   bookingClaudeToolsWhatsapp,
   executeBookingTool,
 } from "./bookingToolRegistry.js";
+import { isExplicitConfirmation } from "./tools/reservation.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -45,9 +46,11 @@ const SAFE_FALLBACK_REPLY = "¿Me cuentas de nuevo qué necesitas? Así te ayudo
 
 const SUMMARY_QUESTION = "¿Todo está correcto? ¿Confirmo tu reserva?";
 
-// Respuesta afirmativa del cliente al resumen ("sí", "dale", "confirmo"...).
-const AFFIRMATIVE_PATTERN =
-  /^\s*(s[ií]+|dale|ok(ay)?|listo|confirm[oa]?|claro|perfecto|h[aá]gale|de una|correcto|est[aá] bien)(?![\wáéíóúñ])/i;
+// Respuestas que prometen una acción sin hacerla ("Un momento... 🔍" y el turno
+// termina sin llamar ninguna tool — caso real 2026-10-23): se le pide al modelo
+// que llame la herramienta en el mismo turno.
+const PROMISED_ACTION_PATTERN =
+  /\bun momento\b|\b(d[eé]jame|perm[ií]teme|voy a|ya te)\s+(revisar|buscar|consultar|verificar|confirmar|mirar|busco|reviso|consulto|confirmo)\b/i;
 
 const depositLinkText = (checkout) =>
   `👉 Paga el abono de *${checkout.depositAmount}* aquí para confirmar tu reserva (tienes ${checkout.holdMinutes} minutos):\n${checkout.paymentUrl}`;
@@ -238,7 +241,7 @@ export const processBookingChat = async (organization, messages, options = {}) =
         // decir que sí, la confirmamos nosotros mismos y respondemos según el
         // resultado REAL — nunca según el texto (potencialmente alucinado) que
         // generó el modelo. Sin un "sí" explícito nunca se confirma.
-        if (pendingPayload && AFFIRMATIVE_PATTERN.test(lastUserText)) {
+        if (pendingPayload && isExplicitConfirmation(lastUserText)) {
           let confirmResult;
           try {
             confirmResult = await executeBookingTool("confirm_reservation", {}, context);
@@ -324,6 +327,22 @@ export const processBookingChat = async (organization, messages, options = {}) =
           ? "¡Listo! Toca el botón **'Sí, confirmar'** para finalizar tu reserva."
           : "");
 
+      // Promete buscar/revisar y termina el turno sin hacerlo: el cliente se
+      // queda esperando algo que nunca llega.
+      if (!isLastRound && !depositCheckout && PROMISED_ACTION_PATTERN.test(reply)) {
+        currentMessages = [
+          ...currentMessages,
+          { role: "assistant", content: response.content },
+          {
+            role: "user",
+            content:
+              "[SISTEMA] Tu respuesta promete revisar o buscar algo pero no lo hiciste. Llama ahora la herramienta que necesitas y responde con el resultado; si no necesitas ninguna, reescribe el mensaje sin prometer una acción futura." +
+              NO_LEAK_SUFFIX,
+          },
+        ];
+        continue;
+      }
+
       // El enlace de pago del abono tiene que llegar sí o sí: el modelo puede
       // resumirlo, recortarlo u olvidarlo.
       if (depositCheckout && !reply.includes(depositCheckout.paymentUrl)) {
@@ -331,13 +350,16 @@ export const processBookingChat = async (organization, messages, options = {}) =
       }
 
       // Canal WhatsApp: el modelo puede optar por no responder (mensaje sin
-      // intención de agendar — ver FILTRO DE INTENCIÓN en el prompt).
+      // intención de agendar) o por pasarle el mensaje a una persona del
+      // negocio — ver FILTRO DE INTENCIÓN en el prompt.
       const noReply = isWhatsapp && reply.trim() === NO_REPLY_SENTINEL;
+      const handoff = isWhatsapp && reply.includes(HANDOFF_SENTINEL);
 
       return {
-        reply: noReply ? "" : reply,
+        reply: noReply || handoff ? "" : reply,
         bookingPayload,
         noReply,
+        handoff,
         _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors },
       };
     }

@@ -14,14 +14,51 @@ import { randomUUID } from "crypto";
 import { processBookingChat } from "../booking-chatbot/bookingChatService.js";
 import whatsappService from "./sendWhatsappService.js";
 import ChatLog from "../models/chatLogModel.js";
+import notificationService from "./notificationService.js";
+import subscriptionService from "./subscriptionService.js";
 
-// Sesión expira tras 30 min de inactividad (misma política que el agente admin)
-const SESSION_TTL_MS = 30 * 60 * 1000;
+// Sesión expira tras 6 h de inactividad. Con 30 min (antes) los clientes que
+// contestaban más tarde ("en la mañana", "ok") caían en una sesión nueva: el bot
+// los saludaba de cero y perdía el servicio/horario que ya habían elegido.
+const SESSION_TTL_MS = 6 * 60 * 60 * 1000;
 // Máximo de mensajes de texto en el historial por sesión
 const MAX_HISTORY = 30;
 // Nota interna (historial + ChatLog) cuando el bot decide no responder —
 // nunca se envía al cliente por WhatsApp.
 const NO_REPLY_NOTE = "(sin respuesta — mensaje sin intención de agendar)";
+const HANDOFF_NOTE = "(pasado al equipo del negocio — notificación enviada)";
+// Una sola notificación al negocio por cliente en este lapso (varios mensajes
+// seguidos del mismo cliente son la misma conversación).
+const HANDOFF_NOTIFY_COOLDOWN_MS = 30 * 60 * 1000;
+
+const handoffReply = (org) =>
+  `Le paso tu mensaje al equipo de *${org.name.trim()}* para que te responda personalmente 🙌`;
+
+// El modelo a veces usa Markdown que WhatsApp no interpreta (**negrita**, # títulos).
+function toWhatsappFormat(text) {
+  return String(text || "")
+    .replace(/\*\*(.+?)\*\*/g, "*$1*")
+    .replace(/__(.+?)__/g, "_$1_")
+    .replace(/^#{1,6}\s+/gm, "");
+}
+
+async function notifyHandoff(org, clientPhone, body) {
+  const title = "Un cliente necesita respuesta 💬";
+  const message = `${clientPhone} escribió al WhatsApp del negocio y el asistente no puede resolverlo: "${body.slice(0, 160)}". Respóndele desde tu WhatsApp.`;
+  await Promise.allSettled([
+    notificationService.createNotification({
+      title,
+      message,
+      organizationId: org._id,
+      type: "system",
+      status: "unread",
+    }),
+    subscriptionService.sendNotificationToUser(
+      org._id,
+      JSON.stringify({ title, message, icon: org?.branding?.pwaIcon })
+    ),
+  ]);
+}
 
 // ── Pausa del bot por comando del cliente ────────────────────────────────────
 // Permite que un cliente silencie al bot en su chat (ej: el número también se
@@ -151,6 +188,7 @@ export async function processClientBookingMessage(org, clientPhone, body) {
   let meta = {};
   let errorMsg = null;
   let noReply = false;
+  let handoff = false;
 
   if (isPauseCommand) {
     // Comando de pausa: respuesta fija (no depende del modelo) para garantizar
@@ -166,8 +204,25 @@ export async function processClientBookingMessage(org, clientPhone, body) {
         clientPhone,
       });
       noReply = result.noReply === true;
-      reply = noReply ? NO_REPLY_NOTE : (result.reply || "¿En qué puedo ayudarte con tu reserva?");
+      handoff = result.handoff === true;
       meta = result._meta || {};
+      if (handoff) {
+        // Necesita a una persona: se le avisa al cliente una vez por conversación
+        // (los mensajes siguientes ya los ve el negocio) y se notifica al negocio.
+        const recentlyNotified =
+          session.lastHandoffAt && Date.now() - session.lastHandoffAt < HANDOFF_NOTIFY_COOLDOWN_MS;
+        if (!recentlyNotified) {
+          session.lastHandoffAt = Date.now();
+          notifyHandoff(org, clientPhone, body).catch((err) =>
+            console.error("[WaBookingAgent] Error notificando handoff:", err.message)
+          );
+        }
+        noReply = !!session.handoffReplied;
+        reply = noReply ? HANDOFF_NOTE : handoffReply(org);
+        session.handoffReplied = true;
+      } else {
+        reply = noReply ? NO_REPLY_NOTE : toWhatsappFormat(result.reply || "¿En qué puedo ayudarte con tu reserva?");
+      }
     } catch (err) {
       console.error("[WaBookingAgent] Error en processBookingChat:", err);
       errorMsg = err.message;
@@ -176,7 +231,7 @@ export async function processClientBookingMessage(org, clientPhone, body) {
     }
 
     // Primer mensaje de la sesión: informar del comando de pausa junto al saludo.
-    if (isFirstMessageInSession && !noReply && reply) {
+    if (isFirstMessageInSession && !noReply && !handoff && reply) {
       reply += PAUSE_HINT_SUFFIX;
     }
   }
@@ -209,6 +264,8 @@ export async function processClientBookingMessage(org, clientPhone, body) {
       channel: "whatsapp",
       "review.reviewed": false,
     },
+    // Un solo $push con ambos campos: antes el de toolErrors (spread más abajo)
+    // reemplazaba este y el turno quedaba sin mensajes en el ChatLog.
     $push: {
       messages: {
         $each: [
@@ -216,6 +273,7 @@ export async function processClientBookingMessage(org, clientPhone, body) {
           { role: "assistant", content: reply },
         ],
       },
+      ...(meta.toolErrors?.length ? { toolErrors: { $each: meta.toolErrors, $slice: -50 } } : {}),
     },
     $set: {
       reply,
@@ -233,9 +291,6 @@ export async function processClientBookingMessage(org, clientPhone, body) {
       outputTokens: meta.outputTokens || 0,
     },
     ...(meta.toolsUsed?.length ? { $addToSet: { toolsUsed: { $each: meta.toolsUsed } } } : {}),
-    ...(meta.toolErrors?.length
-      ? { $push: { toolErrors: { $each: meta.toolErrors, $slice: -50 } } }
-      : {}),
   };
 
   ChatLog.findOneAndUpdate({ sessionId: session.sessionId }, update, {
