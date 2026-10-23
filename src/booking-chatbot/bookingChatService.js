@@ -9,10 +9,16 @@ import { isExplicitConfirmation } from "./tools/reservation.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// Bajado de Sonnet 5 a Haiku 4.5 el 2026-08-26 por costo — ver nota en
-// agenda-backend/src/chatbot/chatService.js (misma decisión, mismo motivo).
-const MODEL = "claude-haiku-4-5";
-const MAX_TOKENS = 1024;
+// Subido de Haiku 4.5 a Sonnet 5.5 el 2026-10-23: en una comparación con 20
+// conversaciones reales de 13 negocios + 11 casos de Diana Vargas, Haiku 4.5 tuvo
+// 5 errores serios (fechas inventadas, aceptar días pasados, perder el "sí" del
+// cliente) y Sonnet 5.5 0-1, verificando disponibilidad antes de afirmar. Costo
+// ~2,7x (≈ +15 USD/mes al volumen actual). El asistente del panel
+// (src/chatbot/chatService.js) y el validador de comprobantes siguen en Haiku 4.5.
+const MODEL = "claude-sonnet-5-5";
+// Sonnet 5.5 cuenta las notas que escribe entre tools (bloques thinking) dentro de
+// max_tokens; con 1024 una respuesta con varias tools podía cortarse.
+const MAX_TOKENS = 4096;
 const MAX_TOOL_ROUNDS = 8;
 
 // Detecta cuando el bot afirma que la reserva fue confirmada/procesada sin haber
@@ -162,10 +168,11 @@ export const processBookingChat = async (organization, messages, options = {}) =
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: MAX_TOKENS,
-      // Haiku 4.5 no piensa por defecto sin budget_tokens — este disabled explícito
-      // es un remanente inofensivo de cuando el modelo era Sonnet 5 (adaptativo por
-      // defecto); se deja igual para no tocar el request shape entre modelos.
-      thinking: { type: "disabled" },
+      // Sonnet 5.5 rechaza { type: "disabled" } (400): between_tools es su nivel
+      // mínimo — sin razonamiento extendido, solo notas cortas entre tools. Exige
+      // effort high o menor y ningún otro campo dentro de thinking.
+      thinking: { type: "between_tools" },
+      output_config: { effort: "high" },
       system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
       tools: toolsWithCache,
       messages: currentMessages,
@@ -173,6 +180,18 @@ export const processBookingChat = async (organization, messages, options = {}) =
 
     inputTokens += response.usage?.input_tokens ?? 0;
     outputTokens += response.usage?.output_tokens ?? 0;
+
+    // Filtros de seguridad de Sonnet 5.5: la respuesta llega sin texto. Se
+    // contesta algo neutro en vez de reintentar (el guard de respuesta vacía lo
+    // volvería a pedir y recibiría la misma negativa).
+    if (response.stop_reason === "refusal") {
+      console.warn(`[bookingChat] Respuesta rechazada por el modelo (${response.stop_details?.category || "sin categoría"})`);
+      return {
+        reply: SAFE_FALLBACK_REPLY,
+        bookingPayload,
+        _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors },
+      };
+    }
 
     if (response.stop_reason !== "tool_use") {
       const rawReply = extractText(response.content);
