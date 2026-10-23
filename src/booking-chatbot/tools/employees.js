@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import Employee from "../../models/employeeModel.js";
 import Service from "../../models/serviceModel.js";
+import { isPriceHidden } from "./services.js";
 
 // Quita acentos, emojis y signos para comparar nombres de servicio de forma flexible
 // ("Corte Tradicional" debe encontrar "✂️ Corte Tradicional ✨").
@@ -46,7 +47,7 @@ export const getEmployeesForService = {
       required: true,
     },
   },
-  handler: async ({ serviceId }, { organizationId }) => {
+  handler: async ({ serviceId }, { organizationId, organization }) => {
     const resolvedId = await resolveServiceId(serviceId, organizationId);
     if (!resolvedId) {
       return {
@@ -74,15 +75,30 @@ export const getEmployeesForService = {
       };
     }
 
+    // Línea del servicio ya armada: el cliente que nombra un servicio debe ver
+    // su duración y precio antes de las preguntas de agenda (el modelo tendía a
+    // saltar directo a "¿con quién quieres?" sin decir cuánto cuesta).
+    const service = await Service.findById(resolvedId).select("name duration price hidePrice").lean();
+    const currency = (organization?.currency || "COP").toUpperCase();
+    const serviceLine = service
+      ? `*${service.name.trim()}* — ${service.duration} min — ${
+          isPriceHidden(service, currency) ? "precio a confirmar con el negocio" : `$${Number(service.price).toLocaleString("es-CO")}`
+        }`
+      : null;
+
     return {
       success: true,
+      serviceLine,
       employees: employees.map((e) => ({
         id: e._id.toString(),
         name: e.names,
         position: e.position || "",
       })),
       _instruction:
-        "Estos son los ÚNICOS profesionales que atienden este servicio. Nunca menciones otros nombres. Si el cliente pide a alguien que no está en esta lista, dile que esa persona no atiende este servicio y ofrécele los de la lista.",
+        "Estos son los ÚNICOS profesionales que atienden este servicio. Nunca menciones otros nombres. Si el cliente pide a alguien que no está en esta lista, dile que esa persona no atiende este servicio y ofrécele los de la lista." +
+        (serviceLine
+          ? ` Si todavía no le diste al cliente el precio de este servicio, empieza tu respuesta con esta línea tal cual: ${serviceLine}`
+          : ""),
     };
   },
 };

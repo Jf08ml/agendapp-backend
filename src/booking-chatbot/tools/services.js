@@ -10,7 +10,7 @@ export const isPriceHidden = (service, currency) =>
 export const getServices = {
   name: "get_services",
   description:
-    "Obtiene los servicios activos disponibles para reservar, con los destacados (featured: true) primero. Llama esto al inicio de la conversación. Cuando el cliente pida sugerencias o no sepa qué elegir, menciona primero los servicios destacados.",
+    "Obtiene los servicios activos disponibles para reservar (nombre, categoría en 'type', duración, precio), con los destacados (featured: true) primero. Llama esto al inicio de la conversación. Cómo presentarlos al cliente lo indica el PASO 1 de tus instrucciones — no muestres el catálogo completo si el cliente no lo pidió.",
   parameters: {},
   handler: async (_params, { organizationId, organization }) => {
     const currency = (organization?.currency || "COP").toUpperCase();

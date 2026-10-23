@@ -62,6 +62,26 @@ const confirmedReply = (confirmResult) =>
     ? `✅ Tu reserva quedó apartada.\n\n${depositLinkText(confirmResult)}`
     : "✅ ¡Listo! Tu reserva quedó agendada. Te esperamos.";
 
+// Nombre del servicio dentro de la línea "*Nombre* — 90 min — $45".
+const serviceNameOf = (line) => (line.match(/^\*(.+?)\*/)?.[1] || "").toLowerCase();
+
+// Antepone la línea de cada servicio consultado que ni esta respuesta ni un
+// mensaje anterior del asistente ya mencionaron — el cliente que nombró un
+// servicio ve su duración y precio antes de las preguntas de agenda.
+function withServiceLines(reply, serviceLines, history) {
+  if (!serviceLines.size || !reply) return reply;
+  const lowerReply = reply.toLowerCase();
+  const previous = history
+    .filter((m) => m.role === "assistant" && typeof m.content === "string")
+    .map((m) => m.content.toLowerCase())
+    .join("\n");
+  const missing = [...serviceLines].filter((line) => {
+    const name = serviceNameOf(line);
+    return name && !lowerReply.includes(name) && !previous.includes(name);
+  });
+  return missing.length ? `${missing.join("\n")}\n\n${reply}` : reply;
+}
+
 const extractText = (content) => {
   const block = content.find((b) => b.type === "text");
   return block?.text || "";
@@ -124,6 +144,10 @@ export const processBookingChat = async (organization, messages, options = {}) =
   // resultado de confirm_reservation cuando abrió el cobro del abono.
   let preparedSummary = null;
   let depositCheckout = null;
+  // "*Servicio* — 90 min — $45" de los servicios consultados en este turno
+  // (get_employees_for_service): si el modelo no le dijo al cliente qué servicio
+  // y precio quedaron, se antepone (ver withServiceLines).
+  const serviceLines = new Set();
   const lastUserText =
     [...messages].reverse().find((m) => m.role === "user" && typeof m.content === "string")?.content || "";
 
@@ -327,6 +351,32 @@ export const processBookingChat = async (organization, messages, options = {}) =
           ? "¡Listo! Toca el botón **'Sí, confirmar'** para finalizar tu reserva."
           : "");
 
+      // El modelo a veces cierra el turno después de una tool sin escribir nada
+      // (caso visto 1 de cada 3 con "¿hay cita mañana a las 10:30?"). Se le pide
+      // la respuesta; en la última ronda se usa un texto seguro.
+      if (!reply && !depositCheckout) {
+        if (!isLastRound) {
+          const nudge = {
+            type: "text",
+            text: "[SISTEMA] No escribiste ningún mensaje para el cliente. Responde ahora a su último mensaje, breve." + NO_LEAK_SUFFIX,
+          };
+          const last = currentMessages[currentMessages.length - 1];
+          // El turno anterior es del usuario (resultado de tools o su mensaje):
+          // se le agrega el aviso en vez de insertar un turno de asistente vacío.
+          currentMessages = [
+            ...currentMessages.slice(0, -1),
+            {
+              ...last,
+              content: Array.isArray(last.content)
+                ? [...last.content, nudge]
+                : [{ type: "text", text: String(last.content) }, nudge],
+            },
+          ];
+          continue;
+        }
+        reply = SAFE_FALLBACK_REPLY;
+      }
+
       // Promete buscar/revisar y termina el turno sin hacerlo: el cliente se
       // queda esperando algo que nunca llega.
       if (!isLastRound && !depositCheckout && PROMISED_ACTION_PATTERN.test(reply)) {
@@ -354,6 +404,9 @@ export const processBookingChat = async (organization, messages, options = {}) =
       // negocio — ver FILTRO DE INTENCIÓN en el prompt.
       const noReply = isWhatsapp && reply.trim() === NO_REPLY_SENTINEL;
       const handoff = isWhatsapp && reply.includes(HANDOFF_SENTINEL);
+      if (!noReply && !handoff && !depositCheckout) {
+        reply = withServiceLines(reply, serviceLines, messages);
+      }
 
       return {
         reply: noReply || handoff ? "" : reply,
@@ -379,6 +432,9 @@ export const processBookingChat = async (organization, messages, options = {}) =
           }
           if (block.name === "confirm_reservation" && result?.success && result.paymentUrl) {
             depositCheckout = result;
+          }
+          if (block.name === "get_employees_for_service" && result?.serviceLine) {
+            serviceLines.add(result.serviceLine);
           }
         } catch (err) {
           result = { success: false, error: err.message };
