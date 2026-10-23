@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import Employee from "../../models/employeeModel.js";
 import Service from "../../models/serviceModel.js";
 import { isPriceHidden } from "./services.js";
+import { ONLINE_BOOKABLE_EMPLOYEE } from "../../utils/onlineBooking.js";
 
 // Quita acentos, emojis y signos para comparar nombres de servicio de forma flexible
 // ("Corte Tradicional" debe encontrar "✂️ Corte Tradicional ✨").
@@ -62,6 +63,7 @@ export const getEmployeesForService = {
       organizationId,
       isActive: true,
       services: resolvedId,
+      ...ONLINE_BOOKABLE_EMPLOYEE,
     })
       .select("_id names position")
       .lean();

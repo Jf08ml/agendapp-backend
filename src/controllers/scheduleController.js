@@ -12,6 +12,7 @@ import serviceModel from "../models/serviceModel.js";
 import reservationModel from "../models/reservationModel.js";
 import scheduleService from "../services/scheduleService.js";
 import sendResponse from "../utils/sendResponse.js";
+import { ONLINE_BOOKABLE_EMPLOYEE } from "../utils/onlineBooking.js";
 
 // Valida acceso a las excepciones de horario (bloqueos) de un empleado:
 // 1) el empleado debe pertenecer a la organización resuelta por organizationResolver
@@ -621,7 +622,7 @@ const scheduleController = {
    * Body: { date, organizationId, services: [{serviceId, employeeId|null, duration}] }
    */
   getMultiServiceBlocks: async (req, res) => {
-    const { date, organizationId, services } = req.body;
+    const { date, organizationId, services, onlineBooking } = req.body;
     
     try {
       // Validar parámetros
@@ -665,6 +666,8 @@ const scheduleController = {
           const eligible = await employeeModel.find({
             organizationId,
             isActive: true,
+            // Reserva en línea: sin los profesionales ocultos (Employee.onlineBookingEnabled)
+            ...(onlineBooking ? ONLINE_BOOKABLE_EMPLOYEE : {}),
             services: svc.serviceId
           });
           eligible.forEach(e => allEmployeeIds.add(e._id.toString()));
@@ -732,7 +735,7 @@ const scheduleController = {
    * Body: { organizationId, requests: [{date, serviceId, employeeId|null, duration}] }
    */
   getAvailableSlotsBatch: async (req, res) => {
-    const { organizationId, requests } = req.body;
+    const { organizationId, requests, onlineBooking } = req.body;
     
     try {
       // Validar parámetros
@@ -760,6 +763,8 @@ const scheduleController = {
           const eligible = await employeeModel.find({
             organizationId,
             isActive: true,
+            // Reserva en línea: sin los profesionales ocultos (Employee.onlineBookingEnabled)
+            ...(onlineBooking ? ONLINE_BOOKABLE_EMPLOYEE : {}),
             services: req.serviceId
           });
           eligible.forEach(e => allEmployeeIds.add(e._id.toString()));
@@ -908,7 +913,7 @@ const scheduleController = {
    * Returns: { availability: { "YYYY-MM-DD": boolean, ... } }
    */
   checkDaysAvailability: async (req, res) => {
-    const { organizationId, services, startDate, endDate } = req.body;
+    const { organizationId, services, startDate, endDate, onlineBooking } = req.body;
 
     try {
       // Validar parámetros
@@ -953,6 +958,8 @@ const scheduleController = {
           const eligible = await employeeModel.find({
             organizationId,
             isActive: true,
+            // Reserva en línea: sin los profesionales ocultos (Employee.onlineBookingEnabled)
+            ...(onlineBooking ? ONLINE_BOOKABLE_EMPLOYEE : {}),
             services: svc.serviceId
           });
           eligible.forEach(e => allEmployeeIds.add(e._id.toString()));

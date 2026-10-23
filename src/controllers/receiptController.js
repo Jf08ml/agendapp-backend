@@ -31,6 +31,7 @@ import Reservation from "../models/reservationModel.js";
 import Enrollment from "../models/enrollmentModel.js";
 import ServicePackage from "../models/servicePackageModel.js";
 import Order from "../models/orderModel.js";
+import { onlineBookingEmployeeError } from "../utils/onlineBooking.js";
 
 // El cliente necesita tiempo para transferir y subir el comprobante.
 const HOLD_MINUTES = 60;
@@ -115,6 +116,8 @@ export const createReceiptReservationCheckout = async (req, res) => {
     if (!(org.paymentMethods || []).length) {
       return sendResponse(res, 400, null, "La organización no tiene métodos de pago configurados.");
     }
+    const hiddenEmployeeError = await onlineBookingEmployeeError(services, organizationId);
+    if (hiddenEmployeeError) return sendResponse(res, 400, null, hiddenEmployeeError);
 
     const serviceIds = services.map((s) => s.serviceId);
     const docs = await Service.find({ _id: { $in: serviceIds } }).lean();

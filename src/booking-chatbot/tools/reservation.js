@@ -11,6 +11,7 @@ import { resolveBaseUrl } from "../../utils/cancellationUtils.js";
 import { computeDepositForServices } from "../../services/collection/orderService.js";
 import { dateLabel } from "./availability.js";
 import { isPriceHidden } from "./services.js";
+import { ONLINE_BOOKABLE_EMPLOYEE } from "../../utils/onlineBooking.js";
 
 const ACTIVE_APPOINTMENT_FILTER = { $nin: ["cancelled_by_customer", "cancelled_by_admin"] };
 
@@ -122,7 +123,7 @@ async function resolveService(value, organizationId) {
 // Vargas", tomado del nombre del negocio) queda en null y se auto-asigna.
 async function resolveEmployeeId(value, organizationId, serviceId) {
   if (!value) return null;
-  const filter = { organizationId, isActive: true, services: serviceId };
+  const filter = { organizationId, isActive: true, services: serviceId, ...ONLINE_BOOKABLE_EMPLOYEE };
   const found = mongoose.Types.ObjectId.isValid(value)
     ? await Employee.findOne({ ...filter, _id: value }).select("_id").lean()
     : await Employee.findOne({
@@ -147,6 +148,7 @@ async function autoAssignAvailableEmployees(resolved, startDate, organization, o
     organizationId,
     isActive: true,
     services: { $all: unassignedServiceIds },
+    ...ONLINE_BOOKABLE_EMPLOYEE,
   }).lean();
 
   // Si nadie cubre todos juntos, caer al comportamiento por servicio individual
@@ -156,6 +158,7 @@ async function autoAssignAvailableEmployees(resolved, startDate, organization, o
         organizationId,
         isActive: true,
         services: r.serviceId,
+        ...ONLINE_BOOKABLE_EMPLOYEE,
       }).lean();
       if (emp) r.employeeId = emp._id.toString();
     }

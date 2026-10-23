@@ -15,6 +15,7 @@ const employeeService = {
       organizationId,
       password,
       isActive,
+      onlineBookingEnabled,
       profileImage,
       commissionType,
       commissionValue,
@@ -32,6 +33,7 @@ const employeeService = {
       organizationId,
       password: hashedPassword,
       isActive,
+      ...(onlineBookingEnabled !== undefined ? { onlineBookingEnabled: !!onlineBookingEnabled } : {}),
       profileImage,
       commissionType,
       commissionValue,
@@ -95,6 +97,7 @@ const employeeService = {
       organizationId,
       password,
       isActive,
+      onlineBookingEnabled,
       profileImage,
       color,
       order,
@@ -117,6 +120,7 @@ const employeeService = {
     employee.organizationId =
       organizationId !== undefined ? organizationId : employee.organizationId;
     employee.isActive = isActive !== undefined ? isActive : employee.isActive;
+    if (onlineBookingEnabled !== undefined) employee.onlineBookingEnabled = !!onlineBookingEnabled;
     employee.profileImage =
       profileImage !== undefined ? profileImage : employee.profileImage;
     employee.color = color !== undefined ? color : employee.color;

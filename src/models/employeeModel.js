@@ -75,6 +75,9 @@ const employeeModelSchema = new mongoose.Schema({
   },
   customPermissions: [String],
   isActive: { type: Boolean, default: true },
+  // false = no se ofrece en la reserva en línea (wizard público ni asistentes de
+  // reservas web/WhatsApp), pero sigue activo en la agenda interna. Ver utils/onlineBooking.js.
+  onlineBookingEnabled: { type: Boolean, default: true },
   profileImage: { 
     type: String, 
     default: "https://ik.imagekit.io/6cx9tc1kx/default_smile.png?updatedAt=1732716506174"

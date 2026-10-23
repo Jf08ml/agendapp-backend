@@ -25,6 +25,7 @@ import Enrollment from "../models/enrollmentModel.js";
 import ServicePackage from "../models/servicePackageModel.js";
 import { resolveBaseUrl } from "../utils/cancellationUtils.js";
 import Order from "../models/orderModel.js";
+import { onlineBookingEmployeeError } from "../utils/onlineBooking.js";
 
 // Minutos que se retiene el cupo mientras el cliente paga (hold).
 const HOLD_MINUTES = 15;
@@ -127,6 +128,8 @@ export const createReservationCheckout = async (req, res) => {
     if (!org.mpCollect?.connected) {
       return sendResponse(res, 400, null, "La organización no tiene Mercado Pago conectado.");
     }
+    const hiddenEmployeeError = await onlineBookingEmployeeError(services, organizationId);
+    if (hiddenEmployeeError) return sendResponse(res, 400, null, hiddenEmployeeError);
 
     // Cargar servicios (precio + duración) y preservar el orden enviado.
     const serviceIds = services.map((s) => s.serviceId);

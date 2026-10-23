@@ -4,6 +4,7 @@ import Appointment from "../../models/appointmentModel.js";
 import Employee from "../../models/employeeModel.js";
 import Service from "../../models/serviceModel.js";
 import scheduleService from "../../services/scheduleService.js";
+import { ONLINE_BOOKABLE_EMPLOYEE } from "../../utils/onlineBooking.js";
 
 const DAY_NAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
 const MONTH_NAMES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
@@ -28,14 +29,18 @@ async function resolveService(value, organizationId) {
   }).lean();
 }
 
-// Resolve employeeId: accepts ObjectId or partial name
+// Resolve employeeId: accepts ObjectId or partial name. Professionals hidden from
+// online booking resolve to null (treated as "no preference").
 async function resolveEmployee(value, organizationId) {
   if (!value) return null;
-  if (mongoose.Types.ObjectId.isValid(value)) return Employee.findById(value).lean();
+  if (mongoose.Types.ObjectId.isValid(value)) {
+    return Employee.findOne({ _id: value, organizationId, ...ONLINE_BOOKABLE_EMPLOYEE }).lean();
+  }
   return Employee.findOne({
     organizationId,
     names: { $regex: value.replace(/-/g, " "), $options: "i" },
     isActive: true,
+    ...ONLINE_BOOKABLE_EMPLOYEE,
   }).lean();
 }
 
@@ -80,6 +85,7 @@ async function buildMultiServiceInput(params, organizationId) {
         organizationId,
         isActive: true,
         services: svc.serviceId,
+        ...ONLINE_BOOKABLE_EMPLOYEE,
       }).lean();
       eligible.forEach((e) => employeeIds.add(e._id.toString()));
     }

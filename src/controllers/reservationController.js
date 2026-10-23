@@ -22,6 +22,7 @@ import appointmentModel from "../models/appointmentModel.js";
 import ChatLog from "../models/chatLogModel.js";
 import { auditLogService } from "../services/auditLogService.js";
 import { getCustomFieldDefinitions, validateAndSplitCustomFieldValues } from "../utils/customFieldUtils.js";
+import { onlineBookingEmployeeError } from "../utils/onlineBooking.js";
 
 // Marca como convertido el ChatLog del chatbot de reserva, del lado del servidor
 // y en la misma request que crea la reserva. Reemplaza al frágil POST
@@ -692,6 +693,10 @@ const reservationController = {
 
       if (bookingSource !== "admin" && reservationService.isStartInPast(startDate, timezone)) {
         return sendResponse(res, 400, null, "Ese horario ya pasó. Elige un horario disponible.");
+      }
+      if (bookingSource !== "admin") {
+        const hiddenEmployeeError = await onlineBookingEmployeeError(services, organizationId);
+        if (hiddenEmployeeError) return sendResponse(res, 400, null, hiddenEmployeeError);
       }
 
       // 🧩 Campos personalizados (Organization.clientFormConfig.fields)
