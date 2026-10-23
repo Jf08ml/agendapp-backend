@@ -13,6 +13,11 @@ import clientService from './clientService.js';
 import scheduleService from './scheduleService.js';
 import serviceModel from '../models/serviceModel.js';
 
+// Hashes bcrypt ($2a$/$2b$/$2y$) — solo los tokens antiguos los tienen. El fallback
+// filtra por este formato para no cargar y popular miles de citas con hash SHA-256
+// (que bcrypt nunca puede validar) cada vez que llega un enlace no encontrado.
+const BCRYPT_HASH = /^\$2[aby]\$/;
+
 const cancellationService = {
   /**
    * Genera un token único de cancelación y su hash
@@ -72,7 +77,7 @@ const cancellationService = {
         console.log('🔄 Token SHA-256 no encontrado, buscando con bcrypt (token antiguo)...');
         
         const appointments = await Appointment.find({
-          cancelTokenHash: { $exists: true, $ne: null },
+          cancelTokenHash: { $regex: BCRYPT_HASH },
           startDate: { $gte: thirtyDaysAgo }
         })
           .select('+cancelTokenHash service client organizationId startDate endDate status clientConfirmed groupId')
@@ -242,15 +247,19 @@ const cancellationService = {
         // Fallback a bcrypt
         console.log('🔄 Buscando reservations con bcrypt...');
         const reservations = await Reservation.find({
-          cancelTokenHash: { $exists: true, $ne: null },
+          cancelTokenHash: { $regex: BCRYPT_HASH },
           startDate: { $gte: thirtyDaysAgo }
         })
-          .select('+cancelTokenHash serviceId organizationId startDate status customerDetails appointmentId')
+          // Sin "+": en Reservation cancelTokenHash no es select:false, y con "+"
+          // Mongoose lo dejaba fuera de la proyección → bcrypt.compare(token, undefined)
+          // lanzaba "Illegal arguments" y cualquier token no encontrado daba 400.
+          .select('cancelTokenHash serviceId organizationId startDate status customerDetails appointmentId')
           .populate('serviceId', 'name duration')
           .populate('organizationId', 'name timezone timeFormat cancellationPolicy')
           .lean();
 
         for (const res of reservations) {
+          if (!res.cancelTokenHash) continue;
           const isValid = await this.verifyToken(token, res.cancelTokenHash);
           if (isValid) {
             console.log(`✅ Token bcrypt válido encontrado para reservation ${res._id}`);
@@ -1221,7 +1230,7 @@ const cancellationService = {
     if (appt) return appt;
 
     const legacy = await Appointment.find({
-      cancelTokenHash: { $exists: true, $ne: null },
+      cancelTokenHash: { $regex: BCRYPT_HASH },
       startDate: { $gte: thirtyDaysAgo },
     })
       .select('+cancelTokenHash')
