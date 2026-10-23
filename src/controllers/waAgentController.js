@@ -3,7 +3,7 @@ import {
   sanitizePhone,
 } from "../services/waAgentService.js";
 import { processAdminCommand } from "../services/waAgentChatService.js";
-import { processClientBookingMessage } from "../services/waBookingAgentService.js";
+import { processClientBookingMessage, pauseForHumanTakeover } from "../services/waBookingAgentService.js";
 import { validateMetaSignature } from "../services/metaApiService.js";
 import Organization from "../models/organizationModel.js";
 import { disconnectOrg } from "../services/metaConnectService.js";
@@ -98,6 +98,30 @@ export async function handleMetaIncoming(req, res) {
           ),
         );
     }
+    return;
+  }
+
+  // smb_message_echoes (coexistencia): el negocio escribió desde su app de
+  // WhatsApp Business. Si el agente de reservas está activo, se pausa para ese
+  // cliente — una persona ya lo está atendiendo y el bot no debe pisarla.
+  if (changeObj?.field === "smb_message_echoes") {
+    const echoes = change?.message_echoes || [];
+    const phoneNumberId = change?.metadata?.phone_number_id;
+    if (!echoes.length || !phoneNumberId) return;
+    Organization.findOne({ metaPhoneNumberId: phoneNumberId, waBookingAgentEnabled: true })
+      .select("_id name")
+      .lean()
+      .then(async (org) => {
+        if (!org) return;
+        for (const echo of echoes) {
+          if (!echo?.to) continue;
+          const clientPhone = "+" + String(echo.to).replace(/\D/g, "");
+          if (await pauseForHumanTakeover(String(org._id), clientPhone, echo.id)) {
+            console.log(`[WaAgent] ${org.name} respondió a mano a ${clientPhone} — bot de reservas pausado para ese cliente`);
+          }
+        }
+      })
+      .catch((err) => console.error("[WaAgent] Error procesando smb_message_echoes:", err.message));
     return;
   }
 

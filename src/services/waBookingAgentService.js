@@ -14,6 +14,7 @@ import { randomUUID } from "crypto";
 import { processBookingChat } from "../booking-chatbot/bookingChatService.js";
 import whatsappService from "./sendWhatsappService.js";
 import ChatLog from "../models/chatLogModel.js";
+import WaBotPause from "../models/waBotPauseModel.js";
 import notificationService from "./notificationService.js";
 import subscriptionService from "./subscriptionService.js";
 
@@ -80,23 +81,54 @@ function normalizeCommand(text) {
     .trim();
 }
 
-// `${orgId}:${clientPhone}` → timestamp (ms) hasta cuándo está pausado.
-// Deliberadamente separado de `sessions`: una pausa de horas debe sobrevivir
-// aunque el cliente no escriba nada en ese tiempo (`sessions` sí expira a los
-// 30 min de inactividad).
+// ── Pausas (PAUSAR del cliente o respuesta manual del negocio) ──────────────
+// Fuente de verdad: colección WaBotPause (sobrevive a reinicios; TTL la borra
+// al vencer). `pausedClients` es solo caché: `${orgId}:${clientPhone}` → ms.
 const pausedClients = new Map();
 
-function getPauseUntil(key) {
-  const until = pausedClients.get(key);
-  if (!until) return null;
-  if (Date.now() >= until) {
-    pausedClients.delete(key);
+async function getPauseUntil(orgId, clientPhone) {
+  const key = `${orgId}:${clientPhone}`;
+  const cached = pausedClients.get(key);
+  if (cached && Date.now() < cached) return cached;
+  pausedClients.delete(key);
+  try {
+    const pause = await WaBotPause.findOne({
+      organizationId: orgId,
+      clientPhone,
+      until: { $gt: new Date() },
+    })
+      .select("until")
+      .lean();
+    if (!pause) return null;
+    const until = pause.until.getTime();
+    pausedClients.set(key, until);
+    return until;
+  } catch (err) {
+    // Sin DB no se bloquea al cliente: mejor responder que quedarse mudo.
+    console.error("[WaBookingAgent] Error leyendo pausa:", err.message);
     return null;
   }
-  return until;
 }
 
-// Limpieza periódica de pausas expiradas para no acumular memoria.
+// Extiende la pausa (nunca la acorta: $max) y actualiza la caché.
+async function setPause(orgId, clientPhone, untilMs, reason) {
+  const key = `${orgId}:${clientPhone}`;
+  pausedClients.set(key, Math.max(pausedClients.get(key) || 0, untilMs));
+  await WaBotPause.updateOne(
+    { organizationId: orgId, clientPhone },
+    { $max: { until: new Date(untilMs) }, $set: { reason } },
+    { upsert: true }
+  ).catch((err) => console.error("[WaBookingAgent] Error guardando pausa:", err.message));
+}
+
+async function clearPause(orgId, clientPhone) {
+  pausedClients.delete(`${orgId}:${clientPhone}`);
+  await WaBotPause.deleteOne({ organizationId: orgId, clientPhone }).catch((err) =>
+    console.error("[WaBookingAgent] Error quitando pausa:", err.message)
+  );
+}
+
+// Limpieza periódica de la caché de pausas vencidas.
 setInterval(() => {
   const now = Date.now();
   for (const [key, until] of pausedClients.entries()) {
@@ -104,37 +136,133 @@ setInterval(() => {
   }
 }, PAUSE_TTL_MS).unref();
 
-// Historial en memoria: `${orgId}:${clientPhone}` →
+// ── Pausa automática cuando el negocio contesta a mano ──────────────────────
+// En coexistencia, lo que el negocio escribe desde la app de WhatsApp Business
+// llega como webhook smb_message_echoes (waAgentController). Si una persona ya
+// está atendiendo a ese cliente, el bot se calla para no pisarle la conversación.
+// Se extiende con cada respuesta manual; el cliente puede reactivarlo con AGENDAR.
+const HUMAN_TAKEOVER_TTL_MS = 12 * 60 * 60 * 1000;
+
+// Ids de los mensajes que envió el propio bot (Cloud API) — por si Meta llegara
+// a reportarlos como eco, nunca se confunden con una respuesta del negocio.
+const botMessageIds = new Map(); // id → timestamp
+const BOT_MESSAGE_ID_TTL_MS = 60 * 60 * 1000;
+
+function rememberBotMessage(id) {
+  if (!id) return;
+  const now = Date.now();
+  if (botMessageIds.size > 2000) {
+    for (const [k, ts] of botMessageIds.entries()) {
+      if (now - ts > BOT_MESSAGE_ID_TTL_MS) botMessageIds.delete(k);
+    }
+  }
+  botMessageIds.set(id, now);
+}
+
+/**
+ * El negocio le respondió a mano a un cliente (eco de la app de WhatsApp
+ * Business): pausa el bot para ese cliente. Devuelve false si el eco era de un
+ * mensaje del propio bot.
+ */
+export async function pauseForHumanTakeover(orgId, clientPhone, echoMessageId) {
+  if (echoMessageId && botMessageIds.has(echoMessageId)) return false;
+  await setPause(orgId, clientPhone, Date.now() + HUMAN_TAKEOVER_TTL_MS, "human");
+  return true;
+}
+
+// ── Sesiones ─────────────────────────────────────────────────────────────────
+// Caché en memoria: `${orgId}:${clientPhone}` →
 // { messages, lastActivity, sessionId, pendingPayload, pendingSummary,
-//   pendingSummaryShown, pendingDeposit, reservationCreated, hasConfirmedBookingThisSession }
+//   pendingSummaryShown, pendingDeposit, reservationCreated,
+//   hasConfirmedBookingThisSession, handoffReplied, lastHandoffAt }
 // pendingSummary* y pendingDeposit los manejan prepare_reservation / confirm_reservation
 // (booking-chatbot/tools/reservation.js): resumen oficial mostrado y abono por pagar.
+// Cada turno se guarda en ChatLog (mensajes + waState); si la sesión no está en
+// memoria (reinicio del servidor) se reconstruye desde ahí.
 const sessions = new Map();
 
-function getOrCreateSession(orgId, clientPhone) {
+// Estado de la sesión que sobrevive a un reinicio (reservationCreated no: es
+// one-shot y se consume en el mismo turno).
+const PERSISTED_STATE_FIELDS = [
+  "pendingPayload",
+  "pendingSummary",
+  "pendingSummaryShown",
+  "pendingDeposit",
+  "hasConfirmedBookingThisSession",
+  "handoffReplied",
+  "lastHandoffAt",
+];
+
+function snapshotState(session) {
+  const state = {};
+  for (const f of PERSISTED_STATE_FIELDS) {
+    if (session[f] !== undefined) state[f] = session[f];
+  }
+  return state;
+}
+
+function newSession(now) {
+  return {
+    messages: [],
+    lastActivity: now,
+    sessionId: randomUUID(),
+    pendingPayload: null,
+    reservationCreated: false,
+    // A diferencia de reservationCreated (one-shot, se resetea tras loguear
+    // cada turno), este flag persiste toda la sesión: le indica al prompt
+    // que ya se confirmó al menos una reserva en esta conversación, para
+    // que turnos posteriores no vuelvan a intentar recolectar los mismos
+    // datos en bucle si el cliente sigue chateando.
+    hasConfirmedBookingThisSession: false,
+  };
+}
+
+// Conversación del cliente en las últimas SESSION_TTL_MS guardada en ChatLog.
+async function loadPersistedSession(orgId, clientPhone, now) {
+  try {
+    const log = await ChatLog.findOne({
+      organizationId: orgId,
+      clientPhone,
+      channel: "whatsapp",
+      updatedAt: { $gte: new Date(now - SESSION_TTL_MS) },
+    })
+      .sort({ updatedAt: -1 })
+      .select("sessionId messages waState updatedAt")
+      .lean();
+    if (!log?.sessionId) return null;
+    return {
+      ...newSession(now),
+      ...(log.waState || {}),
+      sessionId: log.sessionId,
+      messages: (log.messages || [])
+        .filter((m) => m.role && typeof m.content === "string")
+        .map((m) => ({ role: m.role, content: m.content }))
+        .slice(-MAX_HISTORY),
+      reservationCreated: false,
+    };
+  } catch (err) {
+    console.error("[WaBookingAgent] Error recuperando la sesión de ChatLog:", err.message);
+    return null;
+  }
+}
+
+async function getOrCreateSession(orgId, clientPhone) {
   const key = `${orgId}:${clientPhone}`;
   const now = Date.now();
   const existing = sessions.get(key);
-  if (existing && now - existing.lastActivity > SESSION_TTL_MS) {
-    sessions.delete(key);
+  if (existing && now - existing.lastActivity <= SESSION_TTL_MS) {
+    existing.lastActivity = now;
+    return existing;
   }
-  if (!sessions.has(key)) {
-    sessions.set(key, {
-      messages: [],
-      lastActivity: now,
-      sessionId: randomUUID(),
-      pendingPayload: null,
-      reservationCreated: false,
-      // A diferencia de reservationCreated (one-shot, se resetea tras loguear
-      // cada turno), este flag persiste toda la sesión: le indica al prompt
-      // que ya se confirmó al menos una reserva en esta conversación, para
-      // que turnos posteriores no vuelvan a intentar recolectar los mismos
-      // datos en bucle si el cliente sigue chateando.
-      hasConfirmedBookingThisSession: false,
-    });
+  sessions.delete(key);
+
+  const restored = existing ? null : await loadPersistedSession(orgId, clientPhone, now);
+  if (restored) {
+    console.log(`[WaBookingAgent] Sesión recuperada de ChatLog — ${clientPhone} (${restored.messages.length} mensajes)`);
   }
-  const session = sessions.get(key);
+  const session = restored || newSession(now);
   session.lastActivity = now;
+  sessions.set(key, session);
   return session;
 }
 
@@ -157,12 +285,11 @@ setInterval(() => {
 export async function processClientBookingMessage(org, clientPhone, body) {
   const orgId = org._id.toString();
   const startedAt = Date.now();
-  const pauseKey = `${orgId}:${clientPhone}`;
 
   const normalized = normalizeCommand(body);
   const isPauseCommand = PAUSE_COMMANDS.has(normalized);
   const isResumeCommand = RESUME_COMMANDS.has(normalized);
-  const pausedUntil = getPauseUntil(pauseKey);
+  const pausedUntil = await getPauseUntil(orgId, clientPhone);
 
   // El cliente pausó el bot explícitamente — no lo interrumpimos ni gastamos IA,
   // salvo que este mensaje sea justo el comando de reactivación.
@@ -173,14 +300,14 @@ export async function processClientBookingMessage(org, clientPhone, body) {
     return;
   }
   if (isResumeCommand && pausedUntil) {
-    pausedClients.delete(pauseKey);
+    await clearPause(orgId, clientPhone);
   }
 
   console.log(
     `[WaBookingAgent] Mensaje de cliente — org: ${org.name} — ${clientPhone} — "${body.slice(0, 80)}"`
   );
 
-  const session = getOrCreateSession(orgId, clientPhone);
+  const session = await getOrCreateSession(orgId, clientPhone);
   const isFirstMessageInSession = session.messages.length === 0;
   session.messages.push({ role: "user", content: body });
 
@@ -194,7 +321,7 @@ export async function processClientBookingMessage(org, clientPhone, body) {
     // Comando de pausa: respuesta fija (no depende del modelo) para garantizar
     // el texto exacto, y sin invocar al asistente en absoluto.
     reply = PAUSE_ACK_MESSAGE;
-    pausedClients.set(pauseKey, Date.now() + PAUSE_TTL_MS);
+    await setPause(orgId, clientPhone, Date.now() + PAUSE_TTL_MS, "client");
   } else {
     try {
       const result = await processBookingChat(org, session.messages, {
@@ -245,7 +372,8 @@ export async function processClientBookingMessage(org, clientPhone, body) {
   // no se envía nada al cliente, solo queda registrado en el historial/ChatLog.
   if (!noReply) {
     try {
-      await whatsappService.sendMessage(orgId, clientPhone, reply);
+      const sent = await whatsappService.sendMessage(orgId, clientPhone, reply);
+      rememberBotMessage(sent?.messageId);
     } catch (err) {
       console.error(`[WaBookingAgent] Error enviando respuesta a ${clientPhone}:`, err.message);
     }
@@ -262,6 +390,7 @@ export async function processClientBookingMessage(org, clientPhone, body) {
       organizationId: org._id,
       type: "booking",
       channel: "whatsapp",
+      clientPhone,
       "review.reviewed": false,
     },
     // Un solo $push con ambos campos: antes el de toolErrors (spread más abajo)
@@ -278,6 +407,9 @@ export async function processClientBookingMessage(org, clientPhone, body) {
     $set: {
       reply,
       durationMs: Date.now() - startedAt,
+      // Estado de la reserva en curso, para retomar la conversación si el
+      // servidor se reinicia (ver loadPersistedSession).
+      waState: snapshotState(session),
       ...(session.pendingPayload ? { bookingPayload: session.pendingPayload } : {}),
       ...(reservationJustCreated
         ? { reservationCreated: true, reservationCreatedAt: new Date() }

@@ -37,6 +37,13 @@ const chatLogSchema = new mongoose.Schema(
     // Solo para tipo "booking": payload construido por prepare_reservation
     bookingPayload: { type: mongoose.Schema.Types.Mixed },
 
+    // Solo canal WhatsApp: teléfono del cliente (E.164) y estado de la reserva en
+    // curso (resumen mostrado, payload preparado, abono pendiente...). Permiten
+    // retomar la conversación tras un reinicio del servidor — la sesión vive en
+    // memoria y se reconstruye desde aquí (waBookingAgentService.js).
+    clientPhone: { type: String },
+    waState: { type: mongoose.Schema.Types.Mixed },
+
     // Solo para tipo "booking": true cuando el cliente tocó "Sí, confirmar"
     // y la reserva se creó realmente (métrica de conversión prepare → reserva)
     reservationCreated: { type: Boolean, default: false },
@@ -85,6 +92,13 @@ const chatLogSchema = new mongoose.Schema(
 chatLogSchema.index(
   { createdAt: 1 },
   { expireAfterSeconds: 90 * 24 * 60 * 60, partialFilterExpression: { "review.reviewed": false } }
+);
+
+// Búsqueda de la conversación reciente de un cliente de WhatsApp al reconstruir
+// la sesión (solo docs con clientPhone — los del canal web no entran al índice).
+chatLogSchema.index(
+  { organizationId: 1, clientPhone: 1, updatedAt: -1 },
+  { partialFilterExpression: { clientPhone: { $exists: true } } }
 );
 
 export default mongoose.model("ChatLog", chatLogSchema);
