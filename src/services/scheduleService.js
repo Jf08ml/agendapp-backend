@@ -333,7 +333,7 @@ function validateDateTime(datetime, organization, employee = null) {
  * @param {number} maxConcurrentAppointments - Máximo de citas simultáneas que puede atender el empleado (default 1)
  * @returns {Array} Array de objetos {time: "HH:mm", available: boolean}
  */
-function generateAvailableSlots(date, organization, employee = null, durationMinutes = 30, appointments = [], maxConcurrentAppointments = 1) {
+function generateAvailableSlots(date, organization, employee = null, durationMinutes = 30, appointments = [], maxConcurrentAppointments = 1, serviceId = null) {
   const timezone = organization.timezone || 'America/Bogota';
   // Obtener día de la semana en la timezone de la organización
   const dateInTz = moment.tz(date, timezone);
@@ -454,8 +454,8 @@ function generateAvailableSlots(date, organization, employee = null, durationMin
       // Verificar si el slot completo está dentro del segmento
       if (slotEndMin > segment.end) break;
       
-      // 👥 Contar citas simultáneas en lugar de solo verificar conflictos
-      let simultaneousAppointmentCount = 0;
+      // 👥 Citas que se cruzan con el slot (ver isWithinConcurrency)
+      const overlapping = [];
       relevantAppointments.forEach(appt => {
         // Convertir las fechas de la cita a la timezone de la organización
         const apptStartInTz = moment.tz(appt.startDate, timezone);
@@ -476,12 +476,12 @@ function generateAvailableSlots(date, organization, employee = null, durationMin
         // Hay solapamiento si el slot empieza antes de que termine la cita
         // Y el slot termina después de que empieza la cita
         if (currentMin < apptEnd && slotEndMin > apptStart) {
-          simultaneousAppointmentCount++;
+          overlapping.push(appt);
         }
       });
-      
+
       // Slot disponible si no excede el límite concurrente
-      const overlapsAppointment = simultaneousAppointmentCount >= maxConcurrentAppointments;
+      const overlapsAppointment = !isWithinConcurrency(overlapping, serviceId, maxConcurrentAppointments);
       
       // Crear datetime usando moment-timezone con la zona horaria de la organización
       const hours = Math.floor(currentMin / 60);
@@ -526,6 +526,23 @@ function generateAvailableSlots(date, organization, employee = null, durationMin
  * @param {number} stepMinutes - Intervalo entre slots de la organización
  * @returns {Array<{start: string, end: string}>}
  */
+/**
+ * ¿Cabe una cita más del servicio `serviceId` junto a las citas `overlapping` que
+ * se cruzan con el horario? Misma regla que appointmentService.createAppointmentsBatch
+ * al crear la cita: una cita de OTRO servicio siempre ocupa al profesional; las del
+ * mismo servicio cuentan contra maxConcurrentAppointments (ej. 2 aplicaciones a la
+ * vez). Antes el buscador contaba todas contra el límite del servicio y ofrecía
+ * horarios que después no se podían aprobar (Vitalidad & bienestar, 2026-10-23).
+ * Sin serviceId (llamadas que no conocen el servicio) se cuentan todas, como antes.
+ */
+function isWithinConcurrency(overlapping, serviceId, maxConcurrent) {
+  if (serviceId) {
+    const sid = String(serviceId);
+    if (overlapping.some((a) => String(a.service?._id ?? a.service) !== sid)) return false;
+  }
+  return overlapping.length < maxConcurrent;
+}
+
 function computeFreeWindows(times, durationMinutes, stepMinutes = durationMinutes) {
   const reach = Math.max(durationMinutes, stepMinutes);
   const windows = [];
@@ -605,7 +622,7 @@ function isEmployeeAvailableOnDay(employee, dayOfWeek, organization) {
  * @returns {Object|null} Empleado asignado o null si ninguno disponible
  */
 function assignBestEmployeeForSlot(opts) {
-  const { candidateEmployees, date, startTime, duration, existingAppointments, dayOfWeek, organization, skipOrgBreaks = false, maxConcurrentAppointments = 1 } = opts;
+  const { candidateEmployees, date, startTime, duration, existingAppointments, dayOfWeek, organization, skipOrgBreaks = false, maxConcurrentAppointments = 1, serviceId = null } = opts;
   const timezone = organization.timezone || 'America/Bogota';
   
   // Filtrar por disponibilidad de horario
@@ -680,7 +697,7 @@ function assignBestEmployeeForSlot(opts) {
     const startMin = timeToMinutes(startTime);
     const endMin = startMin + duration;
 
-    const overlapCount = empAppts.filter(appt => {
+    const overlapping = empAppts.filter(appt => {
       // Convertir las fechas de la cita a la timezone de la organización
       const apptStartInTz = moment.tz(appt.startDate, timezone);
       const apptEndInTz = moment.tz(appt.endDate, timezone);
@@ -698,9 +715,9 @@ function assignBestEmployeeForSlot(opts) {
       const apptStart = apptStartInTz.hours() * 60 + apptStartInTz.minutes();
       const apptEnd = apptEndInTz.hours() * 60 + apptEndInTz.minutes();
       return (startMin < apptEnd && endMin > apptStart);
-    }).length;
+    });
 
-    return overlapCount < maxConcurrentAppointments;
+    return isWithinConcurrency(overlapping, serviceId, maxConcurrentAppointments);
   });
   
   if (free.length === 0) return null;
@@ -926,7 +943,7 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
         const empAppts = appointments.filter(a =>
           a.employee && a.employee.toString() === service.employeeId
         );
-        const overlapCount = empAppts.filter(appt => {
+        const overlapping = empAppts.filter(appt => {
           // Convertir las fechas de la cita a la timezone de la organización
           const apptStartInTz = moment.tz(appt.startDate, timezone);
           const apptEndInTz = moment.tz(appt.endDate, timezone);
@@ -934,9 +951,9 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
           const apptStart = apptStartInTz.hours() * 60 + apptStartInTz.minutes();
           const apptEnd = apptEndInTz.hours() * 60 + apptEndInTz.minutes();
           return (slotMin < apptEnd && (slotMin + service.duration) > apptStart);
-        }).length;
+        });
 
-        if (overlapCount >= maxConcurrent) {
+        if (!isWithinConcurrency(overlapping, service.serviceId, maxConcurrent)) {
           blockValid = false;
           break;
         }
@@ -963,7 +980,8 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
           dayOfWeek,
           organization,
           skipOrgBreaks: true, // Ya manejados en los segmentos
-          maxConcurrentAppointments: service.maxConcurrentAppointments || 1
+          maxConcurrentAppointments: service.maxConcurrentAppointments || 1,
+          serviceId: service.serviceId,
         });
         
         if (!assigned) {

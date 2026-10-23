@@ -362,7 +362,8 @@ const scheduleController = {
         employee,
         duration,
         appointments,
-        maxConcurrentAppointments
+        maxConcurrentAppointments,
+        serviceId || null
       );
       appointments.forEach(appt => {
         const start = moment.tz(appt.startDate, timezone);
@@ -867,7 +868,8 @@ const scheduleController = {
               employee,
               request.duration || 30,
               dayAppointments,
-              maxConcurrent
+              maxConcurrent,
+              request.serviceId
             );
             slots = generatedSlots.filter(s => s.available).map(s => s.time);
           }
@@ -883,7 +885,8 @@ const scheduleController = {
               emp,
               request.duration || 30,
               dayAppointments,
-              maxConcurrent
+              maxConcurrent,
+              request.serviceId
             );
             generatedSlots.filter(s => s.available).forEach(s => timeSet.add(s.time));
           }

@@ -1364,7 +1364,8 @@ const cancellationService = {
       appointment.employee,
       durationMin,
       appointments,
-      service?.maxConcurrentAppointments ?? 1
+      service?.maxConcurrentAppointments ?? 1,
+      appointment.service?._id || appointment.service
     );
     return slots.filter((sl) => sl.available);
   },

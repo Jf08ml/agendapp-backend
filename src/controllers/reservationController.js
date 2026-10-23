@@ -529,7 +529,8 @@ const reservationController = {
           employee,
           service.duration,
           dayAppointments,
-          service.maxConcurrentAppointments ?? 1
+          service.maxConcurrentAppointments ?? 1,
+          service._id
         );
 
         const requestedTimeInTz = moment.tz(requestedDateTime, timezone);
