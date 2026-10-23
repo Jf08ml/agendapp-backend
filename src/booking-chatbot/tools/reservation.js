@@ -291,6 +291,23 @@ export const prepareReservation = {
       customFieldValues: rawCustomFieldValues,
     } = params;
 
+    // WhatsApp: ese mismo horario ya está apartado con un abono en curso (o ya
+    // pagado). Caso real 2026-10-23: el cliente dijo "ya envié el comprobante", el
+    // bot volvió a preparar la reserva y su "sí, ya lo envié" abrió un segundo cobro.
+    const deposit = context.session?.pendingDeposit;
+    if (
+      deposit?.startDate &&
+      !["failed", "expired"].includes(deposit.status) &&
+      String(startDate || "").slice(0, 16) === deposit.startDate
+    ) {
+      return {
+        success: false,
+        error: "Esta reserva ya está apartada con el abono en curso.",
+        _instruction:
+          "NO prepares ni confirmes esta reserva de nuevo. Respóndele al cliente según el ESTADO ACTUAL DEL ABONO de tus instrucciones (reenvía el enlace de pago solo si todavía no lo ha pagado).",
+      };
+    }
+
     // WhatsApp: una preparación nueva reemplaza a la anterior, también si falla —
     // así un "sí" posterior nunca confirma un resumen viejo.
     if (context.session) {
@@ -583,7 +600,16 @@ async function startDepositCheckout(payload, depositPlan, context) {
 
   context.session.pendingPayload = null;
   context.session.pendingSummary = null;
-  context.session.pendingDeposit = { paymentUrl, amountLabel, expiresAt: data.expiresAt, method: depositPlan.method };
+  context.session.pendingDeposit = {
+    paymentUrl,
+    amountLabel,
+    expiresAt: data.expiresAt,
+    method: depositPlan.method,
+    // Para consultar el estado real del pago en cada turno (waBookingAgentService)
+    // y no volver a apartar el mismo horario (guard en prepare_reservation).
+    externalReference: data.externalReference,
+    startDate: String(payload.startDate).slice(0, 16),
+  };
   context.session.hasConfirmedBookingThisSession = true;
 
   return {

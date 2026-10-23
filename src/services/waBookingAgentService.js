@@ -15,6 +15,7 @@ import { processBookingChat } from "../booking-chatbot/bookingChatService.js";
 import whatsappService from "./sendWhatsappService.js";
 import ChatLog from "../models/chatLogModel.js";
 import WaBotPause from "../models/waBotPauseModel.js";
+import Order from "../models/orderModel.js";
 import notificationService from "./notificationService.js";
 import subscriptionService from "./subscriptionService.js";
 
@@ -31,6 +32,15 @@ const HANDOFF_NOTE = "(pasado al equipo del negocio — notificación enviada)";
 // Una sola notificación al negocio por cliente en este lapso (varios mensajes
 // seguidos del mismo cliente son la misma conversación).
 const HANDOFF_NOTIFY_COOLDOWN_MS = 30 * 60 * 1000;
+
+// "ya pagué", "ya envié el comprobante", "ya lo subí", "ya transferí"...
+const PAYMENT_CLAIM_PATTERN =
+  /\b(pagu[eé]|pag[oó]|envi[eé]|mand[eé]|sub[ií]|transfer[ií]|consign[eé]|deposit[eé])\b|comprobante/i;
+
+const notPaidYetReply = (deposit) =>
+  `Aún no nos llega tu ${deposit.method === "mercadopago" ? "pago" : "comprobante"} 🙏 ` +
+  `${deposit.method === "mercadopago" ? "Solo se registra si pagas" : "Solo nos llega si lo subes"} en este enlace:\n` +
+  `${deposit.paymentUrl}\n\nApenas lo hagas se valida y te confirmamos por aquí.`;
 
 const handoffReply = (org) =>
   `Le paso tu mensaje al equipo de *${org.name.trim()}* para que te responda personalmente 🙌`;
@@ -323,7 +333,25 @@ export async function processClientBookingMessage(org, clientPhone, body) {
     reply = PAUSE_ACK_MESSAGE;
     await setPause(orgId, clientPhone, Date.now() + PAUSE_TTL_MS, "client");
   } else {
-    try {
+    // Estado real del abono pendiente (sin pagar / en revisión / pagado /
+    // rechazado / vencido): el bot responde desde aquí en vez de suponerlo.
+    if (session.pendingDeposit?.externalReference) {
+      try {
+        const order = await Order.findOne({ externalReference: session.pendingDeposit.externalReference })
+          .select("status")
+          .lean();
+        if (order) session.pendingDeposit.status = order.status;
+      } catch (err) {
+        console.warn("[WaBookingAgent] No se pudo leer el estado del abono:", err.message);
+      }
+    }
+    const deposit = session.pendingDeposit;
+    if (deposit && ["created", "pending"].includes(deposit.status) && PAYMENT_CLAIM_PATTERN.test(body)) {
+      // Dice que ya pagó pero el sistema no tiene nada: respuesta fija. El modelo
+      // inventaba "se está procesando, en unos minutos te llega la confirmación"
+      // y el cliente se quedaba esperando algo que nunca iba a llegar.
+      reply = notPaidYetReply(deposit);
+    } else try {
       const result = await processBookingChat(org, session.messages, {
         channel: "whatsapp",
         session,

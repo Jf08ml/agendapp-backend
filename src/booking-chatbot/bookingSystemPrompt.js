@@ -10,6 +10,23 @@ export const NO_REPLY_SENTINEL = "[[NO_REPLY]]";
 // puede verificar) — ver caso 3 del FILTRO DE INTENCIÓN y waBookingAgentService.
 export const HANDOFF_SENTINEL = "[[HANDOFF]]";
 
+// Estado del Order del abono pendiente (lo refresca waBookingAgentService en
+// cada turno) → qué debe decirle el bot al cliente.
+const NOT_PAID_TEXT =
+  "TODAVÍA NO HA PAGADO: no nos ha llegado ningún pago ni comprobante. Si dice que ya pagó o ya lo envió, dile con amabilidad que aún no nos llega y que el comprobante solo nos llega si lo sube en el enlace de abajo (reenvíaselo). No inventes tiempos de procesamiento ni le digas que espere: si no lo sube ahí, no llega.";
+const DEPOSIT_STATUS_TEXT = {
+  created: NOT_PAID_TEXT,
+  pending: NOT_PAID_TEXT,
+  in_review:
+    "COMPROBANTE RECIBIDO, EN REVISIÓN: ya nos llegó y el negocio lo está revisando; su cupo sigue apartado. Dile que ya lo recibimos y que le confirmamos por aquí apenas quede validado. NO le reenvíes el enlace ni le pidas pagar de nuevo.",
+  paid:
+    "PAGO VALIDADO: el abono se confirmó y la reserva quedó agendada (le llega la confirmación por WhatsApp). Díselo.",
+  failed:
+    "COMPROBANTE RECHAZADO: el negocio no pudo validar el pago y la reserva no quedó confirmada. Díselo con amabilidad y ofrécele agendar de nuevo.",
+  expired:
+    "VENCIDO: no se pagó a tiempo y el horario se liberó. Ofrécele agendar de nuevo.",
+};
+
 export const buildBookingSystemPrompt = (organization, options = {}) => {
   // channel: "web" (default, con botón de confirmación en el frontend)
   //        | "whatsapp" (sin botón — la confirmación es conversacional vía confirm_reservation)
@@ -359,9 +376,15 @@ ${JSON.stringify(options.pendingReservation)}
     isWhatsapp && options.pendingDeposit
       ? `
 
-💳 ESTADO ACTUAL — HAY UNA RESERVA APARTADA ESPERANDO EL PAGO DEL ABONO (${options.pendingDeposit.amountLabel}), que vence ${moment(options.pendingDeposit.expiresAt).tz(timezone).format("h:mm a")}. Enlace de pago: ${options.pendingDeposit.paymentUrl}
-- Si el cliente pregunta cómo pagar, por el enlace o si su reserva está lista, reenvíale ese enlace y recuérdale que la reserva se confirma cuando el pago se valide.
-- Si ya pasó la hora de vencimiento, dile que el horario pudo haberse liberado y ofrécele agendar de nuevo.`
+💳 ESTADO ACTUAL DEL ABONO (${options.pendingDeposit.amountLabel}) de la reserva que ya apartaste en esta conversación — consultado en el sistema ahora mismo:
+${DEPOSIT_STATUS_TEXT[options.pendingDeposit.status] || DEPOSIT_STATUS_TEXT.created}
+Enlace de pago: ${options.pendingDeposit.paymentUrl} (vence ${moment(options.pendingDeposit.expiresAt).tz(timezone).format("h:mm a")})
+- Si el cliente pregunta por su pago o su reserva, o dice que ya pagó / ya envió el comprobante, respóndele SOLO según este estado, en una o dos líneas. No uses ${HANDOFF_SENTINEL} para esto.
+${
+          ["failed", "expired"].includes(options.pendingDeposit.status)
+            ? "- Si quiere agendar de nuevo, sigue el flujo normal desde la disponibilidad."
+            : '- NUNCA vuelvas a preparar ni confirmar esta misma reserva: ya existe. Un "sí" del cliente ahora no confirma nada nuevo.'
+        }`
       : ""
   }
 
