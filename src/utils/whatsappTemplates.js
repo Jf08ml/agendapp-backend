@@ -65,6 +65,38 @@ Si necesitas ajustar horarios o cambiar algún servicio, *responde a este chat* 
 
 ¡Te esperamos en cada sesión!`,
 
+      // 🔄 El negocio reprogramó una cita (desde la agenda)
+      rescheduleAppointment: `🔄 ¡Hola, {{names}}!
+
+Tu cita en *{{organization}}* fue reprogramada.
+
+❌ Antes: {{previousDate}}
+✅ Ahora: {{date}}
+✨ Servicio: {{service}}
+👩‍💼 Te atenderá: {{employee}}
+📍 Dirección: {{address}}
+
+Si necesitas cancelar tu cita, puedes hacerlo desde este enlace:
+{{cancellationLink}}
+
+Si el nuevo horario no te sirve, *responde a este chat* y con gusto te ayudamos.`,
+
+      // 🔄 El negocio reprogramó varias citas de una serie ("esta y las siguientes")
+      rescheduleAppointmentSeries: `🔄 ¡Hola, {{names}}!
+
+Tus citas en *{{organization}}* fueron reprogramadas.
+
+📍 Dirección: {{address}}
+👩‍💼 Te atenderá: {{employee}}
+
+📅 *Tus nuevos horarios:*
+{{appointmentsList}}
+
+❌ Puedes cancelar todas tus citas o solo algunas desde este enlace:
+{{cancellationLink}}
+
+Si algún horario no te sirve, *responde a este chat* y con gusto te ayudamos.`,
+
       reminder: `📅 ¡Hola, {{names}}!
 
 Recuerda que tienes {{count}} {{cita_pal}} {{agendada_pal}}.

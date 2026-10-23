@@ -24,6 +24,15 @@ const whatsappTemplateSchema = new mongoose.Schema(
           type: Boolean,
           default: true,
         },
+        // 🔄 Aviso de reprogramación (el admin decide en cada cambio si se envía)
+        rescheduleAppointment: {
+          type: Boolean,
+          default: true,
+        },
+        rescheduleAppointmentSeries: {
+          type: Boolean,
+          default: true,
+        },
         reminder: {
           type: Boolean,
           default: true,
@@ -121,6 +130,8 @@ const whatsappTemplateSchema = new mongoose.Schema(
         scheduleAppointment: true,
         scheduleAppointmentBatch: true,
         recurringAppointmentSeries: true,
+        rescheduleAppointment: true,
+        rescheduleAppointmentSeries: true,
         reminder: true,
         secondReminder: true,
         statusReservationPending: true,
@@ -153,6 +164,15 @@ const whatsappTemplateSchema = new mongoose.Schema(
       default: null,
     },
     recurringAppointmentSeries: {
+      type: String,
+      default: null,
+    },
+    // 🔄 Aviso de reprogramación
+    rescheduleAppointment: {
+      type: String,
+      default: null,
+    },
+    rescheduleAppointmentSeries: {
       type: String,
       default: null,
     },

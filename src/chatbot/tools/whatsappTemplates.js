@@ -16,6 +16,14 @@ const TEMPLATE_TYPES = {
     label: "Confirmación de serie de citas recurrentes",
     variables: ["{{names}}", "{{organization}}", "{{address}}", "{{employee}}", "{{appointmentsList}}", "{{cancellationLink}}"],
   },
+  rescheduleAppointment: {
+    label: "Aviso al cliente cuando el negocio reprograma su cita",
+    variables: ["{{names}}", "{{organization}}", "{{previousDate}}", "{{date}}", "{{service}}", "{{employee}}", "{{address}}", "{{cancellationLink}}"],
+  },
+  rescheduleAppointmentSeries: {
+    label: "Aviso al cliente cuando el negocio reprograma varias citas de su serie",
+    variables: ["{{names}}", "{{organization}}", "{{address}}", "{{employee}}", "{{appointmentsList}}", "{{cancellationLink}}"],
+  },
   reminder: {
     label: "Recordatorio de cita",
     variables: ["{{names}}", "{{count}}", "{{cita_pal}}", "{{agendada_pal}}", "{{date_range}}", "{{organization}}", "{{address}}", "{{services_list}}", "{{employee}}", "{{manage_block}}", "{{recommendations}}"],

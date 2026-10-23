@@ -26,6 +26,7 @@
  *   days            → dias
  *   originalService → servicio_original
  *   service (followUpReminder) → servicio_seguimiento
+ *   previousDate    → fecha_anterior (reprogramación)
  */
 
 import { listTemplates, sendTemplateMessage, getOrgPrefix } from "./metaTemplateService.js";
@@ -37,6 +38,9 @@ const META_TEMPLATE_NAMES = {
   scheduleAppointment:       "confirmacion_cita",
   scheduleAppointmentBatch:  "confirmacion_cita",
   recurringAppointmentSeries:"citas_recurrentes",
+  // 🔄 Aviso de reprogramación
+  rescheduleAppointment:     "cita_reprogramada",
+  rescheduleAppointmentSeries:"citas_reprogramadas",
   reminder:                  "recordatorio_cita",
   secondReminder:            "segundo_recordatorio",
   clientConfirmationAck:     "confirmacion_asistencia",
@@ -75,6 +79,15 @@ const VARIABLE_ORDER = {
     "lista_servicios", "profesional", "enlace_cancelacion",
   ],
   citas_recurrentes: [
+    "nombre_cliente", "nombre_negocio", "direccion",
+    "profesional", "lista_citas", "enlace_cancelacion",
+  ],
+  // 🔄 Aviso de reprogramación
+  cita_reprogramada: [
+    "nombre_cliente", "nombre_negocio", "fecha_anterior", "fecha_cita",
+    "servicio", "profesional", "direccion", "enlace_cancelacion",
+  ],
+  citas_reprogramadas: [
     "nombre_cliente", "nombre_negocio", "direccion",
     "profesional", "lista_citas", "enlace_cancelacion",
   ],
@@ -118,6 +131,7 @@ function buildMetaVarMap(data) {
   return {
     nombre_cliente:       data.names             ?? "",
     fecha_cita:           data.date ?? data.dateRange ?? data.date_range ?? "",
+    fecha_anterior:       data.previousDate       ?? "",
     nombre_negocio:       data.organization       ?? "",
     direccion:            data.address            ?? "",
     servicio:             data.service            ?? "",

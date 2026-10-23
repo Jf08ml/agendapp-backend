@@ -6,6 +6,7 @@ import organizationService from "../services/organizationService.js";
 import subscriptionService from "../services/subscriptionService.js";
 import sendResponse from "../utils/sendResponse.js";
 import { auditLogService } from "../services/auditLogService.js";
+import { notifyClientReschedule } from "../services/rescheduleNotifier.js";
 
 const appointmentController = {
   // Controlador para crear una nueva cita
@@ -235,11 +236,29 @@ const appointmentController = {
   // Controlador para actualizar una cita
   updateAppointment: async (req, res) => {
     const { id } = req.params;
+    // 🔄 notifyClient: el admin marcó "Avisar al cliente por WhatsApp" al reprogramar
+    const { notifyClient, ...changes } = req.body;
     try {
+      const before = notifyClient === true ? await appointmentService.getAppointmentById(id) : null;
       const updatedAppointment = await appointmentService.updateAppointment(
         id,
-        req.body
+        changes
       );
+
+      // Solo se avisa si de verdad cambió el horario o el profesional
+      let clientNotification;
+      if (before) {
+        const moved =
+          before.startDate.getTime() !== new Date(updatedAppointment.startDate).getTime() ||
+          String(before.employee) !== String(updatedAppointment.employee?._id ?? updatedAppointment.employee);
+        if (moved) {
+          clientNotification = await notifyClientReschedule({
+            organizationId: updatedAppointment.organizationId,
+            appointmentIds: [updatedAppointment._id],
+            previousStartDate: before.startDate,
+          });
+        }
+      }
 
       const organization = await organizationService.getOrganizationById(
         updatedAppointment.organizationId
@@ -258,7 +277,9 @@ const appointmentController = {
       sendResponse(
         res,
         200,
-        updatedAppointment,
+        clientNotification
+          ? { ...updatedAppointment.toObject(), clientNotification }
+          : updatedAppointment,
         "Cita actualizada exitosamente"
       );
     } catch (error) {
@@ -277,7 +298,7 @@ const appointmentController = {
   // las que chocan o caen fuera de horario (si no, esas se quedan donde estaban).
   rescheduleSeriesFromAppointment: async (req, res) => {
     const { id } = req.params;
-    const { previewOnly, force, ...changes } = req.body;
+    const { previewOnly, force, notifyClient, ...changes } = req.body;
     try {
       const organizationId = req.organization?._id || changes.organizationId;
       // El plan se calcula ANTES de actualizar la cita editada (mide contra su horario original)
@@ -287,8 +308,18 @@ const appointmentController = {
         return sendResponse(res, 200, { items: plan.items, summary: plan.summary }, "Vista previa de la reprogramación");
       }
 
+      const before = await appointmentService.getAppointmentById(id);
       const updatedAppointment = await appointmentService.updateAppointment(id, changes);
       const result = await appointmentSeriesService.applySeriesReschedulePlan(plan, { force: force === true });
+
+      // 🔄 Un solo WhatsApp con los nuevos horarios (si solo se movió la editada, el aviso individual)
+      const clientNotification = notifyClient === true
+        ? await notifyClientReschedule({
+            organizationId,
+            appointmentIds: [updatedAppointment._id, ...result.moved.map((m) => m._id)],
+            previousStartDate: before.startDate,
+          })
+        : undefined;
 
       try {
         const organization = await organizationService.getOrganizationById(organizationId);
@@ -307,7 +338,7 @@ const appointmentController = {
       sendResponse(
         res,
         200,
-        { appointment: updatedAppointment, moved: result.moved, skipped: result.skipped },
+        { appointment: updatedAppointment, moved: result.moved, skipped: result.skipped, clientNotification },
         `Se reprogramaron ${result.moved.length + 1} citas`
       );
     } catch (error) {
