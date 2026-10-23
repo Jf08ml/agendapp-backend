@@ -67,6 +67,9 @@ const servicePackageSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    // 🖼️ Fotos del paquete (URLs de ImageKit), igual que Service.images —
+    // la primera es la portada en la página pública y en el panel.
+    images: [{ type: String }],
     organizationId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Organization",

@@ -272,6 +272,55 @@ const appointmentController = {
     }
   },
 
+  // 🔁 Reprogramar una cita de serie junto con las siguientes ("esta y las siguientes").
+  // previewOnly → solo devuelve cómo quedarían (con choques); force → mueve también
+  // las que chocan o caen fuera de horario (si no, esas se quedan donde estaban).
+  rescheduleSeriesFromAppointment: async (req, res) => {
+    const { id } = req.params;
+    const { previewOnly, force, ...changes } = req.body;
+    try {
+      const organizationId = req.organization?._id || changes.organizationId;
+      // El plan se calcula ANTES de actualizar la cita editada (mide contra su horario original)
+      const plan = await appointmentSeriesService.planSeriesReschedule(id, changes, organizationId);
+
+      if (previewOnly === true) {
+        return sendResponse(res, 200, { items: plan.items, summary: plan.summary }, "Vista previa de la reprogramación");
+      }
+
+      const updatedAppointment = await appointmentService.updateAppointment(id, changes);
+      const result = await appointmentSeriesService.applySeriesReschedulePlan(plan, { force: force === true });
+
+      try {
+        const organization = await organizationService.getOrganizationById(organizationId);
+        await subscriptionService.sendNotificationToUser(
+          updatedAppointment.employee,
+          JSON.stringify({
+            title: "Citas reprogramadas",
+            message: `Se reprogramaron ${result.moved.length + 1} citas de una serie`,
+            icon: organization?.branding?.pwaIcon || "",
+          })
+        );
+      } catch (notifError) {
+        console.error("Error enviando notificación de reprogramación:", notifError);
+      }
+
+      sendResponse(
+        res,
+        200,
+        { appointment: updatedAppointment, moved: result.moved, skipped: result.skipped },
+        `Se reprogramaron ${result.moved.length + 1} citas`
+      );
+    } catch (error) {
+      if (error.code === 'CONCURRENCY_LIMIT_REACHED') {
+        return sendResponse(res, 409, {
+          code: 'CONCURRENCY_LIMIT_REACHED',
+          conflictingAppointments: error.conflictingAppointments || [],
+        }, error.message);
+      }
+      sendResponse(res, error.statusCode || 400, null, error.message);
+    }
+  },
+
   // Controlador para cancelar una cita (cambia estado a cancelled_by_admin, mantiene historial)
   cancelAppointment: async (req, res) => {
     const { id } = req.params;

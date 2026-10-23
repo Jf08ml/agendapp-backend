@@ -20,6 +20,7 @@ import cancellationService from './cancellationService.js';
 import { generateCancellationLink } from '../utils/cancellationUtils.js';
 import { weekdayEs } from '../utils/timeAndPhones.js';
 import packageService from './packageService.js';
+import scheduleService from './scheduleService.js';
 import waQuotaService, { WA_QUOTA_BLOCKED_REASON } from './waQuotaService.js';
 
 // 📅 Helpers de formato para mensajes
@@ -853,11 +854,240 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 🔁 Reprogramar "esta y las siguientes" de una serie
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Citas que ya no se mueven: canceladas/rechazadas o ya ocurridas (atendida / no asistió)
+const FROZEN_STATUSES = ['cancelled', 'cancelled_by_customer', 'cancelled_by_admin', 'rejected', 'attended', 'no_show'];
+
+/**
+ * Desplazamiento en la timezone de la organización: días de calendario + minutos
+ * de reloj. Así "pasar del martes 3 PM al jueves 10 AM" mueve cada cita siguiente
+ * dos días y a las 10 AM, sin depender de las horas reales entre fechas.
+ */
+function computeShift(originalStart, newStart, timezone) {
+  const o = moment.tz(originalStart, timezone);
+  const n = moment.tz(newStart, timezone);
+  const dayDelta = Math.round(n.clone().startOf('day').diff(o.clone().startOf('day'), 'days', true));
+  const minuteDelta = (n.hours() * 60 + n.minutes()) - (o.hours() * 60 + o.minutes());
+  return { dayDelta, minuteDelta };
+}
+
+function applyShift(date, { dayDelta, minuteDelta }, timezone) {
+  return moment.tz(date, timezone).add(dayDelta, 'days').add(minuteDelta, 'minutes').toDate();
+}
+
+/**
+ * Valida el nuevo horario de una cita que se mueve junto con la serie:
+ * horario laboral, bloqueos del profesional y solapes (sin contar las citas
+ * que se mueven en el mismo lote, porque se desplazan todas a la vez).
+ */
+async function validateShiftedSlot({ start, end, employee, organization, service, movingIds, timezone }) {
+  if (start <= new Date()) {
+    return { status: 'past', reason: 'Quedaría en una fecha pasada' };
+  }
+
+  const startMoment = moment.tz(start, timezone);
+  const durationMinutes = Math.round((end - start) / 60000);
+  const schedule = getEffectiveSchedule(employee, organization, startMoment.day());
+  if (!schedule || !isSlotWithinWorkingHours(startMoment.format('HH:mm'), durationMinutes, schedule)) {
+    return {
+      status: 'no_work',
+      reason: schedule?.isAvailable
+        ? `Fuera del horario de trabajo (${schedule.start} - ${schedule.end})`
+        : 'El profesional no trabaja ese día',
+    };
+  }
+
+  const dateStr = startMoment.format('YYYY-MM-DD');
+  const slotStartMin = timeToMinutes(startMoment.format('HH:mm'));
+  const slotEndMin = slotStartMin + durationMinutes;
+  for (const exception of employee.scheduleExceptions || []) {
+    if (!scheduleService.exceptionAppliesToDate(exception, dateStr)) continue;
+    const blocksSlot = exception.allDay
+      || (exception.startTime && exception.endTime
+        && slotStartMin < timeToMinutes(exception.endTime)
+        && slotEndMin > timeToMinutes(exception.startTime));
+    if (blocksSlot) {
+      return { status: 'no_work', reason: `Horario bloqueado${exception.reason ? ` (${exception.reason})` : ''}` };
+    }
+  }
+
+  // Mismo criterio de concurrencia que appointmentService.updateAppointment
+  const overlapping = await appointmentModel
+    .find({
+      _id: { $nin: movingIds },
+      employee: employee._id,
+      organizationId: organization._id,
+      status: { $nin: FROZEN_STATUSES },
+      startDate: { $lt: end },
+      endDate: { $gt: start },
+    })
+    .select('service')
+    .lean();
+  if (overlapping.length > 0) {
+    const serviceId = String(service?._id || '');
+    const otherServiceConflict = overlapping.some((a) => String(a.service) !== serviceId);
+    const maxConcurrent = service?.maxConcurrentAppointments ?? 1;
+    if (otherServiceConflict || overlapping.length >= maxConcurrent) {
+      return { status: 'conflict', reason: 'El profesional ya tiene otra cita en ese horario' };
+    }
+  }
+
+  return { status: 'available' };
+}
+
+/**
+ * Calcula (sin guardar nada) cómo quedarían las citas siguientes de la serie
+ * si la cita `appointmentId` se reprograma a `changes.startDate` / `changes.employee`.
+ * Se debe llamar ANTES de actualizar la cita editada: el desplazamiento se mide
+ * contra su horario original.
+ *
+ * @param {string} appointmentId
+ * @param {{ startDate?: string, employee?: string }} changes - startDate en "YYYY-MM-DDTHH:mm:ss" (hora local de la org)
+ * @param {string} organizationId
+ * @returns {Promise<{ items: Array, summary: Object, shift: Object, employeeChanged: boolean }>}
+ */
+async function planSeriesReschedule(appointmentId, changes, organizationId) {
+  const appt = await appointmentModel.findOne({ _id: appointmentId, organizationId });
+  if (!appt) throw new Error('Cita no encontrada');
+  if (!appt.seriesId) throw new Error('La cita no pertenece a una serie recurrente');
+
+  const organization = await organizationService.getOrganizationById(organizationId);
+  if (!organization) throw new Error('Organización no encontrada');
+  const timezone = organization.timezone || 'America/Bogota';
+
+  const newStart = changes.startDate
+    ? moment.tz(changes.startDate, 'YYYY-MM-DDTHH:mm:ss', timezone).toDate()
+    : appt.startDate;
+  const shift = computeShift(appt.startDate, newStart, timezone);
+  const newEmployeeId = changes.employee ? String(changes.employee?._id || changes.employee) : null;
+  const employeeChanged = !!newEmployeeId && newEmployeeId !== String(appt.employee);
+
+  // Siguientes = misma serie, desde el horario original de la editada (incluye los
+  // demás servicios de esa misma visita que van después) y aún no ocurridas.
+  const following = await appointmentModel
+    .find({
+      seriesId: appt.seriesId,
+      organizationId,
+      _id: { $ne: appt._id },
+      startDate: { $gte: appt.startDate },
+      status: { $nin: FROZEN_STATUSES },
+    })
+    .populate('service', 'name maxConcurrentAppointments')
+    .sort({ startDate: 1 })
+    .lean();
+
+  const nothingChanges = shift.dayDelta === 0 && shift.minuteDelta === 0 && !employeeChanged;
+  if (following.length === 0 || nothingChanges) {
+    return { items: [], summary: { total: 0, available: 0, conflict: 0, no_work: 0, past: 0 }, shift, employeeChanged };
+  }
+
+  // Profesionales involucrados (normalmente uno solo para toda la serie)
+  const employeeIds = new Set(following.map((a) => (employeeChanged ? newEmployeeId : String(a.employee))));
+  const employees = new Map();
+  for (const id of employeeIds) {
+    const emp = await employeeService.getEmployeeById(id);
+    if (!emp) throw new Error('Profesional no encontrado');
+    employees.set(id, emp);
+  }
+
+  const movingIds = [appt._id, ...following.map((a) => a._id)];
+  const items = [];
+  for (const a of following) {
+    const start = applyShift(a.startDate, shift, timezone);
+    const end = new Date(start.getTime() + (new Date(a.endDate) - new Date(a.startDate)));
+    const employeeId = employeeChanged ? newEmployeeId : String(a.employee);
+    const validation = await validateShiftedSlot({
+      start,
+      end,
+      employee: employees.get(employeeId),
+      organization,
+      service: a.service,
+      movingIds,
+      timezone,
+    });
+    items.push({
+      _id: a._id,
+      occurrenceNumber: a.occurrenceNumber,
+      serviceName: a.service?.name || 'Servicio',
+      oldStartDate: a.startDate,
+      oldEndDate: a.endDate,
+      newStartDate: start,
+      newEndDate: end,
+      employee: employeeId,
+      status: validation.status,
+      reason: validation.reason,
+    });
+  }
+
+  const count = (s) => items.filter((i) => i.status === s).length;
+  return {
+    items,
+    summary: {
+      total: items.length,
+      available: count('available'),
+      conflict: count('conflict'),
+      no_work: count('no_work'),
+      past: count('past'),
+    },
+    shift,
+    employeeChanged,
+  };
+}
+
+/**
+ * Aplica un plan de planSeriesReschedule en una sola transacción.
+ * - Disponibles: siempre se mueven.
+ * - Con choque / fuera de horario: solo con `force` (si no, se quedan donde estaban).
+ * - Las que quedarían en el pasado nunca se mueven.
+ * Las sesiones de paquete no cambian: son las mismas citas en otra fecha.
+ */
+async function applySeriesReschedulePlan(plan, { force = false } = {}) {
+  const toMove = plan.items.filter((i) =>
+    i.status === 'available' || (force && (i.status === 'conflict' || i.status === 'no_work'))
+  );
+  const skipped = plan.items.filter((i) => !toMove.includes(i));
+
+  if (toMove.length > 0) {
+    const session = await mongoose.startSession();
+    try {
+      await session.withTransaction(async () => {
+        await appointmentModel.bulkWrite(
+          toMove.map((i) => ({
+            updateOne: {
+              filter: { _id: i._id },
+              update: {
+                $set: {
+                  startDate: i.newStartDate,
+                  endDate: i.newEndDate,
+                  ...(plan.employeeChanged ? { employee: i.employee } : {}),
+                },
+              },
+            },
+          })),
+          { session }
+        );
+      });
+    } finally {
+      session.endSession();
+    }
+  }
+
+  return {
+    moved: toMove.map((i) => ({ _id: i._id, startDate: i.newStartDate, endDate: i.newEndDate })),
+    skipped: skipped.map((i) => ({ _id: i._id, startDate: i.oldStartDate, status: i.status, reason: i.reason })),
+  };
+}
+
 export default {
   generateWeeklyOccurrences,
   validateOccurrenceAvailability,
   previewSeriesAppointments,
   createSeriesAppointments,
+  planSeriesReschedule,
+  applySeriesReschedulePlan,
   getEffectiveSchedule, // Export para tests
   isSlotWithinWorkingHours // Export para tests
 };

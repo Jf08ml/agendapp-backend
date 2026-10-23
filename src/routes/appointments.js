@@ -39,6 +39,9 @@ router.get("/:id", appointmentController.getAppointmentById);
 // Actualizar una cita específica por ID
 router.put("/:id", appointmentController.updateAppointment);
 
+// 🔁 Reprogramar esta cita y las siguientes de su serie (previewOnly para ver choques)
+router.post("/:id/series-reschedule", appointmentController.rescheduleSeriesFromAppointment);
+
 // 📝 Actualizar solo las notas de la sesión (no reprograma ni recalcula la cita)
 router.patch("/:id/notes", appointmentController.updateSessionNotes);
 
