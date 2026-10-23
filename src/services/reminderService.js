@@ -270,7 +270,9 @@ export const reminderService = {
         for (const item of items) {
           try {
             if (!dryRun) {
-              const result = await whatsappService.sendNotification(_orgId, item.phone, 'reminder', item.vars);
+              const result = await whatsappService.sendNotification(_orgId, item.phone, 'reminder', item.vars, {
+                externalRef: `reminder:${item.apptIds.join(",")}`,
+              });
               if (!result || result.blocked) {
                 console.warn(`[${_orgId}] Recordatorio Meta a ${item.phone} no enviado (sin plantilla/fallback disponible)`);
                 continue;

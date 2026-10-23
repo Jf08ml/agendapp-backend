@@ -234,7 +234,12 @@ function buildComponents(metaTemplateName, data, customOrder) {
 
 /**
  * Sends a WhatsApp notification via an approved Meta template.
- * Returns null (and logs a warning) if the template is not found or not APPROVED.
+ * Returns null only when the template type has no Meta template mapped.
+ * Throws (with a readable reason in err.message) when the template is missing,
+ * not APPROVED, or Meta rejects the send — the caller decides on fallbacks and
+ * records the reason on the appointment instead of marking it as sent.
+ * err.recipientIssue = true when the problem is the recipient (no WhatsApp):
+ * no other channel will deliver either.
  *
  * Template names are stored in Meta with an org-specific prefix (e.g. "abcd1234_confirmacion_cita").
  * listTemplates() returns them WITHOUT prefix (stripped), so we match by the base name.
@@ -245,9 +250,11 @@ function buildComponents(metaTemplateName, data, customOrder) {
  * @param {string} templateType - Internal template type (e.g. "scheduleAppointmentBatch")
  * @param {Object} data         - Variable data (same keys used for Baileys rendering)
  * @param {string} [language]   - BCP-47 language code, default "es"
+ * @param {Object} [opts]
+ * @param {string} [opts.externalRef] - correlación para el tracking de entrega (biz_opaque_callback_data)
  * @returns {Promise<Object|null>}
  */
-export async function sendMetaTemplateNotification(org, phone, templateType, data, language = "es") {
+export async function sendMetaTemplateNotification(org, phone, templateType, data, language = "es", opts = {}) {
   const metaName = META_TEMPLATE_NAMES[templateType];
   if (!metaName) {
     console.warn(`[metaSendWA] No Meta template name configured for type: ${templateType}`);
@@ -258,8 +265,8 @@ export async function sendMetaTemplateNotification(org, phone, templateType, dat
   try {
     templates = await getApprovedTemplateList(org);
   } catch (err) {
-    console.error(`[metaSendWA] Could not fetch template list for org ${org._id}:`, err.message);
-    return null;
+    console.error(`[metaSendWA] Could not fetch template list for org ${org._id}:`, err.response?.data || err.message);
+    throw metaSendError(err, "No se pudieron consultar las plantillas en Meta");
   }
 
   // listTemplates returns names WITHOUT prefix — match by base name
@@ -270,12 +277,12 @@ export async function sendMetaTemplateNotification(org, phone, templateType, dat
 
   if (!template) {
     console.warn(`[metaSendWA] Template "${metaName}" not found for org ${org._id} (prefix: ${getOrgPrefix(org)})`);
-    return null;
+    throw new Error(`La plantilla "${metaName}" no existe en Meta`);
   }
 
   if (template.status !== "APPROVED") {
     console.warn(`[metaSendWA] Template "${metaName}" is not approved (status: ${template.status}) for org ${org._id}`);
-    return null;
+    throw new Error(`La plantilla "${metaName}" no está aprobada en Meta (estado: ${template.status})`);
   }
 
   // Si la org personalizó esta plantilla, usar el orden de variables que
@@ -299,7 +306,7 @@ export async function sendMetaTemplateNotification(org, phone, templateType, dat
 
   try {
     // sendTemplateMessage adds the org prefix to metaName internally
-    return await sendTemplateMessage(org, phone, metaName, lang, components);
+    return await sendTemplateMessage(org, phone, metaName, lang, components, opts.externalRef);
   } catch (err) {
     const metaCode = err.response?.data?.error?.code;
     // 133010 = número no tiene WhatsApp — esperado, no es un error crítico
@@ -308,6 +315,27 @@ export async function sendMetaTemplateNotification(org, phone, templateType, dat
     } else {
       console.error(`[metaSendWA] Error sending template "${metaName}" to ${phone}:`, err.response?.data || err.message);
     }
-    return null;
+    throw metaSendError(err);
   }
+}
+
+// Errores de envío de Meta con causa accionable → mensaje legible en español
+// (se guarda en Appointment.waConfirmationError y se ve al diagnosticar).
+const META_SEND_ERROR_MESSAGES = {
+  131042: "Meta bloqueó el envío: hay un problema con el método de pago de la cuenta de WhatsApp Business",
+  133010: "El número del cliente no tiene WhatsApp",
+  131026: "Meta no pudo entregar el mensaje a ese número",
+  131047: "Fuera de la ventana de 24 h de Meta (solo se pueden enviar plantillas)",
+  132001: "La plantilla no existe en Meta para ese idioma",
+};
+const RECIPIENT_ERROR_CODES = new Set([133010, 131026]);
+
+function metaSendError(err, fallbackText = "Error enviando por Meta") {
+  const metaErr = err.response?.data?.error;
+  const code = metaErr?.code;
+  const text = META_SEND_ERROR_MESSAGES[code] || metaErr?.error_data?.details || metaErr?.message || err.message || fallbackText;
+  const e = new Error(code ? `${text} (Meta ${code})` : text);
+  e.metaCode = code;
+  e.recipientIssue = RECIPIENT_ERROR_CODES.has(code);
+  return e;
 }

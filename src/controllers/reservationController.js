@@ -5,7 +5,7 @@ import reservationModel from "../models/reservationModel.js";
 import notificationService from "../services/notificationService.js";
 import organizationService from "../services/organizationService.js";
 import reservationService from "../services/reservationService.js";
-import appointmentService, { recordConfirmationOutcome } from "../services/appointmentService.js";
+import appointmentService, { recordConfirmationOutcome, sendConfirmationAndRecord } from "../services/appointmentService.js";
 import waQuotaService, { WA_QUOTA_BLOCKED_REASON } from "../services/waQuotaService.js";
 import subscriptionService from "../services/subscriptionService.js";
 import sendResponse from "../utils/sendResponse.js";
@@ -432,25 +432,19 @@ async function _sendRecurringWhatsApp({ allAppointments, customerDetails, org, o
   );
 
   // sendNotification enruta Meta (plantilla citas_recurrentes) o Baileys
-  const notifyResult = await whatsappService.sendNotification(
-    organizationId,
-    customerDetails.phone,
-    'recurringAppointmentSeries',
-    templateData,
-    { fallbackMessage: msg, externalRef: `confirmation:${ids.join(",")}` }
-  );
-  const messageId = notifyResult?.messageId || notifyResult?.id || null;
-  const outcome = !notifyResult ? "failed" : notifyResult.blocked ? "blocked" : "sent";
-  await recordConfirmationOutcome(
-    ids.filter(id => allowed.has(String(id))),
-    outcome,
-    outcome === "sent" ? undefined : notifyResult?.reason || "Sin template aprobado ni canal disponible",
-    messageId
+  const outcome = await sendConfirmationAndRecord(ids.filter(id => allowed.has(String(id))), () =>
+    whatsappService.sendNotification(
+      organizationId,
+      customerDetails.phone,
+      'recurringAppointmentSeries',
+      templateData,
+      { fallbackMessage: msg, externalRef: `confirmation:${ids.join(",")}` }
+    )
   );
   const overQuota = ids.filter(id => !allowed.has(String(id)));
   if (overQuota.length) await recordConfirmationOutcome(overQuota, "blocked", WA_QUOTA_BLOCKED_REASON);
 
-  console.log(`✅ WhatsApp recurrente enviado: ${Object.keys(citasPorOcurrencia).length} ocurrencias`);
+  console.log(`📨 WhatsApp recurrente (${Object.keys(citasPorOcurrencia).length} ocurrencias): ${outcome.status}${outcome.reason ? ` — ${outcome.reason}` : ""}`);
 }
 
 const reservationController = {
@@ -931,19 +925,14 @@ const reservationController = {
                   'scheduleAppointmentBatch',
                   templateData
                 );
-                const notifyResult = await whatsappService.sendNotification(
-                  organizationId,
-                  customerDetails.phone,
-                  'scheduleAppointmentBatch',
-                  templateData,
-                  { fallbackMessage: renderedMsg, externalRef: `confirmation:${apptIds.join(",")}` }
-                );
-                const outcome = !notifyResult ? "failed" : notifyResult.blocked ? "blocked" : "sent";
-                await recordConfirmationOutcome(
-                  apptIds,
-                  outcome,
-                  outcome === "sent" ? undefined : notifyResult?.reason || "Sin template aprobado ni canal disponible",
-                  notifyResult?.messageId || notifyResult?.id || null
+                await sendConfirmationAndRecord(apptIds, () =>
+                  whatsappService.sendNotification(
+                    organizationId,
+                    customerDetails.phone,
+                    'scheduleAppointmentBatch',
+                    templateData,
+                    { fallbackMessage: renderedMsg, externalRef: `confirmation:${apptIds.join(",")}` }
+                  )
                 );
               }
             }

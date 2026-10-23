@@ -6,7 +6,7 @@ import Organization from "../models/organizationModel.js";
 import Appointment from "../models/appointmentModel.js";
 import Service from "../models/serviceModel.js";
 import Employee from "../models/employeeModel.js";
-import appointmentService, { recordConfirmationOutcome } from "./appointmentService.js";
+import appointmentService, { recordConfirmationOutcome, sendConfirmationAndRecord } from "./appointmentService.js";
 import whatsappService from "./sendWhatsappService.js";
 import waQuotaService, { WA_QUOTA_BLOCKED_REASON } from "./waQuotaService.js";
 import cancellationService from "./cancellationService.js";
@@ -86,24 +86,19 @@ async function _sendRecurringApprovalWhatsApp({ allCreatedAppts, customerDetails
   );
 
   // sendNotification enruta Meta (plantilla citas_recurrentes) o Baileys
-  const notifyResult = await whatsappService.sendNotification(
-    organizationId,
-    customerDetails.phone,
-    'recurringAppointmentSeries',
-    templateData,
-    { fallbackMessage: msg, externalRef: `confirmation:${ids.join(",")}` }
-  );
-  const outcome = !notifyResult ? "failed" : notifyResult.blocked ? "blocked" : "sent";
-  await recordConfirmationOutcome(
-    ids.filter(id => allowed.has(String(id))),
-    outcome,
-    outcome === "sent" ? undefined : notifyResult?.reason || "Sin template aprobado ni canal disponible",
-    notifyResult?.messageId || notifyResult?.id || null
+  const outcome = await sendConfirmationAndRecord(ids.filter(id => allowed.has(String(id))), () =>
+    whatsappService.sendNotification(
+      organizationId,
+      customerDetails.phone,
+      'recurringAppointmentSeries',
+      templateData,
+      { fallbackMessage: msg, externalRef: `confirmation:${ids.join(",")}` }
+    )
   );
   const overQuota = ids.filter(id => !allowed.has(String(id)));
   if (overQuota.length) await recordConfirmationOutcome(overQuota, "blocked", WA_QUOTA_BLOCKED_REASON);
 
-  console.log(`✅ WhatsApp recurrente enviado al aprobar: ${Object.keys(citasPorOcurrencia).length} ocurrencias`);
+  console.log(`📨 WhatsApp recurrente al aprobar (${Object.keys(citasPorOcurrencia).length} ocurrencias): ${outcome.status}${outcome.reason ? ` — ${outcome.reason}` : ""}`);
 }
 
 /**

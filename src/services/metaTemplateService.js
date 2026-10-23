@@ -178,7 +178,12 @@ export async function syncTemplateStatus(org) {
  * Envía un mensaje usando una plantilla aprobada.
  * El templateName se recibe SIN prefijo; se agrega internamente si aplica.
  */
-export async function sendTemplateMessage(org, toPhone, templateName, language, components = []) {
+// biz_opaque_callback_data: Meta lo devuelve tal cual en los webhooks de status
+// del mensaje — lo usamos para correlacionar la entrega con las citas (mismo
+// externalRef que en Baileys, ver waAgentController.applyDeliveryStatus). Límite 512 chars.
+const MAX_CALLBACK_DATA = 512;
+
+export async function sendTemplateMessage(org, toPhone, templateName, language, components = [], externalRef) {
   if (!org.metaPhoneNumberId) throw new Error("La organización no tiene Meta API configurada.");
   const { token, usePrefix } = getOrgCredentials(org);
   const client = axios.create({ baseURL: GRAPH_URL, params: { access_token: token } });
@@ -188,8 +193,23 @@ export async function sendTemplateMessage(org, toPhone, templateName, language, 
     to: toPhone,
     type: "template",
     template: { name: fullName, language: { code: language || "es" }, components },
+    ...(externalRef && externalRef.length <= MAX_CALLBACK_DATA ? { biz_opaque_callback_data: externalRef } : {}),
   });
   return { messageId: res.data?.messages?.[0]?.id };
+}
+
+/**
+ * Estado de envío del número según Meta (health_status del nodo del número:
+ * incluye el número, el WABA, el Business y la app). can_send_message:
+ * AVAILABLE | LIMITED | BLOCKED. Usado por waHealthCheckService.
+ */
+export async function getPhoneHealthStatus(org) {
+  if (!org.metaPhoneNumberId) throw new Error("La organización no tiene Meta API configurada.");
+  const { token } = getOrgCredentials(org);
+  const res = await withOwnerTokenFallback(org, token, (t) =>
+    makeClient(t).get(`/${org.metaPhoneNumberId}`, { params: { fields: "health_status" } })
+  );
+  return res.data?.health_status || null;
 }
 
 /**

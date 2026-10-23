@@ -15,7 +15,7 @@ import WhatsappTemplate from '../models/whatsappTemplateModel.js';
 import whatsappTemplates from '../utils/whatsappTemplates.js';
 import { waIntegrationService } from './waIntegrationService.js';
 import whatsappService from './sendWhatsappService.js';
-import { recordConfirmationOutcome } from './appointmentService.js';
+import { recordConfirmationOutcome, sendConfirmationAndRecord } from './appointmentService.js';
 import cancellationService from './cancellationService.js';
 import { generateCancellationLink } from '../utils/cancellationUtils.js';
 import { weekdayEs } from '../utils/timeAndPhones.js';
@@ -716,16 +716,17 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
             console.log(`⏭️  Confirmación de serie NO enviada (tope mensual de WhatsApp del plan)`);
             await recordConfirmationOutcome(created.map(c => c._id), "blocked", WA_QUOTA_BLOCKED_REASON);
           } else if (planAllowsSeriesConfirmations && isRecurringConfirmationEnabled) {
-            const notifyResult = await whatsappService.sendNotification(
-              baseAppointment.organizationId,
-              phoneE164,
-              'recurringAppointmentSeries',
-              templateData,
-              { externalRef: `confirmation:${created.map(c => c._id).join(",")}` }
+            const outcome = await sendConfirmationAndRecord(
+              created.filter(c => quotaAllowed.has(String(c._id))).map(c => c._id),
+              () => whatsappService.sendNotification(
+                baseAppointment.organizationId,
+                phoneE164,
+                'recurringAppointmentSeries',
+                templateData,
+                { externalRef: `confirmation:${created.map(c => c._id).join(",")}` }
+              )
             );
-            const messageId = notifyResult?.messageId || notifyResult?.id || null;
-            console.log(`✅ Confirmación de serie recurrente enviada: ${Object.keys(citasPorOcurrencia).length} ocurrencias (${created.length} citas totales) — messageId: ${messageId || "?"}`);
-            await recordConfirmationOutcome(created.filter(c => quotaAllowed.has(String(c._id))).map(c => c._id), "sent", undefined, messageId);
+            console.log(`📨 Confirmación de serie recurrente (${Object.keys(citasPorOcurrencia).length} ocurrencias, ${created.length} citas): ${outcome.status}${outcome.reason ? ` — ${outcome.reason}` : ""}`);
             if (overQuotaIds.length) await recordConfirmationOutcome(overQuotaIds, "blocked", WA_QUOTA_BLOCKED_REASON);
           } else {
             console.log(`⏭️  Confirmación de serie recurrente deshabilitada`);
@@ -813,16 +814,16 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
               
               // Usar template batch o simple según cantidad de servicios
               const templateType = primerasCitas.length > 1 ? 'scheduleAppointmentBatch' : 'scheduleAppointment';
-              const notifyResult = await whatsappService.sendNotification(
-                baseAppointment.organizationId,
-                phoneE164,
-                templateType,
-                templateData,
-                { externalRef: `confirmation:${primerasCitas.map(c => c._id).join(",")}` }
+              const outcome = await sendConfirmationAndRecord(primerasCitas.map(c => c._id), () =>
+                whatsappService.sendNotification(
+                  baseAppointment.organizationId,
+                  phoneE164,
+                  templateType,
+                  templateData,
+                  { externalRef: `confirmation:${primerasCitas.map(c => c._id).join(",")}` }
+                )
               );
-              const messageId = notifyResult?.messageId || notifyResult?.id || null;
-              console.log(`📱 Mensaje enviado solo de primera ocurrencia (${primerasCitas.length} servicios) — messageId: ${messageId || "?"}`);
-              await recordConfirmationOutcome(primerasCitas.map(c => c._id), "sent", undefined, messageId);
+              console.log(`📱 Mensaje de primera ocurrencia (${primerasCitas.length} servicios): ${outcome.status}${outcome.reason ? ` — ${outcome.reason}` : ""}`);
             }
           }
         }

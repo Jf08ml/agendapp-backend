@@ -190,29 +190,47 @@ const whatsappService = {
       const normalizedPhone = this.normalizePhoneForWhatsapp(phone, org.default_country || "CO");
 
       // Try Meta template first
+      let metaError = null;
       try {
-        const result = await sendMetaTemplateNotification(org, normalizedPhone, templateType, data);
+        const result = await sendMetaTemplateNotification(org, normalizedPhone, templateType, data, "es", {
+          externalRef: opts.externalRef,
+        });
         if (result) return result;
       } catch (err) {
+        metaError = err;
         console.error(`[sendNotification] Meta template error for "${templateType}":`, err.message);
       }
 
-      // Fallback 1: Baileys en coexistencia (mismo número, siempre funciona)
-      if (org.clientIdWhatsapp) {
+      // El destinatario no tiene WhatsApp: ningún otro canal lo va a entregar
+      if (metaError?.recipientIssue) throw metaError;
+
+      // Fallback 1: Baileys en coexistencia — solo con la sesión realmente lista.
+      // Una sesión desvinculada (401) aceptaba el envío y el mensaje se perdía
+      // en silencio, mientras la cita quedaba marcada como enviada.
+      if (org.clientIdWhatsapp && (await this.isClientReady(org.clientIdWhatsapp))) {
         console.warn(`[sendNotification] Meta template no disponible, usando Baileys (coexistencia) para "${templateType}" org ${org._id}`);
         const msg = opts.fallbackMessage || await whatsappTemplates.getRenderedTemplate(organizationId, templateType, data);
         const payload = { clientId: org.clientIdWhatsapp, phone: normalizedPhone, message: msg };
+        if (opts.externalRef) payload.externalRef = opts.externalRef;
         return this.sendViaMultiSession(payload, opts);
       }
 
-      // Fallback 2: texto libre Meta (puede fallar si no hay ventana de 24h)
+      // Fallback 2: texto libre Meta (solo funciona dentro de la ventana de 24h)
       if (opts.fallbackMessage) {
         console.warn(`[sendNotification] Fallback a texto libre Meta para "${templateType}" org ${org._id}`);
-        return metaSendText(org, normalizedPhone, opts.fallbackMessage);
+        try {
+          return await metaSendText(org, normalizedPhone, opts.fallbackMessage);
+        } catch (err) {
+          // El error de la plantilla es el que explica el problema (p. ej. pago
+          // bloqueado); el del texto libre casi siempre es la ventana de 24h.
+          if (!metaError) throw err;
+        }
       }
 
-      console.warn(`[sendNotification] Sin template ni fallback para "${templateType}" org ${org._id} — omitiendo`);
-      return null;
+      // Nada salió: lanzar con la causa real para que quien llama la registre
+      // (antes se devolvía null y varios caminos marcaban la cita como "sent").
+      console.warn(`[sendNotification] "${templateType}" no enviado para org ${org._id}: ${metaError?.message || "sin plantilla ni canal alternativo"}`);
+      throw metaError || new Error(`Sin plantilla de Meta para "${templateType}" ni canal alternativo disponible`);
     }
 
     // Baileys: render and send as text
@@ -270,10 +288,11 @@ const whatsappService = {
         if (result) return result;
       } catch (err) {
         console.error(`[sendWhatsappStatusReservation] Meta template error:`, err.message);
+        if (err.recipientIssue) throw err;
       }
 
-      // Fallback 1: Baileys en coexistencia
-      if (org.clientIdWhatsapp) {
+      // Fallback 1: Baileys en coexistencia — solo con la sesión realmente lista
+      if (org.clientIdWhatsapp && (await this.isClientReady(org.clientIdWhatsapp))) {
         console.warn(`[sendWhatsappStatusReservation] Meta template no disponible, usando Baileys (coexistencia) para "${templateType}" org ${org._id}`);
         const msg = await whatsappTemplates.getRenderedTemplate(org, templateType, reservationDetails);
         const payload = { clientId: org.clientIdWhatsapp, phone: normalizedPhone, message: msg };

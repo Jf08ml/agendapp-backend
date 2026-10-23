@@ -468,6 +468,17 @@ const organizationSchema = new mongoose.Schema({
     downSince:  { type: Date, default: null },
     notifiedAt: { type: Date, default: null },
   },
+  // ── Alerta de envío bloqueado por Meta (orgs con waConnectionType "meta") ──
+  // Meta puede bloquear los mensajes iniciados por el negocio (método de pago
+  // con error, cuenta restringida...) sin que el número se desconecte.
+  // waHealthCheckService consulta health_status cada 15 min: blockedSince se
+  // pone al verlo BLOCKED, notifiedAt al avisar (una vez por bloqueo) y ambos
+  // vuelven a null cuando Meta deja de reportarlo bloqueado.
+  metaHealthAlert: {
+    blockedSince: { type: Date, default: null },
+    notifiedAt:   { type: Date, default: null },
+    reason:       { type: String, default: null },
+  },
   blockHolidaysForReservations: {
     type: Boolean,
     default: false,

@@ -87,6 +87,35 @@ export async function recordConfirmationOutcome(appointmentIds, status, errorMes
   }
 }
 
+// 📨 Envía una confirmación (send = () => whatsappService.sendNotification(...)) y
+// registra el resultado real en las citas: sendNotification devuelve
+// { blocked, reason } si el plan lo impide, el resultado del proveedor si salió,
+// y lanza (o devuelve null) cuando no salió por ningún canal. Antes varios
+// caminos guardaban "sent" sin mirar el resultado.
+export async function sendConfirmationAndRecord(appointmentIds, send) {
+  let result;
+  try {
+    result = await send();
+  } catch (err) {
+    const reason = err?.message || String(err);
+    await recordConfirmationOutcome(appointmentIds, "failed", reason);
+    return { status: "failed", reason };
+  }
+  if (!result) {
+    const reason = "Sin plantilla aprobada ni canal disponible";
+    await recordConfirmationOutcome(appointmentIds, "failed", reason);
+    return { status: "failed", reason };
+  }
+  if (result.blocked) {
+    const reason = result.reason || "Bloqueada por plan";
+    await recordConfirmationOutcome(appointmentIds, "blocked", reason);
+    return { status: "blocked", reason };
+  }
+  const messageId = result.messageId || result.id || null;
+  await recordConfirmationOutcome(appointmentIds, "sent", undefined, messageId);
+  return { status: "sent", messageId };
+}
+
 const appointmentService = {
   // Crear una nueva cita
   createAppointment: async (appointmentData) => {
@@ -738,16 +767,16 @@ const appointmentService = {
           console.log(`⏭️  Confirmación batch NO enviada (tope mensual de WhatsApp del plan)`);
           await recordConfirmationOutcome(groupApptIds, "blocked", WA_QUOTA_BLOCKED_REASON);
         } else if (planAllowsConfirmations && isBatchConfirmationEnabled) {
-          const notifyResult = await whatsappService.sendNotification(
-            organizationId,
-            phoneE164,
-            'scheduleAppointmentBatch',
-            templateData,
-            { externalRef: `confirmation:${groupApptIds.join(",")}` }
+          const outcome = await sendConfirmationAndRecord(groupApptIds, () =>
+            whatsappService.sendNotification(
+              organizationId,
+              phoneE164,
+              'scheduleAppointmentBatch',
+              templateData,
+              { externalRef: `confirmation:${groupApptIds.join(",")}` }
+            )
           );
-          const messageId = notifyResult?.messageId || notifyResult?.id || null;
-          console.log(`✅ Confirmación batch enviada (${allGroupAppointments.length} citas) — messageId: ${messageId || "?"}`);
-          await recordConfirmationOutcome(groupApptIds, "sent", undefined, messageId);
+          console.log(`📨 Confirmación batch (${allGroupAppointments.length} citas): ${outcome.status}${outcome.reason ? ` — ${outcome.reason}` : ""}`);
         } else {
           console.log(`⏭️  Confirmación batch deshabilitada`);
           await recordConfirmationOutcome(
@@ -894,16 +923,16 @@ const appointmentService = {
           console.log('⏭️  Confirmación multi-profesional NO enviada (tope mensual de WhatsApp del plan)');
           await recordConfirmationOutcome(allCreatedIds, "blocked", WA_QUOTA_BLOCKED_REASON);
         } else if (planAllowsConfirmations && isBatchConfirmationEnabled) {
-          const notifyResult = await whatsappService.sendNotification(
-            organizationId,
-            phoneE164,
-            'scheduleAppointmentBatch',
-            templateData,
-            { externalRef: `confirmation:${allCreatedIds.join(",")}` }
+          const outcome = await sendConfirmationAndRecord(allCreatedIds, () =>
+            whatsappService.sendNotification(
+              organizationId,
+              phoneE164,
+              'scheduleAppointmentBatch',
+              templateData,
+              { externalRef: `confirmation:${allCreatedIds.join(",")}` }
+            )
           );
-          const messageId = notifyResult?.messageId || notifyResult?.id || null;
-          console.log(`✅ WA multi-profesional enviado (${groupAppts.length} citas, ${employeeNames.length} profesionales) — messageId: ${messageId || "?"}`);
-          await recordConfirmationOutcome(allCreatedIds, "sent", undefined, messageId);
+          console.log(`📨 WA multi-profesional (${groupAppts.length} citas, ${employeeNames.length} profesionales): ${outcome.status}${outcome.reason ? ` — ${outcome.reason}` : ""}`);
         } else {
           console.log('⏭️  Confirmación multi-profesional deshabilitada');
           await recordConfirmationOutcome(
@@ -1725,7 +1754,7 @@ const appointmentService = {
             const failedIds = [];
             for (const item of items) {
               try {
-                const result = await whatsappService.sendNotification(org._id, item.phone, templateType, item.vars);
+                const result = await whatsappService.sendNotification(org._id, item.phone, templateType, item.vars, { externalRef: item.externalRef });
                 if (result && !result.blocked) {
                   metaSent++;
                 } else {

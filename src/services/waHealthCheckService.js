@@ -28,6 +28,7 @@ import { sendTextMessage } from "./metaApiService.js";
 import { logOutboundMessage } from "./platformInboxService.js";
 import { normalizeAdminPhone } from "./collection/adminPaymentNotifier.js";
 import { getPlatformSettings } from "./platformSettingsService.js";
+import { getPhoneHealthStatus } from "./metaTemplateService.js";
 
 async function notifyWhatsappDisconnected(org) {
   const title = "WhatsApp desconectado ⚠️";
@@ -144,4 +145,101 @@ export async function checkWhatsappConnections() {
   return { checked: candidates.length, notified };
 }
 
-export default { checkWhatsappConnections };
+// ── Meta Cloud API ───────────────────────────────────────────────────────────
+//
+// Las orgs con waConnectionType "meta" no tienen sesión que se caiga, pero Meta
+// puede bloquear los mensajes iniciados por el negocio (p. ej. error 141006:
+// método de pago con error en el WABA) con el número "CONNECTED". Los envíos
+// fallan en silencio para la org — se consulta health_status del número y se
+// avisa una vez por bloqueo. Sin anti-falso-positivo de dos corridas: es un
+// estado de la cuenta en Meta, no un blip de conexión.
+
+// Causas con solución conocida → texto accionable para el dueño del negocio
+const META_BLOCK_REASONS = {
+  141006:
+    "hay un problema con el método de pago de tu cuenta de WhatsApp Business. Agrega o actualiza la tarjeta en Meta Business Suite → WhatsApp Manager → Configuración de pagos",
+};
+
+function describeMetaBlock(healthStatus) {
+  const blocked = (healthStatus?.entities || []).filter((e) => e.can_send_message === "BLOCKED");
+  const error = blocked.flatMap((e) => e.errors || [])[0];
+  if (!error) return "Meta bloqueó los mensajes de la cuenta. Revisa el estado en Meta Business Suite → WhatsApp Manager";
+  return META_BLOCK_REASONS[error.error_code] || `${error.error_description} (Meta ${error.error_code})`;
+}
+
+async function notifyMetaBlocked(org, reason) {
+  const title = "WhatsApp bloqueado por Meta ⚠️";
+  const message = `Meta bloqueó los mensajes automáticos de ${org.name} (confirmaciones, recordatorios, etc): ${reason}. Mientras no se corrija, tus clientes no reciben mensajes.`;
+
+  await Promise.allSettled([
+    notificationService.createNotification({
+      title,
+      message,
+      organizationId: org._id,
+      type: "system",
+      frontendRoute: "/gestionar-whatsapp",
+      status: "unread",
+    }),
+    subscriptionService.sendNotificationToUser(
+      org._id,
+      JSON.stringify({ title, message, icon: org?.branding?.pwaIcon })
+    ),
+  ]);
+}
+
+export async function checkMetaHealth() {
+  const orgs = await Organization.find({
+    waConnectionType: "meta",
+    metaPhoneNumberId: { $nin: [null, ""] },
+  }).select("_id name branding metaPhoneNumberId metaWabaId metaAccessToken metaHealthAlert");
+
+  let notified = 0;
+
+  for (const org of orgs) {
+    try {
+      const health = await getPhoneHealthStatus(org);
+      const isBlocked = health?.can_send_message === "BLOCKED";
+      const { blockedSince, notifiedAt } = org.metaHealthAlert || {};
+
+      if (!isBlocked) {
+        if (blockedSince || notifiedAt) {
+          await Organization.updateOne(
+            { _id: org._id },
+            { $set: { "metaHealthAlert.blockedSince": null, "metaHealthAlert.notifiedAt": null, "metaHealthAlert.reason": null } }
+          );
+          console.log(`[waHealthCheck] Meta desbloqueó los envíos de ${org.name} (${org._id})`);
+        }
+        continue;
+      }
+
+      const reason = describeMetaBlock(health);
+      if (notifiedAt) continue; // ya se avisó este bloqueo
+
+      // Reclamo atómico (evita doble aviso si el cron llegara a solaparse)
+      const claimed = await Organization.findOneAndUpdate(
+        { _id: org._id, "metaHealthAlert.notifiedAt": null },
+        {
+          $set: {
+            "metaHealthAlert.blockedSince": blockedSince || new Date(),
+            "metaHealthAlert.notifiedAt": new Date(),
+            "metaHealthAlert.reason": reason,
+          },
+        }
+      );
+      if (!claimed) continue;
+
+      console.warn(`[waHealthCheck] Meta bloqueó los envíos de ${org.name} (${org._id}): ${reason}`);
+      await notifyMetaBlocked(org, reason);
+      notified++;
+    } catch (err) {
+      console.error(
+        `[waHealthCheck] No se pudo consultar health_status de Meta para ${org._id}:`,
+        err?.response?.data?.error?.message || err?.message
+      );
+    }
+  }
+
+  return { checked: orgs.length, notified };
+}
+
+export default { checkWhatsappConnections, checkMetaHealth };

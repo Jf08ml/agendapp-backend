@@ -102,7 +102,9 @@ export async function handleMetaIncoming(req, res) {
   }
 
   // Eventos de status (ticks: sent/delivered/read/failed) de mensajes salientes —
-  // llegan en un payload separado, sin "messages". Actualiza el inbox de superadmin.
+  // llegan en un payload separado, sin "messages". Actualiza el inbox de superadmin
+  // y, para mensajes de las orgs (confirmaciones/recordatorios), la entrega real
+  // en las citas vía biz_opaque_callback_data (= externalRef del envío).
   const statuses = change?.statuses;
   if (statuses?.length) {
     for (const s of statuses) {
@@ -110,6 +112,16 @@ export async function handleMetaIncoming(req, res) {
       updateMessageStatus({ metaMessageId: s.id, status: s.status }).catch((err) =>
         console.error("[WaAgent] Error actualizando status de mensaje:", err.message)
       );
+      if (s.biz_opaque_callback_data) {
+        const deliveryStatus = s.status === "read" ? "delivered" : s.status;
+        const metaErr = s.errors?.[0];
+        const errorText = metaErr
+          ? `Meta no entregó el mensaje: ${metaErr.error_data?.details || metaErr.title || metaErr.message} (Meta ${metaErr.code})`
+          : undefined;
+        applyDeliveryStatus(s.biz_opaque_callback_data, deliveryStatus, errorText).catch((err) =>
+          console.error("[WaAgent] Error actualizando entrega Meta en citas:", err.message)
+        );
+      }
     }
   }
 
@@ -243,11 +255,60 @@ const DELIVERY_STATUS_RANK = { failed: 1, sent: 1, delivered: 2 };
 
 // externalRef viaja como "<kind>:<id1>,<id2>,..." — un recordatorio puede
 // agrupar varias citas del mismo cliente/teléfono en un solo mensaje.
+// El aviso de reprogramación es la confirmación vigente del nuevo horario
+// (rescheduleNotifier lo registra como confirmación), así que comparte campos.
+const CONFIRMATION_FIELDS = {
+  statusField: "waConfirmationDeliveryStatus",
+  updatedAtField: "waConfirmationDeliveryUpdatedAt",
+  errorField: "waConfirmationError",
+};
 const REF_KIND_FIELDS = {
-  confirmation: { statusField: "waConfirmationDeliveryStatus", updatedAtField: "waConfirmationDeliveryUpdatedAt" },
+  confirmation: CONFIRMATION_FIELDS,
+  reschedule: CONFIRMATION_FIELDS,
   reminder: { statusField: "reminderDeliveryStatus", updatedAtField: "reminderDeliveryUpdatedAt" },
   reminder2: { statusField: "secondReminderDeliveryStatus", updatedAtField: "secondReminderDeliveryUpdatedAt" },
 };
+
+/**
+ * Aplica un ack de entrega ("sent"/"delivered"/"failed") a las citas del
+ * externalRef, sin retroceder un estado ya más avanzado. Lo usan los acks de
+ * Baileys (handleBaileysStatus) y los status de Meta (biz_opaque_callback_data).
+ */
+async function applyDeliveryStatus(externalRef, status, errorText) {
+  if (!externalRef || !DELIVERY_STATUS_RANK[status]) return;
+
+  const sepIndex = externalRef.indexOf(":");
+  if (sepIndex === -1) return;
+
+  const kind = externalRef.slice(0, sepIndex);
+  const fields = REF_KIND_FIELDS[kind];
+  if (!fields) {
+    console.warn(`[WaAgent] externalRef con kind desconocido: ${kind}`);
+    return;
+  }
+
+  const appointmentIds = externalRef.slice(sepIndex + 1).split(",").filter(Boolean);
+  if (!appointmentIds.length) return;
+
+  const appointments = await Appointment.find({ _id: { $in: appointmentIds } })
+    .select(fields.statusField)
+    .lean();
+
+  const toUpdateIds = appointments
+    .filter((a) => {
+      const current = a[fields.statusField];
+      return !current || DELIVERY_STATUS_RANK[status] >= DELIVERY_STATUS_RANK[current];
+    })
+    .map((a) => a._id);
+
+  if (!toUpdateIds.length) return;
+
+  const $set = { [fields.statusField]: status, [fields.updatedAtField]: new Date() };
+  if (status === "failed" && errorText && fields.errorField) {
+    $set[fields.errorField] = String(errorText).slice(0, 500);
+  }
+  await Appointment.updateMany({ _id: { $in: toUpdateIds } }, { $set });
+}
 
 /**
  * POST /api/wa-agent/status
@@ -266,39 +327,9 @@ export async function handleBaileysStatus(req, res) {
   res.status(200).json({ ok: true });
 
   const { externalRef, status } = req.body || {};
-  if (!externalRef || !DELIVERY_STATUS_RANK[status]) return;
-
-  const sepIndex = externalRef.indexOf(":");
-  if (sepIndex === -1) return;
-
-  const kind = externalRef.slice(0, sepIndex);
-  const fields = REF_KIND_FIELDS[kind];
-  if (!fields) {
-    console.warn(`[WaAgent] externalRef con kind desconocido: ${kind}`);
-    return;
-  }
-
-  const appointmentIds = externalRef.slice(sepIndex + 1).split(",").filter(Boolean);
-  if (!appointmentIds.length) return;
 
   try {
-    const appointments = await Appointment.find({ _id: { $in: appointmentIds } })
-      .select(fields.statusField)
-      .lean();
-
-    const toUpdateIds = appointments
-      .filter((a) => {
-        const current = a[fields.statusField];
-        return !current || DELIVERY_STATUS_RANK[status] >= DELIVERY_STATUS_RANK[current];
-      })
-      .map((a) => a._id);
-
-    if (!toUpdateIds.length) return;
-
-    await Appointment.updateMany(
-      { _id: { $in: toUpdateIds } },
-      { $set: { [fields.statusField]: status, [fields.updatedAtField]: new Date() } }
-    );
+    await applyDeliveryStatus(externalRef, status);
   } catch (err) {
     console.error("[WaAgent] Error actualizando status de entrega Baileys:", err.message);
   }
