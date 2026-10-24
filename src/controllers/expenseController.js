@@ -4,6 +4,7 @@ import sendResponse from "../utils/sendResponse.js";
 const VALID_METHODS = ["cash", "card", "transfer", "other"];
 const sanitizeMethod = (method) =>
   VALID_METHODS.includes(method) ? method : null;
+const EDITABLE_FIELDS = ["concept", "amount", "category", "method", "date"];
 
 const expenseController = {
   // Crear gasto general
@@ -67,14 +68,25 @@ const expenseController = {
     try {
       if (!req.organization) return sendResponse(res, 400, null, "Organización no identificada");
       const organizationId = req.organization._id;
-      const update = { ...req.body };
+      // Solo campos editables: organizationId/type/registeredBy no se pueden cambiar desde el cliente
+      const update = {};
+      for (const field of EDITABLE_FIELDS) {
+        if (field in req.body) update[field] = req.body[field];
+      }
       if ("method" in update) {
         update.method = sanitizeMethod(update.method);
+      }
+      if ("date" in update) {
+        const date = new Date(update.date);
+        if (!update.date || Number.isNaN(date.getTime())) {
+          return sendResponse(res, 400, null, "Fecha inválida");
+        }
+        update.date = date;
       }
       const expense = await Expense.findOneAndUpdate(
         { _id: req.params.id, organizationId },
         update,
-        { new: true }
+        { new: true, runValidators: true }
       );
       if (!expense) return sendResponse(res, 404, null, "Gasto no encontrado");
       sendResponse(res, 200, expense, "Gasto actualizado exitosamente");
