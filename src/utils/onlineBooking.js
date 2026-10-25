@@ -9,8 +9,8 @@ import Employee from "../models/employeeModel.js";
 export const ONLINE_BOOKABLE_EMPLOYEE = { onlineBookingEnabled: { $ne: false } };
 
 // Profesionales de respaldo (Employee.onlineBookingBackup === true): entran en
-// la auto-asignación, pero solo los días en que los demás profesionales del
-// servicio no tienen espacio (scheduleService.onlineBookingEmployeesForDay).
+// la auto-asignación, pero solo en los horarios en que los demás profesionales
+// del servicio están ocupados (scheduleService.findOnlineBookingBlocks).
 // No se ofrecen para elegir: el cliente que pide uno por nombre queda "sin
 // preferencia" — si no, se saltaría la prioridad del profesional principal.
 export const ONLINE_SELECTABLE_EMPLOYEE = {

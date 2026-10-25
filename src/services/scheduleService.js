@@ -1032,33 +1032,27 @@ function findAvailableMultiServiceBlocks(date, organization, services, allEmploy
 }
 
 /**
- * Profesionales que la reserva en línea puede usar ese día. Los de respaldo
- * (onlineBookingBackup) solo entran si, sin ellos, la cadena de servicios no
- * tiene ningún bloque libre en el día — p.ej. Diana Vargas Studio: Daniela
- * recibe todas las reservas y Diana solo los días en que Daniela está llena.
+ * findAvailableMultiServiceBlocks para la reserva en línea, con la prioridad de
+ * los profesionales de respaldo (onlineBookingBackup), horario por horario: en
+ * cada bloque donde un principal está libre se asigna al principal; el respaldo
+ * solo cubre los horarios en que los principales están ocupados — p.ej. Diana
+ * Vargas Studio: Daniela recibe todo lo que puede y Diana cubre el resto.
  * Los profesionales fijados explícitamente en `services` se respetan siempre.
- * Misma firma que findAvailableMultiServiceBlocks.
- */
-function onlineBookingEmployeesForDay(date, organization, services, allEmployees, appointments) {
-  const fixedIds = new Set(services.map((s) => s.employeeId).filter(Boolean).map(String));
-  const primaries = allEmployees.filter(
-    (e) => e.onlineBookingBackup !== true || fixedIds.has(e._id.toString())
-  );
-  if (primaries.length === allEmployees.length) return allEmployees;
-
-  const primaryBlocks = findAvailableMultiServiceBlocks(date, organization, services, primaries, appointments);
-  return primaryBlocks.length > 0 ? primaries : allEmployees;
-}
-
-/**
- * findAvailableMultiServiceBlocks para la reserva en línea: aplica la prioridad
- * de los profesionales de respaldo (ver onlineBookingEmployeesForDay).
  * Agregar respaldos nunca quita bloques, así que la pregunta "¿el día tiene
  * algún bloque?" (checkMultipleDaysAvailability) da lo mismo con o sin la regla.
  */
 function findOnlineBookingBlocks(date, organization, services, allEmployees, appointments) {
-  const employees = onlineBookingEmployeesForDay(date, organization, services, allEmployees, appointments);
-  return findAvailableMultiServiceBlocks(date, organization, services, employees, appointments);
+  const fixedIds = new Set(services.map((s) => s.employeeId).filter(Boolean).map(String));
+  const primaries = allEmployees.filter(
+    (e) => e.onlineBookingBackup !== true || fixedIds.has(e._id.toString())
+  );
+  const allBlocks = findAvailableMultiServiceBlocks(date, organization, services, allEmployees, appointments);
+  if (primaries.length === allEmployees.length) return allBlocks;
+
+  const primaryByStart = new Map(
+    findAvailableMultiServiceBlocks(date, organization, services, primaries, appointments).map((b) => [b.start, b])
+  );
+  return allBlocks.map((b) => primaryByStart.get(b.start) || b);
 }
 
 /**
@@ -1138,7 +1132,6 @@ export default {
   isEmployeeAvailableOnDay,
   assignBestEmployeeForSlot,
   findAvailableMultiServiceBlocks,
-  onlineBookingEmployeesForDay,
   findOnlineBookingBlocks,
   checkMultipleDaysAvailability,
 };

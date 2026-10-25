@@ -189,23 +189,8 @@ async function autoAssignAvailableEmployees(resolved, startDate, organization, o
     status: { $nin: ["cancelled_by_customer", "cancelled_by_admin"] },
   }).lean();
 
-  // Prioridad de los profesionales de respaldo: fuera del día si los principales
-  // tienen espacio (misma regla que get_available_slots), y al final de la fila.
-  const dayPool = scheduleService.onlineBookingEmployeesForDay(
-    date,
-    organization,
-    resolved.map((r) => ({
-      serviceId: r.serviceId,
-      employeeId: r.employeeId,
-      duration: r.duration,
-      maxConcurrentAppointments: r.maxConcurrentAppointments,
-    })),
-    [...fixedEmployees, ...candidates],
-    dayAppointments
-  );
-  const dayPoolIds = new Set(dayPool.map((e) => e._id.toString()));
-  const allowedToday = candidates.filter((c) => dayPoolIds.has(c._id.toString()));
-  if (allowedToday.length > 0) candidates = allowedToday;
+  // Profesionales de respaldo al final de la fila: solo se asignan si ningún
+  // principal está libre en ese horario (misma regla que get_available_slots).
   candidates.sort((a, b) => (a.onlineBookingBackup === true) - (b.onlineBookingBackup === true));
 
   // Probar cada candidato: ¿la cadena completa de servicios cabe en el slot elegido?

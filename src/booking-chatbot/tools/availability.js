@@ -274,19 +274,11 @@ export const getAvailableSlots = {
       status: { $nin: ["cancelled_by_customer", "cancelled_by_admin"] },
     }).lean();
 
-    // Profesionales del día: sin los de respaldo si los principales tienen espacio
-    const dayEmployees = scheduleService.onlineBookingEmployeesForDay(
+    const blocks = scheduleService.findOnlineBookingBlocks(
       date,
       organization,
       enriched,
       employees,
-      appointments
-    );
-    const blocks = scheduleService.findAvailableMultiServiceBlocks(
-      date,
-      organization,
-      enriched,
-      dayEmployees,
       appointments
     );
 
@@ -332,10 +324,10 @@ export const getAvailableSlots = {
         ),
       ];
       slots = slots.map((s) => ({ ...s, assignedEmployees: assignedNames }));
-    } else if (noneSpecified && dayEmployees.length > 0) {
+    } else if (noneSpecified && employees.length > 0) {
       // Sin preferencia de empleado: calcular qué empleados están libres en cada slot
       const empSlotSets = new Map();
-      for (const emp of dayEmployees) {
+      for (const emp of employees) {
         const empEnriched = enriched.map((svc) => ({
           ...svc,
           employeeId: emp._id.toString(),
@@ -352,12 +344,17 @@ export const getAvailableSlots = {
           starts: new Set(empBlocks.map((b) => b.start)),
         });
       }
-      slots = slots.map((s) => ({
-        ...s,
-        availableEmployees: dayEmployees
-          .filter((emp) => empSlotSets.get(emp._id.toString())?.starts.has(s.isoString))
-          .map((emp) => emp.names),
-      }));
+      slots = slots.map((s) => {
+        const free = employees.filter((emp) =>
+          empSlotSets.get(emp._id.toString())?.starts.has(s.isoString)
+        );
+        // Los de respaldo solo cuentan en los horarios sin ningún principal libre
+        const primariesFree = free.filter((emp) => emp.onlineBookingBackup !== true);
+        return {
+          ...s,
+          availableEmployees: (primariesFree.length > 0 ? primariesFree : free).map((emp) => emp.names),
+        };
+      });
     }
     // Caso mixto (parcialmente especificado): se devuelven slots sin info de empleado
 
