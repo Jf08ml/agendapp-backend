@@ -210,8 +210,13 @@ const appointmentModelSchema = new mongoose.Schema(
     recurrencePattern: {
       type: {
         type: String,
-        enum: ['weekly', 'none'],
+        enum: ['weekly', 'custom', 'none'],
         default: 'none'
+      },
+      // 'custom': fechas sueltas elegidas a mano (ej. sesiones de un paquete el 23/10, 26/10 y 4/11)
+      dates: {
+        type: [Date],
+        default: undefined
       },
       intervalWeeks: { 
         type: Number,

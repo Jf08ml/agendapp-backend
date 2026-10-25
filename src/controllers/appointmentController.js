@@ -447,8 +447,11 @@ const appointmentController = {
       } = req.body;
 
       // Validar recurrencePattern
-      if (!recurrencePattern || typeof recurrencePattern !== 'object' || recurrencePattern.type === 'none') {
+      if (!recurrencePattern || typeof recurrencePattern !== 'object' || !['weekly', 'custom'].includes(recurrencePattern.type)) {
         return sendResponse(res, 400, null, "recurrencePattern válido es requerido");
+      }
+      if (recurrencePattern.type === 'custom' && (!Array.isArray(recurrencePattern.dates) || recurrencePattern.dates.length === 0)) {
+        return sendResponse(res, 400, null, "Agrega al menos una fecha además de la primera cita");
       }
 
       // Construir baseAppointment

@@ -231,6 +231,45 @@ function generateWeeklyOccurrences(baseDateInput, pattern, timezone = 'America/B
   return occurrences;
 }
 
+const MAX_CUSTOM_OCCURRENCES = 100; // mismo tope que count en el patrón semanal
+
+/**
+ * Ocurrencias de un patrón 'custom': la fecha base (la cita del formulario) más
+ * las fechas sueltas de pattern.dates, cada una con su propia hora. Las fechas
+ * sin zona ("2026-10-26T15:00:00") se interpretan en la timezone de la organización.
+ *
+ * @returns {Array<{date: Date, dayOfWeek: number}>} en orden cronológico, sin repetidas
+ */
+function generateCustomOccurrences(baseDateInput, pattern, timezone = 'America/Bogota') {
+  const inputs = [baseDateInput, ...(Array.isArray(pattern.dates) ? pattern.dates : [])];
+  const byMinute = new Map();
+  for (const input of inputs) {
+    const m = typeof input === 'string'
+      ? moment.tz(input, moment.ISO_8601, timezone)
+      : moment.tz(input, timezone);
+    if (!input || !m.isValid()) {
+      throw new Error(`Fecha inválida en la serie: ${input}`);
+    }
+    byMinute.set(m.clone().startOf('minute').valueOf(), m);
+  }
+  if (byMinute.size > MAX_CUSTOM_OCCURRENCES) {
+    throw new Error(`Máximo ${MAX_CUSTOM_OCCURRENCES} citas por serie`);
+  }
+  return [...byMinute.values()]
+    .sort((a, b) => a.valueOf() - b.valueOf())
+    .map((m) => ({ date: m.toDate(), dayOfWeek: m.day() }));
+}
+
+/**
+ * Genera las ocurrencias de cualquier patrón soportado ('weekly' | 'custom')
+ */
+function generateOccurrences(baseDateInput, pattern, timezone = 'America/Bogota') {
+  if (pattern?.type === 'custom') {
+    return generateCustomOccurrences(baseDateInput, pattern, timezone);
+  }
+  return generateWeeklyOccurrences(baseDateInput, pattern, timezone);
+}
+
 /**
  * Valida la disponibilidad de una ocurrencia específica
  * 
@@ -361,7 +400,7 @@ async function previewSeriesAppointments(baseAppointment, recurrencePattern, opt
   const minMaxConcurrent = Math.min(...servicesDetails.map(s => s.maxConcurrentAppointments ?? 1));
 
   // Generar fechas de ocurrencias
-  const occurrenceDates = generateWeeklyOccurrences(
+  const occurrenceDates = generateOccurrences(
     startDate,
     recurrencePattern,
     timezone
@@ -514,7 +553,13 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
   );
 
   const timezone = organization.timezone || 'America/Bogota';
-  
+
+  // 'custom' guarda las fechas ya resueltas en la timezone de la org (las del
+  // request vienen sin zona y Mongoose las leería en la zona del servidor)
+  const storedPattern = recurrencePattern.type === 'custom'
+    ? { type: 'custom', dates: toCreate.map(occ => new Date(occ.date)) }
+    : recurrencePattern;
+
   // Crear citas en transacción
   const session = await mongoose.startSession();
   const created = [];
@@ -576,7 +621,7 @@ async function createSeriesAppointments(baseAppointment, recurrencePattern, opti
           // 🔁 Campos de serie
           seriesId,
           occurrenceNumber: occurrenceNumber + 1,
-          recurrencePattern: occurrenceNumber === 0 ? recurrencePattern : undefined, // Solo en la primera
+          recurrencePattern: occurrenceNumber === 0 ? storedPattern : undefined, // Solo en la primera
           // 🔗 Campos de grupo para cancelación conjunta
           groupId,
           cancelTokenHash,
@@ -1084,6 +1129,7 @@ async function applySeriesReschedulePlan(plan, { force = false } = {}) {
 
 export default {
   generateWeeklyOccurrences,
+  generateOccurrences,
   validateOccurrenceAvailability,
   previewSeriesAppointments,
   createSeriesAppointments,
