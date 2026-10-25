@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import Employee from "../../models/employeeModel.js";
 import Service from "../../models/serviceModel.js";
 import { isPriceHidden } from "./services.js";
-import { ONLINE_BOOKABLE_EMPLOYEE } from "../../utils/onlineBooking.js";
+import { ONLINE_SELECTABLE_EMPLOYEE } from "../../utils/onlineBooking.js";
 
 // Quita acentos, emojis y signos para comparar nombres de servicio de forma flexible
 // ("Corte Tradicional" debe encontrar "✂️ Corte Tradicional ✨").
@@ -63,12 +63,23 @@ export const getEmployeesForService = {
       organizationId,
       isActive: true,
       services: resolvedId,
-      ...ONLINE_BOOKABLE_EMPLOYEE,
+      ...ONLINE_SELECTABLE_EMPLOYEE,
     })
       .select("_id names position")
       .lean();
 
-    if (employees.length === 0) {
+    // Profesionales de respaldo (onlineBookingBackup): no se listan, pero el
+    // sistema los asigna solo cuando los principales no tienen espacio ese día —
+    // para eso la reserva tiene que ir sin profesional fijo.
+    const hasBackup = !!(await Employee.exists({
+      organizationId,
+      isActive: true,
+      services: resolvedId,
+      onlineBookingEnabled: { $ne: false },
+      onlineBookingBackup: true,
+    }));
+
+    if (employees.length === 0 && !hasBackup) {
       return {
         success: true,
         employees: [],
@@ -97,7 +108,9 @@ export const getEmployeesForService = {
         position: e.position || "",
       })),
       _instruction:
-        "Estos son los ÚNICOS profesionales que atienden este servicio. Nunca menciones otros nombres. Si el cliente pide a alguien que no está en esta lista, dile que esa persona no atiende este servicio y ofrécele los de la lista." +
+        (hasBackup
+          ? "El negocio asigna el profesional automáticamente según disponibilidad. No le preguntes al cliente con quién quiere la cita: busca fechas y horarios y prepara la reserva con employeeId null, salvo que el cliente pida por su cuenta a alguien de esta lista. Nunca inventes nombres de profesionales."
+          : "Estos son los ÚNICOS profesionales que atienden este servicio. Nunca menciones otros nombres. Si el cliente pide a alguien que no está en esta lista, dile que esa persona no atiende este servicio y ofrécele los de la lista.") +
         (serviceLine
           ? ` Si todavía no le diste al cliente el precio de este servicio, empieza tu respuesta con esta línea tal cual: ${serviceLine}`
           : ""),

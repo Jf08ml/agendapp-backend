@@ -712,8 +712,12 @@ const scheduleController = {
         maxConcurrentAppointments: servicesModelMap.get(s.serviceId)?.maxConcurrentAppointments ?? 1
       }));
 
-      // Calcular bloques disponibles
-      const blocks = scheduleService.findAvailableMultiServiceBlocks(
+      // Calcular bloques disponibles (en línea: con la prioridad de los
+      // profesionales de respaldo; la agenda interna ve a todos por igual)
+      const findBlocks = onlineBooking
+        ? scheduleService.findOnlineBookingBlocks
+        : scheduleService.findAvailableMultiServiceBlocks;
+      const blocks = findBlocks(
         date, // Pasar el string de fecha
         organization,
         servicesEnriched,

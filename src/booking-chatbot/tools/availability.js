@@ -4,7 +4,7 @@ import Appointment from "../../models/appointmentModel.js";
 import Employee from "../../models/employeeModel.js";
 import Service from "../../models/serviceModel.js";
 import scheduleService from "../../services/scheduleService.js";
-import { ONLINE_BOOKABLE_EMPLOYEE } from "../../utils/onlineBooking.js";
+import { ONLINE_BOOKABLE_EMPLOYEE, ONLINE_SELECTABLE_EMPLOYEE } from "../../utils/onlineBooking.js";
 
 const DAY_NAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
 const MONTH_NAMES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
@@ -30,17 +30,17 @@ async function resolveService(value, organizationId) {
 }
 
 // Resolve employeeId: accepts ObjectId or partial name. Professionals hidden from
-// online booking resolve to null (treated as "no preference").
+// online booking or marked as backup resolve to null (treated as "no preference").
 async function resolveEmployee(value, organizationId) {
   if (!value) return null;
   if (mongoose.Types.ObjectId.isValid(value)) {
-    return Employee.findOne({ _id: value, organizationId, ...ONLINE_BOOKABLE_EMPLOYEE }).lean();
+    return Employee.findOne({ _id: value, organizationId, ...ONLINE_SELECTABLE_EMPLOYEE }).lean();
   }
   return Employee.findOne({
     organizationId,
     names: { $regex: value.replace(/-/g, " "), $options: "i" },
     isActive: true,
-    ...ONLINE_BOOKABLE_EMPLOYEE,
+    ...ONLINE_SELECTABLE_EMPLOYEE,
   }).lean();
 }
 
@@ -186,7 +186,7 @@ export const getAvailableDates = {
         return s >= dayStart && s <= dayEnd;
       });
 
-      const blocks = scheduleService.findAvailableMultiServiceBlocks(
+      const blocks = scheduleService.findOnlineBookingBlocks(
         dateStr,
         organization,
         enriched,
@@ -274,11 +274,19 @@ export const getAvailableSlots = {
       status: { $nin: ["cancelled_by_customer", "cancelled_by_admin"] },
     }).lean();
 
-    const blocks = scheduleService.findAvailableMultiServiceBlocks(
+    // Profesionales del día: sin los de respaldo si los principales tienen espacio
+    const dayEmployees = scheduleService.onlineBookingEmployeesForDay(
       date,
       organization,
       enriched,
       employees,
+      appointments
+    );
+    const blocks = scheduleService.findAvailableMultiServiceBlocks(
+      date,
+      organization,
+      enriched,
+      dayEmployees,
       appointments
     );
 
@@ -324,10 +332,10 @@ export const getAvailableSlots = {
         ),
       ];
       slots = slots.map((s) => ({ ...s, assignedEmployees: assignedNames }));
-    } else if (noneSpecified && employees.length > 0) {
+    } else if (noneSpecified && dayEmployees.length > 0) {
       // Sin preferencia de empleado: calcular qué empleados están libres en cada slot
       const empSlotSets = new Map();
-      for (const emp of employees) {
+      for (const emp of dayEmployees) {
         const empEnriched = enriched.map((svc) => ({
           ...svc,
           employeeId: emp._id.toString(),
@@ -346,7 +354,7 @@ export const getAvailableSlots = {
       }
       slots = slots.map((s) => ({
         ...s,
-        availableEmployees: employees
+        availableEmployees: dayEmployees
           .filter((emp) => empSlotSets.get(emp._id.toString())?.starts.has(s.isoString))
           .map((emp) => emp.names),
       }));

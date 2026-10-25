@@ -8,6 +8,16 @@ import Employee from "../models/employeeModel.js";
 // $ne:false (no ===true) para que los empleados sin el campo cuenten como visibles.
 export const ONLINE_BOOKABLE_EMPLOYEE = { onlineBookingEnabled: { $ne: false } };
 
+// Profesionales de respaldo (Employee.onlineBookingBackup === true): entran en
+// la auto-asignación, pero solo los días en que los demás profesionales del
+// servicio no tienen espacio (scheduleService.onlineBookingEmployeesForDay).
+// No se ofrecen para elegir: el cliente que pide uno por nombre queda "sin
+// preferencia" — si no, se saltaría la prioridad del profesional principal.
+export const ONLINE_SELECTABLE_EMPLOYEE = {
+  ...ONLINE_BOOKABLE_EMPLOYEE,
+  onlineBookingBackup: { $ne: true },
+};
+
 /**
  * Si alguno de los servicios de una reserva pública trae un profesional oculto
  * de la reserva en línea, devuelve el mensaje de error para el cliente; si no, null.

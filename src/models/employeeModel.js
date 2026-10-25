@@ -78,6 +78,10 @@ const employeeModelSchema = new mongoose.Schema({
   // false = no se ofrece en la reserva en línea (wizard público ni asistentes de
   // reservas web/WhatsApp), pero sigue activo en la agenda interna. Ver utils/onlineBooking.js.
   onlineBookingEnabled: { type: Boolean, default: true },
+  // true = profesional de respaldo en la reserva en línea: no se ofrece para
+  // elegir y solo se auto-asigna los días en que los demás profesionales del
+  // servicio no tienen espacio. Ver utils/onlineBooking.js.
+  onlineBookingBackup: { type: Boolean, default: false },
   profileImage: { 
     type: String, 
     default: "https://ik.imagekit.io/6cx9tc1kx/default_smile.png?updatedAt=1732716506174"

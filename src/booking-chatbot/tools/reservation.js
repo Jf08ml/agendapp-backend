@@ -11,7 +11,7 @@ import { resolveBaseUrl } from "../../utils/cancellationUtils.js";
 import { computeDepositForServices } from "../../services/collection/orderService.js";
 import { dateLabel } from "./availability.js";
 import { isPriceHidden } from "./services.js";
-import { ONLINE_BOOKABLE_EMPLOYEE } from "../../utils/onlineBooking.js";
+import { ONLINE_BOOKABLE_EMPLOYEE, ONLINE_SELECTABLE_EMPLOYEE } from "../../utils/onlineBooking.js";
 
 const ACTIVE_APPOINTMENT_FILTER = { $nin: ["cancelled_by_customer", "cancelled_by_admin"] };
 
@@ -121,9 +121,11 @@ async function resolveService(value, organizationId) {
 // profesionales activos del negocio que atienden el servicio — antes cualquier
 // ObjectId pasaba tal cual. Un nombre inventado (caso real 2026-10-22: "Diana
 // Vargas", tomado del nombre del negocio) queda en null y se auto-asigna.
+// Los profesionales de respaldo también quedan en null: los asigna
+// autoAssignAvailableEmployees solo si los principales no tienen espacio.
 async function resolveEmployeeId(value, organizationId, serviceId) {
   if (!value) return null;
-  const filter = { organizationId, isActive: true, services: serviceId, ...ONLINE_BOOKABLE_EMPLOYEE };
+  const filter = { organizationId, isActive: true, services: serviceId, ...ONLINE_SELECTABLE_EMPLOYEE };
   const found = mongoose.Types.ObjectId.isValid(value)
     ? await Employee.findOne({ ...filter, _id: value }).select("_id").lean()
     : await Employee.findOne({
@@ -159,7 +161,9 @@ async function autoAssignAvailableEmployees(resolved, startDate, organization, o
         isActive: true,
         services: r.serviceId,
         ...ONLINE_BOOKABLE_EMPLOYEE,
-      }).lean();
+      })
+        .sort({ onlineBookingBackup: 1 }) // principales antes que los de respaldo
+        .lean();
       if (emp) r.employeeId = emp._id.toString();
     }
     return;
@@ -184,6 +188,25 @@ async function autoAssignAvailableEmployees(resolved, startDate, organization, o
     startDate: { $gte: dayStart, $lte: dayEnd },
     status: { $nin: ["cancelled_by_customer", "cancelled_by_admin"] },
   }).lean();
+
+  // Prioridad de los profesionales de respaldo: fuera del día si los principales
+  // tienen espacio (misma regla que get_available_slots), y al final de la fila.
+  const dayPool = scheduleService.onlineBookingEmployeesForDay(
+    date,
+    organization,
+    resolved.map((r) => ({
+      serviceId: r.serviceId,
+      employeeId: r.employeeId,
+      duration: r.duration,
+      maxConcurrentAppointments: r.maxConcurrentAppointments,
+    })),
+    [...fixedEmployees, ...candidates],
+    dayAppointments
+  );
+  const dayPoolIds = new Set(dayPool.map((e) => e._id.toString()));
+  const allowedToday = candidates.filter((c) => dayPoolIds.has(c._id.toString()));
+  if (allowedToday.length > 0) candidates = allowedToday;
+  candidates.sort((a, b) => (a.onlineBookingBackup === true) - (b.onlineBookingBackup === true));
 
   // Probar cada candidato: ¿la cadena completa de servicios cabe en el slot elegido?
   for (const emp of candidates) {
