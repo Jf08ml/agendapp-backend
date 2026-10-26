@@ -254,9 +254,11 @@ const sessionController = {
         timezone,
       });
 
+      const duplicates = result.skipped.filter((s) => s.kind === "duplicate").length;
+      const conflicts = result.skipped.length - duplicates;
       const message = `${result.created.length} sesión(es) creada(s)${
-        result.skipped.length ? `, ${result.skipped.length} omitida(s) por conflicto de horario` : ""
-      }`;
+        duplicates ? `, ${duplicates} ya estaban programada(s)` : ""
+      }${conflicts ? `, ${conflicts} omitida(s) por conflicto de horario` : ""}`;
       sendResponse(res, 201, result, message);
     } catch (error) {
       sendResponse(res, 400, null, error.message);

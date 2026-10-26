@@ -438,6 +438,18 @@ const sessionService = {
     const skipped = [];
 
     for (const { startDate, endDate } of candidates) {
+      // Misma clase ya programada a esa hora: es un duplicado (p. ej. volvieron a
+      // programar el mismo horario), no un choque. Se reporta aparte para que el
+      // admin no lo confunda con un conflicto real.
+      const duplicate = await ClassSession.exists({
+        organizationId, classId, startDate, endDate,
+        status: { $nin: ["cancelled"] },
+      });
+      if (duplicate) {
+        skipped.push({ startDate, endDate, kind: "duplicate", reason: "Ya estaba programada" });
+        continue;
+      }
+
       try {
         await assertEmployeeAvailable(employeeId, startDate, endDate);
         await assertRoomAvailable(roomId, startDate, endDate);
@@ -451,7 +463,7 @@ const sessionService = {
         await session.save();
         created.push(session);
       } catch (err) {
-        skipped.push({ startDate, endDate, reason: err.message });
+        skipped.push({ startDate, endDate, kind: "conflict", reason: err.message });
       }
     }
 
