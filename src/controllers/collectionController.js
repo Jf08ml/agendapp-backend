@@ -113,7 +113,7 @@ export const mpOauthCallback = async (req, res) => {
 // del vendedor. NO crea las citas: eso ocurre cuando el webhook confirma el pago
 // (Fase 1d). Público/semi (igual que /reservations/multi).
 export const createReservationCheckout = async (req, res) => {
-  const { services, startDate, customerDetails, organizationId, source } = req.body;
+  const { services, startDate, customerDetails, organizationId, source, chatSessionId } = req.body;
 
   if (!Array.isArray(services) || services.length === 0) {
     return sendResponse(res, 400, null, "Debe enviar al menos un servicio.");
@@ -194,6 +194,7 @@ export const createReservationCheckout = async (req, res) => {
       groupId,
       amount: deposit.total,
       currency: deposit.currency,
+      chatSessionId: bookingSource === "ai_chatbot" && typeof chatSessionId === "string" ? chatSessionId : null,
       marketplaceFee: 0,
       expiresAt,
     });

@@ -19,7 +19,7 @@ const normalizeForSearch = (str) =>
 // modelo pasaba el nombre, la consulta fallaba y el modelo inventaba profesionales
 // (casos reales sep-2026: "Jhon, Leider, Daniel" en Bastidas Barber; "Jessica,
 // Laura, Valeria" en Cata Cruz Nails).
-async function resolveServiceId(value, organizationId) {
+export async function resolveServiceId(value, organizationId) {
   if (!value) return null;
   if (mongoose.Types.ObjectId.isValid(value)) {
     const byId = await Service.findOne({ _id: value, organizationId }).select("_id").lean();

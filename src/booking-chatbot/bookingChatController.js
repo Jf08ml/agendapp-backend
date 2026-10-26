@@ -1,4 +1,5 @@
 import { processBookingChat } from "./bookingChatService.js";
+import { MAX_ACTION_LOG } from "./actionLog.js";
 import sendResponse from "../utils/sendResponse.js";
 import ChatLog from "../models/chatLogModel.js";
 import ChatbotFeedback from "../models/chatbotFeedbackModel.js";
@@ -29,8 +30,18 @@ export const bookingChat = async (req, res) => {
   const startTime = Date.now();
   let result;
 
+  // Acciones de turnos anteriores de esta misma conversación (ver actionLog.js)
+  let actionLog = [];
+  if (sessionId) {
+    const prev = await ChatLog.findOne(
+      { sessionId, organizationId: req.organization._id },
+      { actionLog: 1 }
+    ).lean().catch(() => null);
+    actionLog = prev?.actionLog || [];
+  }
+
   try {
-    result = await processBookingChat(req.organization, messages);
+    result = await processBookingChat(req.organization, messages, { actionLog });
   } catch (err) {
     if (sessionId) {
       ChatLog.findOneAndUpdate(
@@ -56,7 +67,7 @@ export const bookingChat = async (req, res) => {
     ChatLog.findOneAndUpdate(
       { sessionId },
       {
-        $setOnInsert: { organizationId: req.organization._id, type: "booking" },
+        $setOnInsert: { organizationId: req.organization._id, type: "booking", "review.reviewed": false },
         $set: {
           messages: extractTextMessages(messages),
           reply,
@@ -70,8 +81,13 @@ export const bookingChat = async (req, res) => {
           durationMs: Date.now() - startTime,
         },
         $addToSet: { toolsUsed: { $each: _meta.toolsUsed } },
-        ...(_meta.toolErrors?.length
-          ? { $push: { toolErrors: { $each: _meta.toolErrors, $slice: -50 } } }
+        ...(_meta.toolErrors?.length || _meta.actions?.length
+          ? {
+              $push: {
+                ...(_meta.toolErrors?.length ? { toolErrors: { $each: _meta.toolErrors, $slice: -50 } } : {}),
+                ...(_meta.actions?.length ? { actionLog: { $each: _meta.actions, $slice: -MAX_ACTION_LOG } } : {}),
+              },
+            }
           : {}),
       },
       { upsert: true }

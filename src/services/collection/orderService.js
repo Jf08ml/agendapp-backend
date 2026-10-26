@@ -91,10 +91,14 @@ export async function createReservationOrder({
   marketplaceFee = 0,
   expiresAt = null,
   provider = "mercadopago",
+  // Sesión del asistente de reservas que apartó el horario (WhatsApp): al pagarse
+  // el abono, fulfillment marca esa conversación como convertida.
+  chatSessionId = null,
 }) {
   const order = await Order.create({
     organizationId,
     type: "reservation",
+    ...(chatSessionId ? { metadata: { chatSessionId } } : {}),
     refId: groupId || null,
     amount,
     currency: String(currency || "COP").toUpperCase(),

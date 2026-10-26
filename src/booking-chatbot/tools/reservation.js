@@ -11,6 +11,7 @@ import { resolveBaseUrl } from "../../utils/cancellationUtils.js";
 import { computeDepositForServices } from "../../services/collection/orderService.js";
 import { dateLabel } from "./availability.js";
 import { isPriceHidden } from "./services.js";
+import { resolveServiceId } from "./employees.js";
 import { ONLINE_BOOKABLE_EMPLOYEE, ONLINE_SELECTABLE_EMPLOYEE } from "../../utils/onlineBooking.js";
 
 const ACTIVE_APPOINTMENT_FILTER = { $nin: ["cancelled_by_customer", "cancelled_by_admin"] };
@@ -109,12 +110,12 @@ async function resolveService(value, organizationId) {
     const byId = await Service.findOne({ _id: value, organizationId }).lean();
     if (byId) return byId;
   }
-  // Intenta buscar por nombre (case-insensitive, coincidencia parcial)
-  return Service.findOne({
-    organizationId,
-    name: { $regex: String(value).replace(/-/g, " "), $options: "i" },
-    isActive: true,
-  }).lean();
+  // Por nombre, tolerante a acentos, emojis, guiones y orden de palabras. Antes era
+  // una regex literal y fallaban slugs que el modelo arma con el nombre
+  // ("mantenimiento-pestanina" ≠ "Mantenimiento Pestañina", "corte-nino-cutz" ≠
+  // "Corte de Niño Cutz"): 8 reintentos en oct-2026.
+  const id = await resolveServiceId(String(value).replace(/[-_]/g, " "), organizationId);
+  return id ? Service.findOne({ _id: id, organizationId }).lean() : null;
 }
 
 // Resuelve un employeeId: acepta ObjectId válido o nombre parcial. Solo devuelve
@@ -582,7 +583,7 @@ async function startDepositCheckout(payload, depositPlan, context) {
   const res = makeMockRes();
   try {
     await (isMp ? createReservationCheckout : createReceiptReservationCheckout)(
-      { body: { ...payload, source: "ai_chatbot" } },
+      { body: { ...payload, source: "ai_chatbot", chatSessionId: context.sessionId } },
       res
     );
   } catch (err) {

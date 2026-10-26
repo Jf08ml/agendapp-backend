@@ -102,7 +102,7 @@ export function publicPaymentMethods(org) {
 
 // POST /collection/receipt/reservation
 export const createReceiptReservationCheckout = async (req, res) => {
-  const { services, startDate, customerDetails, organizationId, source } = req.body;
+  const { services, startDate, customerDetails, organizationId, source, chatSessionId } = req.body;
 
   if (!Array.isArray(services) || services.length === 0) {
     return sendResponse(res, 400, null, "Debe enviar al menos un servicio.");
@@ -182,6 +182,7 @@ export const createReceiptReservationCheckout = async (req, res) => {
       groupId,
       amount: deposit.total,
       currency: deposit.currency,
+      chatSessionId: bookingSource === "ai_chatbot" && typeof chatSessionId === "string" ? chatSessionId : null,
       provider: "receipt",
       expiresAt,
     });

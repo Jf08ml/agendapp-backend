@@ -6,6 +6,8 @@ import {
   executeBookingTool,
 } from "./bookingToolRegistry.js";
 import { isExplicitConfirmation } from "./tools/reservation.js";
+import { describeToolAction, actionLogPrompt } from "./actionLog.js";
+import { withMessageCacheBreakpoint } from "../utils/claudeCache.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -58,6 +60,14 @@ const SUMMARY_QUESTION = "¿Todo está correcto? ¿Confirmo tu reserva?";
 const PROMISED_ACTION_PATTERN =
   /\bun momento\b|\b(d[eé]jame|perm[ií]teme|voy a|ya te)\s+(revisar|buscar|consultar|verificar|confirmar|mirar|busco|reviso|consulto|confirmo)\b/i;
 
+// Afirma que una hora concreta está libre ("mañana a las 11:00 a. m. hay
+// disponibilidad"). Caso real (Diana Vargas, 2026-10-23): lo dijo solo con
+// get_available_dates y en el turno siguiente tuvo que desdecirse — la clienta
+// se fue. Sin get_available_slots en el turno se le pide consultarlo antes.
+const AVAILABILITY_CLAIM_PATTERN =
+  /(?<!\bno )\b(hay|tengo|tenemos|queda|est[aá]n?)\b.{0,40}\bdisponib|\bdisponible[s]?\b.{0,20}\b(a las|para las)\b/i;
+const TIME_MENTION_PATTERN = /\b\d{1,2}(:\d{2})?\s*(a\.?\s?m\.?|p\.?\s?m\.?|h\b|horas\b)/i;
+
 const depositLinkText = (checkout) =>
   `👉 Paga el abono de *${checkout.depositAmount}* aquí para confirmar tu reserva (tienes ${checkout.holdMinutes} minutos):\n${checkout.paymentUrl}`;
 
@@ -103,6 +113,8 @@ const extractText = (content) => {
  * @param {Object} [options.session]     - sesión mutable (WhatsApp): pendingPayload, reservationCreated
  * @param {string} [options.sessionId]   - id de sesión (para chatSessionId en la reserva)
  * @param {string} [options.clientPhone] - teléfono del cliente (WhatsApp) para prellenar
+ * @param {string[]} [options.actionLog] - acciones verificadas de turnos anteriores (ver actionLog.js);
+ *                                        las de este turno vuelven en _meta.actions
  */
 export const processBookingChat = async (organization, messages, options = {}) => {
   const channel = options.channel || "web";
@@ -143,6 +155,8 @@ export const processBookingChat = async (organization, messages, options = {}) =
   // movida/cancelada" cuando la tool se llamó pero falló).
   const successfulTools = new Set();
   const toolErrors = [];
+  // Hechos de este turno para el registro de acciones (los persiste quien llama)
+  const actions = [];
   let inputTokens = 0;
   let outputTokens = 0;
   let rounds = 0;
@@ -163,6 +177,14 @@ export const processBookingChat = async (organization, messages, options = {}) =
       : t
   );
 
+  // El registro de acciones va en un bloque aparte, DESPUÉS del prompt cacheado:
+  // cambia cada turno y no debe invalidar la caché del prompt.
+  const actionLogText = actionLogPrompt(options.actionLog);
+  const system = [
+    { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } },
+    ...(actionLogText ? [{ type: "text", text: actionLogText }] : []),
+  ];
+
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     rounds = round + 1;
     const response = await anthropic.messages.create({
@@ -173,9 +195,9 @@ export const processBookingChat = async (organization, messages, options = {}) =
       // effort high o menor y ningún otro campo dentro de thinking.
       thinking: { type: "between_tools" },
       output_config: { effort: "high" },
-      system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
+      system,
       tools: toolsWithCache,
-      messages: currentMessages,
+      messages: withMessageCacheBreakpoint(currentMessages),
     });
 
     inputTokens += response.usage?.input_tokens ?? 0;
@@ -189,13 +211,13 @@ export const processBookingChat = async (organization, messages, options = {}) =
       return {
         reply: SAFE_FALLBACK_REPLY,
         bookingPayload,
-        _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors },
+        _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors, actions },
       };
     }
 
     if (response.stop_reason !== "tool_use") {
       const rawReply = extractText(response.content);
-      const meta = { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors };
+      const meta = { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors, actions };
 
       // WhatsApp: si en este turno se preparó una reserva, el cliente recibe el
       // resumen armado por el servidor (nombres, fecha, precio y abono reales),
@@ -226,6 +248,28 @@ export const processBookingChat = async (organization, messages, options = {}) =
         !successfulTools.has("reschedule_appointment") &&
         !successfulTools.has("cancel_appointment");
 
+      // Ambos canales: afirma que una hora está libre sin haber consultado los
+      // horarios en este turno (los de turnos anteriores pueden haber cambiado).
+      const claimsUncheckedAvailability =
+        !isNegatedReply &&
+        !executedTools.has("get_available_slots") &&
+        !successfulTools.has("prepare_reservation") &&
+        AVAILABILITY_CLAIM_PATTERN.test(rawReply) &&
+        TIME_MENTION_PATTERN.test(rawReply);
+      if (claimsUncheckedAvailability && !isLastRound) {
+        currentMessages = [
+          ...currentMessages,
+          { role: "assistant", content: response.content },
+          {
+            role: "user",
+            content:
+              "[SISTEMA] Tu respuesta afirma que hay disponibilidad a una hora concreta, pero en este turno no consultaste los horarios libres de ese día. Consúltalos ahora y responde según el resultado real: si esa hora no está, dilo y ofrece las más cercanas." +
+              NO_LEAK_SUFFIX,
+          },
+        ];
+        continue;
+      }
+
       // Ambos canales: el bot afirma haber movido/cancelado una cita existente
       // sin que la tool correspondiente lo haya confirmado en este turno.
       if (claimsExistingChange) {
@@ -245,7 +289,7 @@ export const processBookingChat = async (organization, messages, options = {}) =
         return {
           reply: "No pude completar el cambio de tu cita todavía. ¿Me confirmas de nuevo qué cita quieres mover o cancelar y para cuándo?",
           bookingPayload,
-          _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors },
+          _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors, actions },
         };
       }
 
@@ -297,13 +341,13 @@ export const processBookingChat = async (organization, messages, options = {}) =
               ? confirmedReply(confirmResult)
               : "Tuve un problema confirmando tu reserva. ¿La confirmas de nuevo, por favor?",
             bookingPayload,
-            _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors },
+            _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors, actions },
           };
         }
         return {
           reply: "Necesito confirmar un par de datos más antes de agendar — ¿me cuentas de nuevo qué servicio y horario prefieres?",
           bookingPayload,
-          _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors },
+          _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors, actions },
         };
       }
 
@@ -330,7 +374,7 @@ export const processBookingChat = async (organization, messages, options = {}) =
             ? "¡Listo! Toca el botón **'Sí, confirmar'** para finalizar tu reserva."
             : SAFE_FALLBACK_REPLY,
           bookingPayload,
-          _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors },
+          _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors, actions },
         };
       }
 
@@ -356,7 +400,7 @@ export const processBookingChat = async (organization, messages, options = {}) =
         return {
           reply: "¡Ya casi! Confírmame el servicio, la fecha y la hora para prepararte el resumen de tu reserva.",
           bookingPayload,
-          _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors },
+          _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors, actions },
         };
       }
 
@@ -432,7 +476,7 @@ export const processBookingChat = async (organization, messages, options = {}) =
         bookingPayload,
         noReply,
         handoff,
-        _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors },
+        _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors, actions },
       };
     }
 
@@ -461,6 +505,8 @@ export const processBookingChat = async (organization, messages, options = {}) =
         if (result?.success === false && result?.error) {
           toolErrors.push({ tool: block.name, error: String(result.error).slice(0, 300) });
         }
+        const action = describeToolAction(block.name, block.input, result, organization);
+        if (action) actions.push(action);
         return {
           type: "tool_result",
           tool_use_id: block.id,
@@ -484,7 +530,7 @@ export const processBookingChat = async (organization, messages, options = {}) =
     return {
       reply: `${preparedSummary}\n\n${SUMMARY_QUESTION}`,
       bookingPayload,
-      _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: true, toolErrors },
+      _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: true, toolErrors, actions },
     };
   }
   const reservationWasCreated = options.session?.reservationCreated === true;
@@ -494,6 +540,6 @@ export const processBookingChat = async (organization, messages, options = {}) =
         ? confirmedReply(depositCheckout)
         : "Lo siento, no pude completar el proceso. Por favor intenta de nuevo.",
     bookingPayload,
-    _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: true, toolErrors },
+    _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: true, toolErrors, actions },
   };
 };

@@ -6,6 +6,8 @@ import Service from "../models/serviceModel.js";
 import Employee from "../models/employeeModel.js";
 import Organization from "../models/organizationModel.js";
 import { markOnboardingMilestone } from "../utils/onboardingMilestones.js";
+import { describeAdminToolAction, actionLogPrompt } from "../booking-chatbot/actionLog.js";
+import { withMessageCacheBreakpoint } from "../utils/claudeCache.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -169,13 +171,21 @@ const autoCompleteSetupIfReady = async (organizationId) => {
   }
 };
 
-export const processChat = async (organization, user, messages) => {
+export const processChat = async (organization, user, messages, { actionLog = [] } = {}) => {
   const context = await buildContext(organization, user);
   const systemPrompt = buildSystemPrompt(context);
+  // Acciones de turnos anteriores (el historial es solo texto): bloque aparte,
+  // fuera de la caché del prompt — ver booking-chatbot/actionLog.js.
+  const actionLogText = actionLogPrompt(actionLog);
+  const system = [
+    { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } },
+    ...(actionLogText ? [{ type: "text", text: actionLogText }] : []),
+  ];
 
   let currentMessages = [...messages];
   const executedTools = new Set();
   const toolErrors = [];
+  const actions = [];
   let inputTokens = 0;
   let outputTokens = 0;
   let rounds = 0;
@@ -193,9 +203,9 @@ export const processChat = async (organization, user, messages) => {
       // es un remanente inofensivo de cuando el modelo era Sonnet 5 (adaptativo por
       // defecto); se deja igual para no tocar el request shape entre modelos.
       thinking: { type: "disabled" },
-      system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
+      system,
       tools: toolsWithCache,
-      messages: currentMessages,
+      messages: withMessageCacheBreakpoint(currentMessages),
     });
 
     inputTokens += response.usage?.input_tokens ?? 0;
@@ -310,7 +320,7 @@ export const processChat = async (organization, user, messages) => {
       return {
         reply,
         invalidates,
-        _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors },
+        _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors, actions },
       };
     }
 
@@ -327,6 +337,8 @@ export const processChat = async (organization, user, messages) => {
         if (result?.success === false && result?.error) {
           toolErrors.push({ tool: block.name, error: String(result.error).slice(0, 300) });
         }
+        const action = describeAdminToolAction(block.name, block.input, result);
+        if (action) actions.push(action);
         return {
           type: "tool_result",
           tool_use_id: block.id,
@@ -359,6 +371,6 @@ export const processChat = async (organization, user, messages) => {
   return {
     reply: `No pude completar la operación en el tiempo disponible.${manualHint} Por favor intenta de nuevo con una solicitud más específica o realízalo directamente desde la interfaz.`,
     invalidates: autoCompletedAtLimit ? ["organization"] : [],
-    _meta: { rounds, toolsUsed: usedTools, inputTokens, outputTokens, hitRoundLimit: true, toolErrors },
+    _meta: { rounds, toolsUsed: usedTools, inputTokens, outputTokens, hitRoundLimit: true, toolErrors, actions },
   };
 };

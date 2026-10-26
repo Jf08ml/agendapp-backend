@@ -18,6 +18,7 @@ import Reservation from "../../models/reservationModel.js";
 import Appointment from "../../models/appointmentModel.js";
 import Order from "../../models/orderModel.js";
 import Organization from "../../models/organizationModel.js";
+import ChatLog from "../../models/chatLogModel.js";
 import reservationService from "../reservationService.js";
 import enrollmentService from "../enrollmentService.js";
 import packageService from "../packageService.js";
@@ -41,6 +42,15 @@ async function fulfillReservationOrder(order) {
     status: "approved",
   });
   await Reservation.updateMany({ groupId: order.refId }, { paymentStatus: "paid" });
+
+  // Reserva apartada por el asistente de WhatsApp: la conversión es el pago del
+  // abono, no el apartado (antes esas sesiones quedaban como no convertidas).
+  if (order.metadata?.chatSessionId) {
+    ChatLog.updateOne(
+      { sessionId: order.metadata.chatSessionId, organizationId: order.organizationId, reservationCreated: { $ne: true } },
+      { $set: { reservationCreated: true, reservationCreatedAt: new Date() } }
+    ).catch((err) => console.error("[fulfillment] No se pudo marcar la conversión del chat:", err.message));
+  }
 
   // Propagar el depósito pagado al seguimiento de pagos de cada cita.
   // Cada Reservation guarda su parte del depósito (`depositAmount`) y queda

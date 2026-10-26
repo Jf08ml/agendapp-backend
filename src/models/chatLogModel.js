@@ -67,6 +67,12 @@ const chatLogSchema = new mongoose.Schema(
       },
     ],
 
+    // Acciones verificadas por el sistema en esta conversación (cita cancelada,
+    // horarios consultados, reserva preparada...). Se le pasan al modelo en cada
+    // turno porque el historial es solo texto — ver booking-chatbot/actionLog.js.
+    // En WhatsApp viven en waState.actionLog (sobreviven reinicios con la sesión).
+    actionLog: [{ type: String }],
+
     // Revisión manual (superadmin) para curar ejemplos de entrenamiento/mejora de prompts
     review: {
       reviewed: { type: Boolean, default: false },

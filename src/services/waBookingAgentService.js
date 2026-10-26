@@ -12,6 +12,7 @@
 
 import { randomUUID } from "crypto";
 import { processBookingChat } from "../booking-chatbot/bookingChatService.js";
+import { MAX_ACTION_LOG } from "../booking-chatbot/actionLog.js";
 import whatsappService from "./sendWhatsappService.js";
 import ChatLog from "../models/chatLogModel.js";
 import WaBotPause from "../models/waBotPauseModel.js";
@@ -201,6 +202,8 @@ const PERSISTED_STATE_FIELDS = [
   "hasConfirmedBookingThisSession",
   "handoffReplied",
   "lastHandoffAt",
+  // Acciones verificadas de la conversación (booking-chatbot/actionLog.js)
+  "actionLog",
 ];
 
 function snapshotState(session) {
@@ -357,10 +360,14 @@ export async function processClientBookingMessage(org, clientPhone, body) {
         session,
         sessionId: session.sessionId,
         clientPhone,
+        actionLog: session.actionLog,
       });
       noReply = result.noReply === true;
       handoff = result.handoff === true;
       meta = result._meta || {};
+      if (meta.actions?.length) {
+        session.actionLog = [...(session.actionLog || []), ...meta.actions].slice(-MAX_ACTION_LOG);
+      }
       if (handoff) {
         // Necesita a una persona: se le avisa al cliente una vez por conversación
         // (los mensajes siguientes ya los ve el negocio) y se notifica al negocio.
