@@ -4,6 +4,7 @@ import Room from "../models/roomModel.js";
 import Class from "../models/classModel.js";
 import ClassSession from "../models/classSessionModel.js";
 import Enrollment from "../models/enrollmentModel.js";
+import ServicePackage from "../models/servicePackageModel.js";
 
 // ══════════════════════════════════════════════════════
 // SALONES (Rooms)
@@ -120,6 +121,12 @@ const classTypeService = {
     if (futureSessions > 0) {
       throw new Error(
         `No se puede eliminar la clase porque tiene ${futureSessions} sesión(es) programada(s)`
+      );
+    }
+    const packageCount = await ServicePackage.countDocuments({ "classes.classId": id });
+    if (packageCount > 0) {
+      throw new Error(
+        `No se puede eliminar la clase porque está incluida en ${packageCount} paquete(s). Quítala de los paquetes primero.`
       );
     }
     const classDoc = await Class.findByIdAndDelete(id);

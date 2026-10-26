@@ -1,5 +1,6 @@
 import Service from "../models/serviceModel.js";
 import Appointment from "../models/appointmentModel.js";
+import ServicePackage from "../models/servicePackageModel.js";
 
 const serviceService = {
   // Crear un nuevo servicio
@@ -84,6 +85,13 @@ const serviceService = {
     if (appointmentCount > 0) {
       throw new Error(
         `No se puede eliminar: este servicio ya tiene ${appointmentCount} cita(s) asociada(s) (pasadas o futuras). Puedes desactivarlo en su lugar para que deje de ofrecerse sin romper el historial ni las citas agendadas.`
+      );
+    }
+
+    const packageCount = await ServicePackage.countDocuments({ "services.serviceId": id });
+    if (packageCount > 0) {
+      throw new Error(
+        `No se puede eliminar: este servicio está incluido en ${packageCount} paquete(s). Quítalo de los paquetes primero o desactívalo en su lugar.`
       );
     }
 
