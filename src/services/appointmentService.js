@@ -388,8 +388,9 @@ const appointmentService = {
       usePackageForServices = {}, // 📦 Mapeo serviceId -> clientPackageId
       skipConcurrencyCheck = false, // 🔓 Omitir validación de concurrencia (para forzar aprobación)
       customFieldValues = undefined, // 🧩 Valores de campos personalizados scope "booking" (copia denormalizada)
+      attachToAppointmentId = null, // ➕ Servicios agregados al editar una cita: se suman a la visita de esa cita
     } = payload;
-    
+
     if (!Array.isArray(services) || services.length === 0) {
       throw new Error("Debe enviar al menos un servicio.");
     }
@@ -419,16 +420,39 @@ const appointmentService = {
     // 🔧 Definir timezone ANTES del try para que esté disponible en efectos externos
     const timezone = org.timezone || 'America/Bogota';
 
+    // ➕ Al agregar servicios a una cita existente, las nuevas citas comparten su groupId
+    // y su enlace de confirmar/cancelar (antes el modal de edición descartaba los servicios extra)
+    let baseGroupId = sharedGroupId;
+    let baseTokenHash = sharedTokenHash;
+    let baseCancellationLink = sharedCancellationLink;
+    if (attachToAppointmentId) {
+      const base = await appointmentModel.findOne({ _id: attachToAppointmentId, organizationId });
+      if (!base) throw new Error("No se encontró la cita a la que se agregan los servicios.");
+      const baseUpdate = {};
+      if (!base.groupId) baseUpdate.groupId = new mongoose.Types.ObjectId();
+      if (!base.cancelTokenHash) {
+        const generated = cancellationService.generateCancelToken();
+        baseUpdate.cancelTokenHash = generated.hash;
+        baseUpdate.cancellationLink = generateCancellationLink(generated.token, org);
+      }
+      if (Object.keys(baseUpdate).length > 0) {
+        await appointmentModel.updateOne({ _id: base._id }, { $set: baseUpdate });
+      }
+      baseGroupId = baseUpdate.groupId || base.groupId;
+      baseTokenHash = baseUpdate.cancelTokenHash || base.cancelTokenHash;
+      baseCancellationLink = baseUpdate.cancellationLink || base.cancellationLink || null;
+    }
+
     const session = await mongoose.startSession();
     let committed = false;
 
     const created = [];
-    const groupId = sharedGroupId || new mongoose.Types.ObjectId();
-    
+    const groupId = baseGroupId || new mongoose.Types.ObjectId();
+
     // 🔗 Usar token compartido si se provee, sino generar uno nuevo
     let groupCancelToken, groupCancelTokenHash;
-    if (sharedTokenHash) {
-      groupCancelTokenHash = sharedTokenHash;
+    if (baseTokenHash) {
+      groupCancelTokenHash = baseTokenHash;
       console.log('🔗 Usando token compartido para grupo:', groupId);
     } else {
       const generated = cancellationService.generateCancelToken();
@@ -441,7 +465,7 @@ const appointmentService = {
     // provee el caller cuando el token compartido se generó afuera (aquí solo llega el hash)
     const groupCancellationLink = groupCancelToken
       ? generateCancellationLink(groupCancelToken, org)
-      : sharedCancellationLink;
+      : baseCancellationLink;
 
     try {
       session.startTransaction();
