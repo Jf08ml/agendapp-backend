@@ -321,9 +321,10 @@ const appointmentService = {
     // Guardar la cita en la base de datos
     const savedAppointment = await newAppointment.save();
 
-    // 📊 Instrumentación: marcar primera cita (fire-and-forget, idempotente)
+    // 📊 Instrumentación: marcar primera cita (idempotente). Se awaitea: la primera
+    // vez avisa a la Oficina y en serverless una petición en vuelo se perdería.
     if (savedAppointment.organizationId) {
-      markOnboardingMilestone(savedAppointment.organizationId, "firstAppointmentAt");
+      await markOnboardingMilestone(savedAppointment.organizationId, "firstAppointmentAt");
     }
 
     console.log('💾 Appointment guardado:', {
@@ -823,7 +824,7 @@ const appointmentService = {
 
     // 📊 Instrumentación: marcar primera cita (fire-and-forget, idempotente)
     if (created.length > 0 && organizationId) {
-      markOnboardingMilestone(organizationId, "firstAppointmentAt");
+      await markOnboardingMilestone(organizationId, "firstAppointmentAt");
     }
 
     return created.map((c) => c.saved);

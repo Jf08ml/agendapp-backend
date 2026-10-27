@@ -18,6 +18,7 @@ import whatsappService from "../services/sendWhatsappService.js";
 import { generateCancellationLink } from "../utils/cancellationUtils.js";
 import { weekdayEs } from "../utils/timeAndPhones.js";
 import appointmentSeriesService from "../services/appointmentSeriesService.js";
+import { markOnboardingMilestone } from "../utils/onboardingMilestones.js";
 import appointmentModel from "../models/appointmentModel.js";
 import ChatLog from "../models/chatLogModel.js";
 import { auditLogService } from "../services/auditLogService.js";
@@ -348,6 +349,9 @@ async function _handleRecurringReservation(req, res, ctx) {
 
       await session.commitTransaction();
       session.endSession();
+
+      // 📊 Primera reserva de un cliente final: tras el commit, nunca dentro de la transacción.
+      await markOnboardingMilestone(organizationId, "firstOnlineBookingAt");
 
       await notifyNewBooking(org, customerDetails, { isAuto: false, multi: true });
 

@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { emitSignupCompleted, sanitizeAttribution } from "../services/oficinaEventsService.js";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import Organization from "../models/organizationModel.js";
@@ -45,7 +46,9 @@ const registrationController = {
   register: async (req, res) => {
     try {
       const { slug, businessName, ownerName, email, password, phone, turnstileToken,
-              default_country, timezone, currency, referralCode, businessVertical } = req.body;
+              default_country, timezone, currency, referralCode, businessVertical, attribution } = req.body;
+      // UTM/fbclid con los que llegó desde la landing (opcional, saneado).
+      const acquisition = sanitizeAttribution(attribution);
 
       // 1. Validar campos requeridos
       if (!slug || !businessName || !email || !password || !phone) {
@@ -105,6 +108,8 @@ const registrationController = {
         ...(currency && { currency: currency.trim().toUpperCase().slice(0, 3) }),
         // Rubro del negocio (opcional) — pre-carga el catálogo de ejemplo
         ...(businessVertical && { businessVertical }),
+        // Atribución de adquisición (si llegó desde una campaña)
+        ...(acquisition && { acquisition }),
         // Agente referidor (si el código era válido)
         ...(referringAgent && {
           referredByAgent: referringAgent._id,
@@ -149,6 +154,9 @@ const registrationController = {
         role: "admin",
         expiresAt: new Date(Date.now() + 2 * 60 * 1000), // 2 minutos
       }).save();
+
+      // Conversión para AgenditApp Oficina IA (nunca lanza; espera como mucho 2 s).
+      await emitSignupCompleted({ organizationId: savedOrg._id, attribution: acquisition, occurredAt: savedOrg.createdAt });
 
       sendResponse(res, 201, {
         exchangeCode: code,
