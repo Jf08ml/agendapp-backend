@@ -443,6 +443,20 @@ const organizationSchema = new mongoose.Schema({
     firstAppointmentAt:  { type: Date, default: null }, // creó su primera cita
     whatsappConnectedAt: { type: Date, default: null }, // conectó WhatsApp por primera vez
     firstAutoMessageAt:  { type: Date, default: null }, // se envió el primer mensaje automático
+    firstOnlineBookingAt: { type: Date, default: null }, // primera reserva hecha por un cliente final
+  },
+
+  // ── Atribución de adquisición (capturada en el registro) ─────────────────
+  // UTM y fbclid con los que llegó el dueño desde la landing. Sin datos
+  // personales. Lo usa AgenditApp Oficina IA para atribuir registros y pagos
+  // a campañas (services/oficinaEventsService.js).
+  acquisition: {
+    utmSource:   { type: String, default: null },
+    utmMedium:   { type: String, default: null },
+    utmCampaign: { type: String, default: null },
+    utmContent:  { type: String, default: null },
+    utmTerm:     { type: String, default: null },
+    fbclid:      { type: String, default: null },
   },
 
   // ── Retargeting de activación (services/retargetingService.js) ──────────

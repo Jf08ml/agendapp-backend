@@ -1,5 +1,6 @@
 // services/paymentService.js
 import PaymentSession from "../models/paymentSessionModel.js";
+import { emitSubscriptionPaid } from "./oficinaEventsService.js";
 import PaymentEvent from "../models/paymentEventModel.js";
 import Membership from "../models/membershipModel.js";
 import membershipService from "./membershipService.js";
@@ -160,6 +161,25 @@ const paymentService = {
         return { alreadyProcessed: true, event: ev };
       }
       throw err;
+    }
+
+    // 4b. Conversión para AgenditApp Oficina IA: solo pagos confirmados y nuevos
+    // (el PaymentEvent recién creado es la marca de idempotencia). Nunca lanza.
+    if (status === "succeeded" && orgId) {
+      const previousPaid = await PaymentEvent.countDocuments({
+        organizationId: orgId,
+        status: "succeeded",
+        _id: { $ne: event._id },
+      });
+      await emitSubscriptionPaid({
+        organizationId: orgId,
+        provider: providerName,
+        providerEventId: eventId,
+        amount: event.amount,
+        currency: event.currency,
+        firstPayment: previousPaid === 0,
+        occurredAt: event.createdAt,
+      });
     }
 
     // 5. Actualizar estado de la sesión (solo si existe)

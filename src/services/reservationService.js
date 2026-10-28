@@ -1,5 +1,6 @@
 // src/services/reservationService.js
 import mongoose from "mongoose";
+import { markOnboardingMilestone } from "../utils/onboardingMilestones.js";
 import Reservation from "../models/reservationModel.js";
 import Client from "../models/clientModel.js";
 import Organization from "../models/organizationModel.js";
@@ -169,6 +170,12 @@ const reservationService = {
       await reservation.save({ session });
     } else {
       await reservation.save();
+    }
+
+    // 📊 Primera reserva de un cliente final (idempotente). Dentro de una
+    // transacción se marca después del commit (ver reservationController).
+    if (!session && reservation.organizationId) {
+      await markOnboardingMilestone(reservation.organizationId, "firstOnlineBookingAt");
     }
 
     // Retornar la reservación con el token (solo en memoria, no guardado en DB)
