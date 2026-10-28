@@ -1,7 +1,7 @@
 import axios from "axios";
 import { createHash } from "crypto";
 
-const GRAPH_API_VERSION = "v21.0";
+const GRAPH_API_VERSION = "v26.0";
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -71,16 +71,18 @@ export async function sendMetaCapiEvent({
     custom_data: customData || {},
   };
 
-  const body = {
-    data: [event],
-    ...(process.env.META_CAPI_TEST_EVENT_CODE && {
-      test_event_code: process.env.META_CAPI_TEST_EVENT_CODE,
-    }),
-  };
+  // El token va como campo del cuerpo, no en la URL (documentación de la
+  // Conversions API: access_token). Así no queda en logs de URLs.
+  const form = new FormData();
+  form.set("data", JSON.stringify([event]));
+  form.set("access_token", accessToken);
+  if (process.env.META_CAPI_TEST_EVENT_CODE) {
+    form.set("test_event_code", process.env.META_CAPI_TEST_EVENT_CODE);
+  }
 
   try {
-    await axios.post(`https://graph.facebook.com/${GRAPH_API_VERSION}/${pixelId}/events`, body, {
-      params: { access_token: accessToken },
+    await axios.post(`https://graph.facebook.com/${GRAPH_API_VERSION}/${pixelId}/events`, form, {
+      timeout: 5000,
     });
   } catch (err) {
     console.error(
