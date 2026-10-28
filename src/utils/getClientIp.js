@@ -1,5 +1,6 @@
 /**
- * Extrae la IP real del request, considerando proxies/Vercel.
+ * Extrae la IP real del request. En el VPS, Caddy descarta el X-Forwarded-For
+ * que manda el cliente y pone la IP real, así que el primer valor es fiable.
  */
 export default function getClientIp(req) {
   return (
