@@ -19,8 +19,8 @@ const adminLoginLimiter = rateLimit({
 
 /**
  * Impersonate: 30 por hora por IP.
- * NOTA: En serverless estos contadores son por instancia.
- * Para producción crítica: usar Upstash Redis / Vercel KV como store.
+ * NOTA: contadores en memoria; bastan porque el backend corre en un solo
+ * contenedor. Si se escala a varias instancias, usar un store compartido (Redis).
  */
 const impersonateLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,

@@ -7,8 +7,8 @@ import { createHmac } from "crypto";
  * - Firmados con HMAC-SHA256 (OFICINA_EVENTS_SECRET), sin datos personales:
  *   solo ids internos, tipo, fecha, UTM y, en los pagos, importe y moneda.
  * - Nunca lanza ni bloquea: espera como mucho 2 s y, si falla, lo registra.
- *   Se AWAITea a propósito: en Vercel la instancia se congela al responder y
- *   una petición en vuelo se perdería.
+ *   Se AWAITea para que el evento salga antes de responder; con el límite de
+ *   2 s no retrasa de forma notable.
  * - Sin OFICINA_EVENTS_URL u OFICINA_EVENTS_SECRET no hace nada.
  * - El eventId es determinista: si se envía dos veces, la Oficina lo guarda una.
  */

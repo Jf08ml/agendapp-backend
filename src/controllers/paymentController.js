@@ -264,7 +264,7 @@ const paymentController = {
   diagnosePaypal: async (req, res) => {
     try {
       const provider = paymentService.getProvider("paypal");
-      const backendUrl = process.env.BACKEND_URL || process.env.VERCEL_URL || "";
+      const backendUrl = process.env.BACKEND_URL || "";
       const result = await provider.diagnose(backendUrl);
       sendResponse(res, 200, result, result.ok ? "Configuración OK" : "Se encontraron problemas");
     } catch (error) {

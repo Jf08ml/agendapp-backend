@@ -29,8 +29,8 @@ import { dynamicCorsOptions } from "./middleware/corsMiddleware.js";
 
 const app = express();
 
-// Confiar en el primer proxy (Vercel) para que express-rate-limit
-// use correctamente X-Forwarded-For para identificar IPs de clientes
+// Confiar en el primer proxy (Caddy, en el VPS) para que express-rate-limit
+// use X-Forwarded-For. Caddy descarta el que manda el cliente y pone la IP real.
 app.set('trust proxy', 1);
 
 // Configura web-push con las claves VAPID
@@ -90,9 +90,9 @@ const loginLimiter = rateLimit({
 });
 
 app.use(morgan("dev"));
-// Evitar caché de respuestas de API: el CDN de Vercel puede cachear respuestas
-// con Access-Control-Allow-Origin de un origen y servirlas a otros (ignora Vary: Origin).
-// no-store previene esto tanto en dev como en producción.
+// Evitar caché de respuestas de API: un proxy o CDN intermedio podría cachear
+// respuestas con Access-Control-Allow-Origin de un origen y servirlas a otros.
+// no-store lo previene tanto en dev como en producción.
 app.disable("etag");
 app.use((req, res, next) => {
   res.setHeader("Cache-Control", "no-store");

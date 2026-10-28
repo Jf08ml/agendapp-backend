@@ -5,8 +5,8 @@ import rateLimit from "express-rate-limit";
 const router = Router();
 
 // Rate limits más estrictos para registro
-// NOTA: En serverless estos contadores son por instancia (no distribuidos).
-// Para production-grade: usar store de Upstash Redis / Vercel KV.
+// NOTA: contadores en memoria; bastan porque el backend corre en un solo
+// contenedor. Si se escala a varias instancias, usar un store compartido (Redis).
 const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hora
   max: 3, // 3 registros por IP por hora
