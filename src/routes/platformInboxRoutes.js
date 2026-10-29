@@ -7,6 +7,7 @@ import {
   postReply,
   getSettings,
   patchSettings,
+  getLines,
 } from "../controllers/platformInboxController.js";
 
 const router = Router();
@@ -18,6 +19,8 @@ router.use(verifyToken, requireSuperAdmin);
 router.get("/settings", getSettings);
 router.patch("/settings", patchSettings);
 
+// Números con inbox; las rutas de conversaciones reciben ?line=platform|oficina.
+router.get("/lines", getLines);
 router.get("/conversations", getConversations);
 router.get("/conversations/:phone/messages", getMessages);
 router.patch("/conversations/:phone/read", markRead);

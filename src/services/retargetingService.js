@@ -2,6 +2,7 @@ import Organization from "../models/organizationModel.js";
 import { sendPlatformTemplate } from "./metaApiService.js";
 import { logOutboundMessage } from "./platformInboxService.js";
 import { renderPlatformTemplate } from "./platformTemplateCatalog.js";
+import { getPlatformSettings } from "./platformSettingsService.js";
 
 /**
  * Retargeting por WhatsApp a dueños de organizaciones estancados en el funnel
@@ -65,6 +66,7 @@ export async function sendSetupNudges() {
     setupCompleted: false,
     "retargeting.setupNudgeSentAt": null,
     "retargeting.setupNudgeAttempts": { $lt: MAX_NUDGE_ATTEMPTS },
+    "outreach.optedOutAt": null,
     createdAt: { $lte: hoursAgo(SETUP_NUDGE_HOURS) },
   });
 
@@ -112,6 +114,7 @@ export async function sendFirstAppointmentNudges() {
     "onboardingMilestones.setupCompletedAt": { $lte: daysAgo(FIRST_APPOINTMENT_NUDGE_DAYS) },
     "retargeting.firstAppointmentNudgeSentAt": null,
     "retargeting.firstAppointmentNudgeAttempts": { $lt: MAX_NUDGE_ATTEMPTS },
+    "outreach.optedOutAt": null,
   });
 
   let sent = 0;
@@ -150,6 +153,7 @@ export async function sendWhatsappConnectNudges() {
     createdAt: { $lte: daysAgo(WHATSAPP_CONNECT_NUDGE_DAYS) },
     "retargeting.whatsappNudgeSentAt": null,
     "retargeting.whatsappNudgeAttempts": { $lt: MAX_NUDGE_ATTEMPTS },
+    "outreach.optedOutAt": null,
   });
 
   let sent = 0;
@@ -185,12 +189,16 @@ export async function sendWhatsappConnectNudges() {
  * Llamado desde membershipCheckJob en el mismo punto donde ya se marca
  * notifications.threeDaysSent/oneDaySent — reusa esa idempotencia, por eso
  * no necesita su propio flag en Organization.retargeting.
+ * Se puede apagar desde superadmin (PlatformSettings.trialNudgeEnabled) cuando
+ * AgenditApp Oficina IA pasa a enviarlo con aprobación humana.
  * @param {import("../models/membershipModel.js").default} membership - populado con organizationId
  * @param {number} daysLeft
  */
 export async function sendTrialEndingNudge(membership, daysLeft) {
   const org = membership.organizationId;
-  if (!org?.phoneNumber) return;
+  if (!org?.phoneNumber || org.outreach?.optedOutAt) return;
+  const { trialNudgeEnabled } = await getPlatformSettings();
+  if (!trialNudgeEnabled) return;
 
   const link = orgLink(org, "/my-membership");
   if (!link) return;

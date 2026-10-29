@@ -6,6 +6,7 @@ import {
   replyToConversation,
 } from "../services/platformInboxService.js";
 import { getPlatformSettings, updatePlatformSettings } from "../services/platformSettingsService.js";
+import { isOficinaLineConfigured } from "../services/metaApiService.js";
 
 // Interruptores de los envíos automáticos por el número de plataforma
 // (retargeting y aviso de desconexión de WhatsApp).
@@ -27,9 +28,19 @@ export async function patchSettings(req, res) {
   }
 }
 
+// Números de AgenditApp con inbox: el oficial y, si está configurado, el de soporte
+// y ventas que opera AgenditApp Oficina IA. Cada ruta de conversaciones recibe
+// ?line=platform|oficina (por defecto, el oficial).
+export function getLines(req, res) {
+  sendResponse(res, 200, [
+    { id: "platform", configured: true },
+    { id: "oficina", configured: isOficinaLineConfigured() },
+  ]);
+}
+
 export async function getConversations(req, res) {
   try {
-    const conversations = await listConversations();
+    const conversations = await listConversations(req.query.line);
     sendResponse(res, 200, conversations);
   } catch (err) {
     console.error("[platformInbox] getConversations error:", err);
@@ -39,7 +50,7 @@ export async function getConversations(req, res) {
 
 export async function getMessages(req, res) {
   try {
-    const messages = await getConversationMessages(req.params.phone);
+    const messages = await getConversationMessages(req.params.phone, req.query.line);
     sendResponse(res, 200, messages);
   } catch (err) {
     console.error("[platformInbox] getMessages error:", err);
@@ -49,7 +60,7 @@ export async function getMessages(req, res) {
 
 export async function markRead(req, res) {
   try {
-    await markConversationRead(req.params.phone);
+    await markConversationRead(req.params.phone, req.query.line);
     sendResponse(res, 200, { ok: true });
   } catch (err) {
     console.error("[platformInbox] markRead error:", err);
@@ -68,6 +79,7 @@ export async function postReply(req, res) {
       phone: req.params.phone,
       body,
       adminId: req.user.adminId,
+      line: req.query.line,
     });
     sendResponse(res, 201, message);
   } catch (err) {
