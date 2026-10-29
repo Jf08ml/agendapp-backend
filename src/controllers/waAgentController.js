@@ -6,13 +6,16 @@ import { processAdminCommand } from "../services/waAgentChatService.js";
 import { processClientBookingMessage, pauseForHumanTakeover } from "../services/waBookingAgentService.js";
 import { validateMetaSignature } from "../services/metaApiService.js";
 import Organization from "../models/organizationModel.js";
+import PlatformWaMessage from "../models/platformWaMessageModel.js";
 import { disconnectOrg } from "../services/metaConnectService.js";
 import {
   logInboundMessage,
+  logOutboundMessage,
   findOrganizationByPhone,
   updateMessageStatus,
 } from "../services/platformInboxService.js";
 import Appointment from "../models/appointmentModel.js";
+import { isOptOutMessage, setOptOut } from "../services/oficinaOutreachService.js";
 
 // Dedupe de webhooks: Meta puede reintentar la entrega del mismo mensaje.
 // Map message.id → timestamp; se poda cada vez que crece.
@@ -30,6 +33,58 @@ function isDuplicateMessage(messageId) {
   if (processedMessageIds.has(messageId)) return true;
   processedMessageIds.set(messageId, now);
   return false;
+}
+
+// ─── Número de soporte y ventas (AgenditApp Oficina IA) ───────────────────────
+// META_OFICINA_PHONE_NUMBER_ID: el número de AgenditApp para soporte, ventas y
+// activación, conectado en coexistencia (sigue funcionando en el teléfono). Aquí
+// no responde ningún bot: los mensajes quedan en el inbox de superadmin y la
+// Oficina los lee. Lo que se escribe desde el teléfono llega como eco y también
+// se guarda, para que la Oficina sepa que una persona ya habló con ese contacto.
+
+function isOficinaNumber(phoneNumberId) {
+  return Boolean(process.env.META_OFICINA_PHONE_NUMBER_ID) && phoneNumberId === process.env.META_OFICINA_PHONE_NUMBER_ID;
+}
+
+// Texto de un mensaje de cualquier tipo, para el inbox (fotos, audios... como marcador).
+function messageBodyForInbox(message) {
+  if (message.type === "text") return message.text?.body || "";
+  if (message.type === "interactive") {
+    return message.interactive?.button_reply?.title ?? message.interactive?.list_reply?.title ?? "[respuesta]";
+  }
+  if (message.type === "button") return message.button?.text || "[botón]";
+  const caption = message[message.type]?.caption;
+  return `[${message.type || "mensaje"}]${caption ? ` ${caption}` : ""}`;
+}
+
+async function handleOficinaInbound(message) {
+  if (isDuplicateMessage(message.id) || !message.from) return;
+  const fromPhone = "+" + String(message.from).replace(/\D/g, "");
+  const body = messageBodyForInbox(message);
+  const org = await findOrganizationByPhone(fromPhone);
+  await logInboundMessage({ phone: fromPhone, organizationId: org?._id || null, body, metaMessageId: message.id, line: "oficina" });
+  if (org && isOptOutMessage(body)) {
+    await setOptOut(String(org._id), true, "whatsapp");
+    console.log(`[WaAgent] Org ${org._id} pidió no recibir mensajes (número de soporte)`);
+  }
+}
+
+async function logOficinaEchoes(echoes) {
+  for (const echo of echoes) {
+    if (!echo?.to || isDuplicateMessage(echo.id)) continue;
+    // Lo enviado por la API ya está guardado; el eco solo agrega lo escrito en el teléfono.
+    if (echo.id && (await PlatformWaMessage.exists({ metaMessageId: echo.id }))) continue;
+    const toPhone = "+" + String(echo.to).replace(/\D/g, "");
+    const org = await findOrganizationByPhone(toPhone);
+    await logOutboundMessage({
+      phone: toPhone,
+      organizationId: org?._id || null,
+      body: messageBodyForInbox(echo),
+      source: "manual",
+      metaMessageId: echo.id || null,
+      line: "oficina",
+    });
+  }
 }
 
 // ─── Meta Webhook ─────────────────────────────────────────────────────────────
@@ -108,6 +163,12 @@ export async function handleMetaIncoming(req, res) {
     const echoes = change?.message_echoes || [];
     const phoneNumberId = change?.metadata?.phone_number_id;
     if (!echoes.length || !phoneNumberId) return;
+    if (isOficinaNumber(phoneNumberId)) {
+      logOficinaEchoes(echoes).catch((err) =>
+        console.error("[WaAgent] Error guardando mensajes enviados desde el teléfono de soporte:", err.message),
+      );
+      return;
+    }
     Organization.findOne({ metaPhoneNumberId: phoneNumberId, waBookingAgentEnabled: true })
       .select("_id name")
       .lean()
@@ -147,6 +208,14 @@ export async function handleMetaIncoming(req, res) {
         );
       }
     }
+  }
+
+  // Número de soporte y ventas (Oficina IA): todo va a su inbox, también fotos y audios.
+  if (message && isOficinaNumber(change?.metadata?.phone_number_id)) {
+    handleOficinaInbound(message).catch((err) =>
+      console.error("[WaAgent] Error guardando mensaje entrante del número de soporte:", err.message),
+    );
+    return;
   }
 
   // Solo procesar texto e interactivos (botones de template); ignorar imágenes, etc.
@@ -198,6 +267,16 @@ export async function handleMetaIncoming(req, res) {
       console.warn(
         `[WaAgent] Mensaje al número de AgenditApp desde teléfono no reconocido: ${fromPhone}`,
       );
+      return;
+    }
+
+    // "Baja", "stop", "no me escriban"...: no se le vuelve a enviar nada desde
+    // ningún número de AgenditApp (ni Oficina IA ni retargeting). Queda en el inbox para revisión.
+    if (isOptOutMessage(body)) {
+      setOptOut(String(org._id), true, "whatsapp").catch((err) =>
+        console.error("[WaAgent] Error guardando la baja de mensajes:", err.message),
+      );
+      console.log(`[WaAgent] Org ${org._id} pidió no recibir mensajes del número de AgenditApp`);
       return;
     }
 

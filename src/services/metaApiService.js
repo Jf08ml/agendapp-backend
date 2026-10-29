@@ -3,7 +3,22 @@ import { createHmac, timingSafeEqual } from "crypto";
 
 const GRAPH_URL = "https://graph.facebook.com/v25.0";
 
-function getConfig() {
+// Números de WhatsApp de AgenditApp ("líneas"):
+// - platform: el oficial (retargeting, bot IA admin, alertas, soporte).
+// - oficina: el de AgenditApp Oficina IA (trabajador de activación). Sin
+//   META_OFICINA_ACCESS_TOKEN usa el token del oficial (mismo usuario del sistema).
+export function isOficinaLineConfigured() {
+  return Boolean(process.env.META_OFICINA_PHONE_NUMBER_ID);
+}
+
+function getConfig(line = "platform") {
+  if (line === "oficina") {
+    if (!isOficinaLineConfigured()) throw new Error("META_OFICINA_PHONE_NUMBER_ID no está configurado");
+    return {
+      phoneNumberId: process.env.META_OFICINA_PHONE_NUMBER_ID,
+      accessToken: process.env.META_OFICINA_ACCESS_TOKEN || process.env.META_PLATFORM_ACCESS_TOKEN,
+    };
+  }
   return {
     phoneNumberId: process.env.META_PLATFORM_PHONE_NUMBER_ID,
     accessToken: process.env.META_PLATFORM_ACCESS_TOKEN,
@@ -14,10 +29,11 @@ function getConfig() {
  * Envía un mensaje de texto desde el número de AgenditApp al número destino.
  * @param {string} toPhone - Número E.164 del destinatario (ej: "+573001234567")
  * @param {string} text - Texto a enviar
+ * @param {"platform"|"oficina"} [line] - Número desde el que sale (default: el oficial)
  * @returns {Promise<{ messageId: string }>}
  */
-export async function sendTextMessage(toPhone, text) {
-  const { phoneNumberId, accessToken } = getConfig();
+export async function sendTextMessage(toPhone, text, line = "platform") {
+  const { phoneNumberId, accessToken } = getConfig(line);
 
   const response = await axios.post(
     `${GRAPH_URL}/${phoneNumberId}/messages`,
@@ -44,9 +60,10 @@ export async function sendTextMessage(toPhone, text) {
  * automático al recibir el webhook — sin esta llamada explícita, el remitente
  * nunca ve el doble check azul aunque el equipo ya haya leído/procesado el mensaje.
  * @param {string} messageId - wamid del mensaje entrante (message.id del webhook)
+ * @param {"platform"|"oficina"} [line] - Número que recibió el mensaje
  */
-export async function markMessageAsRead(messageId) {
-  const { phoneNumberId, accessToken } = getConfig();
+export async function markMessageAsRead(messageId, line = "platform") {
+  const { phoneNumberId, accessToken } = getConfig(line);
 
   await axios.post(
     `${GRAPH_URL}/${phoneNumberId}/messages`,
@@ -70,10 +87,11 @@ export async function markMessageAsRead(messageId) {
  * @param {string} templateName - Nombre exacto de la plantilla en Meta Business
  * @param {string} languageCode - Código de idioma de la plantilla (default: "es")
  * @param {Array} [components] - Componentes con parámetros (ej: [{ type: "body", parameters: [...] }])
+ * @param {"platform"|"oficina"} [line] - Número desde el que sale (default: el oficial)
  * @returns {Promise<{ messageId: string }>}
  */
-export async function sendTemplateMessage(toPhone, templateName, languageCode = "es", components = []) {
-  const { phoneNumberId, accessToken } = getConfig();
+export async function sendTemplateMessage(toPhone, templateName, languageCode = "es", components = [], line = "platform") {
+  const { phoneNumberId, accessToken } = getConfig(line);
 
   const response = await axios.post(
     `${GRAPH_URL}/${phoneNumberId}/messages`,
@@ -106,8 +124,9 @@ export async function sendTemplateMessage(toPhone, templateName, languageCode = 
  * @param {string} toPhone
  * @param {string} templateName
  * @param {Array<string|number>} textParams - en el orden de {{1}}..{{n}}
+ * @param {"platform"|"oficina"} [line] - Número desde el que sale (default: el oficial)
  */
-export async function sendPlatformTemplate(toPhone, templateName, textParams = []) {
+export async function sendPlatformTemplate(toPhone, templateName, textParams = [], line = "platform") {
   const components = textParams.length
     ? [{
         type: "body",
@@ -117,7 +136,7 @@ export async function sendPlatformTemplate(toPhone, templateName, textParams = [
         })),
       }]
     : [];
-  return sendTemplateMessage(toPhone, templateName, "es", components);
+  return sendTemplateMessage(toPhone, templateName, "es", components, line);
 }
 
 // ── Notificación interna: nuevo registro ────────────────────────────────────

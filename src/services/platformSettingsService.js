@@ -1,17 +1,20 @@
 import PlatformSettings from "../models/platformSettingsModel.js";
 
-const EDITABLE_KEYS = ["retargetingEnabled", "waDisconnectWhatsappAlertEnabled"];
+const EDITABLE_KEYS = ["retargetingEnabled", "waDisconnectWhatsappAlertEnabled", "trialNudgeEnabled"];
+
+// Valor de cada clave si el documento (o el campo) todavía no existe.
+const DEFAULTS = { retargetingEnabled: false, waDisconnectWhatsappAlertEnabled: false, trialNudgeEnabled: true };
 
 function toSettings(doc) {
   const settings = {};
-  for (const key of EDITABLE_KEYS) settings[key] = doc?.[key] === true;
+  for (const key of EDITABLE_KEYS) settings[key] = typeof doc?.[key] === "boolean" ? doc[key] : DEFAULTS[key];
   return settings;
 }
 
 /**
- * Lee la configuración global. Nunca lanza: ante cualquier error (o si el
- * documento no existe) devuelve todo APAGADO, así un fallo de lectura jamás
- * dispara envíos por WhatsApp.
+ * Lee la configuración global. Nunca lanza: ante cualquier error devuelve todo
+ * APAGADO, así un fallo de lectura jamás dispara envíos por WhatsApp. Si el
+ * documento no existe, valen los DEFAULTS.
  */
 export async function getPlatformSettings() {
   try {
@@ -19,7 +22,7 @@ export async function getPlatformSettings() {
     return toSettings(doc);
   } catch (err) {
     console.error("[platformSettings] No se pudo leer la configuración — se asume todo apagado:", err?.message);
-    return toSettings(null);
+    return Object.fromEntries(EDITABLE_KEYS.map((key) => [key, false]));
   }
 }
 

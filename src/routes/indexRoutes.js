@@ -54,6 +54,7 @@ import storePublicRoutes from "./storePublicRoutes.js";
 import storeAdminRoutes from "./storeAdminRoutes.js";
 import impactSurveyRoutes from "./impactSurveyRoutes.js";
 import metaConversionsRoutes from "./metaConversionsRoutes.js";
+import oficinaOutreachRoutes from "./oficinaOutreachRoutes.js";
 import membershipService from "../services/membershipService.js";
 import { organizationResolver } from "../middleware/organizationResolver";
 import { verifyToken } from "../middleware/authMiddleware.js";
@@ -170,6 +171,9 @@ router.use(registrationRoutes);
 
 // Meta Pixel + Conversions API: CompleteRegistration server-side (dedup con el Pixel)
 router.use("/meta-capi", metaConversionsRoutes);
+
+// AgenditApp Oficina IA, trabajador de activación: leer el embudo y enviar mensajes aprobados (firma HMAC propia)
+router.use("/oficina/outreach", oficinaOutreachRoutes);
 
 // Superadmin de plataforma: login + impersonation (endpoints propios manejan auth)
 router.use(adminRoutes);

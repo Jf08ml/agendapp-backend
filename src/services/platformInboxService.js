@@ -4,6 +4,16 @@ import { sendTextMessage, markMessageAsRead } from "./metaApiService.js";
 
 const REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
 
+// Línea = número de AgenditApp ("platform", el oficial, u "oficina"). Los mensajes
+// guardados antes de existir el campo no lo tienen y son del oficial.
+export function normalizeLine(line) {
+  return line === "oficina" ? "oficina" : "platform";
+}
+
+export function lineFilter(line) {
+  return normalizeLine(line) === "oficina" ? { line: "oficina" } : { line: { $ne: "oficina" } };
+}
+
 export function normalizePhone(phone) {
   return String(phone || "").replace(/\D/g, "");
 }
@@ -21,10 +31,11 @@ export async function findOrganizationByPhone(phone) {
   }).lean();
 }
 
-export async function logInboundMessage({ phone, organizationId, body, metaMessageId }) {
+export async function logInboundMessage({ phone, organizationId, body, metaMessageId, line }) {
   return PlatformWaMessage.create({
     phone: normalizePhone(phone),
     organizationId: organizationId || null,
+    line: normalizeLine(line),
     direction: "inbound",
     source: "inbound",
     body,
@@ -32,10 +43,11 @@ export async function logInboundMessage({ phone, organizationId, body, metaMessa
   });
 }
 
-export async function logOutboundMessage({ phone, organizationId, body, source, templateName, repliedByAdminId, metaMessageId }) {
+export async function logOutboundMessage({ phone, organizationId, body, source, templateName, repliedByAdminId, metaMessageId, line }) {
   return PlatformWaMessage.create({
     phone: normalizePhone(phone),
     organizationId: organizationId || null,
+    line: normalizeLine(line),
     direction: "outbound",
     source,
     body,
@@ -65,9 +77,10 @@ export async function updateMessageStatus({ metaMessageId, status }) {
   );
 }
 
-/** Lista conversaciones (agrupadas por teléfono) ordenadas por última actividad. */
-export async function listConversations() {
+/** Lista las conversaciones de un número (agrupadas por teléfono) ordenadas por última actividad. */
+export async function listConversations(line) {
   const rows = await PlatformWaMessage.aggregate([
+    { $match: lineFilter(line) },
     { $sort: { createdAt: -1 } },
     {
       $group: {
@@ -95,7 +108,7 @@ export async function listConversations() {
   ]);
 
   const unreadRows = await PlatformWaMessage.aggregate([
-    { $match: { direction: "inbound", read: false } },
+    { $match: { ...lineFilter(line), direction: "inbound", read: false } },
     { $group: { _id: "$phone", count: { $sum: 1 } } },
   ]);
   const unreadMap = new Map(unreadRows.map((r) => [r._id, r.count]));
@@ -116,38 +129,34 @@ export async function listConversations() {
   }));
 }
 
-export async function getConversationMessages(phone) {
+export async function getConversationMessages(phone, line) {
   const cleanPhone = normalizePhone(phone);
-  return PlatformWaMessage.find({ phone: cleanPhone }).sort({ createdAt: 1 }).lean();
+  return PlatformWaMessage.find({ phone: cleanPhone, ...lineFilter(line) }).sort({ createdAt: 1 }).lean();
 }
 
 /** Marca leídos en nuestro inbox Y le confirma a Meta que se leyeron (para que el
  * cliente vea su propio check azul) — recién ahora, cuando un humano de verdad
  * abre la conversación, no antes. */
-export async function markConversationRead(phone) {
+export async function markConversationRead(phone, line) {
   const cleanPhone = normalizePhone(phone);
+  const filter = { phone: cleanPhone, ...lineFilter(line), direction: "inbound", read: false };
 
-  const unread = await PlatformWaMessage.find({
-    phone: cleanPhone,
-    direction: "inbound",
-    read: false,
-  }).select("metaMessageId");
+  const unread = await PlatformWaMessage.find(filter).select("metaMessageId");
 
   for (const msg of unread) {
     if (!msg.metaMessageId) continue;
-    markMessageAsRead(msg.metaMessageId).catch((err) =>
+    markMessageAsRead(msg.metaMessageId, normalizeLine(line)).catch((err) =>
       console.error("[platformInbox] Error marcando como leído en Meta:", err.response?.data || err.message)
     );
   }
 
-  await PlatformWaMessage.updateMany(
-    { phone: cleanPhone, direction: "inbound", read: false },
-    { $set: { read: true } }
-  );
+  await PlatformWaMessage.updateMany(filter, { $set: { read: true } });
 }
 
-export async function replyToConversation({ phone, body, adminId }) {
+/** Responde con texto libre desde el mismo número de la conversación. */
+export async function replyToConversation({ phone, body, adminId, line }) {
   const cleanPhone = normalizePhone(phone);
+  const waLine = normalizeLine(line);
 
   // Reusa la org ya vinculada a este hilo (evita repetir el matching por teléfono).
   const lastLinked = await PlatformWaMessage.findOne({ phone: cleanPhone, organizationId: { $ne: null } })
@@ -155,7 +164,7 @@ export async function replyToConversation({ phone, body, adminId }) {
     .select("organizationId")
     .lean();
 
-  const { messageId } = await sendTextMessage(`+${cleanPhone}`, body);
+  const { messageId } = await sendTextMessage(`+${cleanPhone}`, body, waLine);
 
   return logOutboundMessage({
     phone: cleanPhone,
@@ -164,5 +173,6 @@ export async function replyToConversation({ phone, body, adminId }) {
     source: "manual",
     repliedByAdminId: adminId || null,
     metaMessageId: messageId,
+    line: waLine,
   });
 }

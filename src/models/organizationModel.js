@@ -472,6 +472,15 @@ const organizationSchema = new mongoose.Schema({
     whatsappNudgeAttempts:       { type: Number, default: 0 },
   },
 
+  // ── Mensajes del número de plataforma (Oficina IA y retargeting) ─────────
+  // Si el dueño pidió no recibir mensajes (respondió "baja" o lo marcó una
+  // persona en la Oficina), no se le envía ninguno: ni los de la Oficina
+  // (services/oficinaOutreachService.js) ni los automáticos de retargeting.
+  outreach: {
+    optedOutAt:     { type: Date, default: null },
+    optedOutSource: { type: String, enum: ["whatsapp", "oficina", null], default: null },
+  },
+
   // ── Alerta de caída de WhatsApp Baileys (cron/waHealthCheckJob.js) ───────
   // downSince: primera corrida del cron en que se vio la sesión "no ready"
   // (no se avisa aún, evita falsos positivos por un blip que se autorecupera

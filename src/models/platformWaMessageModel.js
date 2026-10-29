@@ -4,6 +4,8 @@ import mongoose from "mongoose";
 // (META_PLATFORM_PHONE_NUMBER_ID): retargeting saliente, respuestas del bot IA
 // admin, y respuestas manuales del equipo — más los mensajes entrantes de los
 // dueños de organización. Alimenta el inbox de superadmin (services/platformInboxService.js).
+// También guarda los del número de AgenditApp Oficina IA (line "oficina"); cada
+// número tiene sus propias conversaciones.
 const platformWaMessageSchema = new mongoose.Schema(
   {
     // Solo dígitos (sin "+"), clave de la conversación — evita inconsistencias
@@ -18,9 +20,12 @@ const platformWaMessageSchema = new mongoose.Schema(
     direction: { type: String, enum: ["inbound", "outbound"], required: true },
     source: {
       type: String,
-      enum: ["inbound", "retargeting", "ai_agent", "manual", "alert"],
+      enum: ["inbound", "retargeting", "ai_agent", "manual", "alert", "oficina"],
       required: true,
     },
+    // Número de AgenditApp que envió o recibió el mensaje. Los registros
+    // anteriores no tienen el campo: son del número oficial.
+    line: { type: String, enum: ["platform", "oficina"], default: "platform" },
     body: { type: String, required: true },
     templateName: { type: String, default: null },
     metaMessageId: { type: String, default: null, index: true },
