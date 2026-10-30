@@ -11,7 +11,8 @@ const oficinaOutreachSendSchema = new mongoose.Schema(
     kind: { type: String, enum: ["template", "text"], required: true },
     templateName: { type: String, default: null },
     // sending: reclamado, llamando a WhatsApp. sent: WhatsApp lo aceptó. failed: WhatsApp lo rechazó (se puede reintentar).
-    status: { type: String, enum: ["sending", "sent", "failed"], required: true },
+    // uncertain: WhatsApp no respondió o el intento quedó a medias; pudo haber salido. No se reintenta: lo revisa una persona.
+    status: { type: String, enum: ["sending", "sent", "failed", "uncertain"], required: true },
     metaMessageId: { type: String, default: null },
     error: { type: String, default: null },
     sentAt: { type: Date, default: null },
