@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import Organization from "../models/organizationModel.js";
 import Membership from "../models/membershipModel.js";
+import Plan from "../models/planModel.js";
 import PlatformWaMessage from "../models/platformWaMessageModel.js";
 import OficinaOutreachSend from "../models/oficinaOutreachSendModel.js";
 import { isOficinaLineConfigured, sendPlatformTemplate, sendTextMessage } from "./metaApiService.js";
@@ -35,7 +36,24 @@ const TEMPLATE_PURPOSE = {
   agenda_tu_primera_cita: "Configuró, pero no ha creado su primera cita",
   conecta_tu_whatsapp: "Ya usa la agenda, pero no ha conectado su WhatsApp",
   trial_por_vencer: "La prueba gratis termina en pocos días",
+  mejora_tu_plan: "Está en el plan gratuito (sin WhatsApp automático): invitarlo a un plan pago",
 };
+
+// Plan de la prueba. Al vencer, el producto pasa el negocio al plan gratuito
+// (membershipService.convertTrialToFree): membresía "active", precio 0, sin WhatsApp.
+const TRIAL_PLAN = "plan-demo";
+
+/** Plan gratuito: sin costo y fuera de la prueba. No paga, aunque la membresía diga "active". */
+function isFreePlan(membership) {
+  const plan = membership?.plan;
+  return Boolean(plan) && plan.price === 0 && plan.slug !== TRIAL_PLAN && membership.status !== "trial";
+}
+
+/** Fin de la prueba. El producto la vence por currentPeriodEnd; trialEnd queda viejo si se extendió. */
+function trialEndOf(membership) {
+  if (membership?.status !== "trial") return membership?.trialEnd || null;
+  return membership.currentPeriodEnd || membership.trialEnd || null;
+}
 
 export class OutreachBlocked extends Error {
   constructor(code, message) {
@@ -85,11 +103,14 @@ export function templateParamsFor(org, membership, now = new Date()) {
   };
   if (!org.setupCompleted) add("activa_tu_cuenta", "/login-admin");
   if (org.setupCompleted && !ms.firstAppointmentAt) add("agenda_tu_primera_cita", "/gestionar-agenda");
-  if (org.setupCompleted && !ms.whatsappConnectedAt) add("conecta_tu_whatsapp", "/gestionar-whatsapp");
+  // El plan gratuito no incluye WhatsApp: invitarlo a conectarlo sería engañoso.
+  const free = isFreePlan(membership);
+  if (org.setupCompleted && !ms.whatsappConnectedAt && !free) add("conecta_tu_whatsapp", "/gestionar-whatsapp");
   const left = daysLeft(membership, now);
   if (membership?.status === "trial" && left !== null && left >= 1 && left <= 7) {
     add("trial_por_vencer", "/my-membership", [String(left)]);
   }
+  if (free) add("mejora_tu_plan", "/my-membership");
   // Mismo colapso de espacios que sendPlatformTemplate antes de enviar a Meta.
   for (const name of Object.keys(params)) params[name] = params[name].map((p) => String(p).replace(/\s+/g, " ").trim() || "—");
   return params;
@@ -104,14 +125,23 @@ export function templateCatalog() {
   }));
 }
 
-/** Última membresía de cada organización. */
+/** Última membresía de cada organización, con su plan (slug, nombre, precio y si incluye WhatsApp). */
 async function latestMemberships(orgIds) {
   const rows = await Membership.aggregate([
     { $match: { organizationId: { $in: orgIds } } },
     { $sort: { createdAt: -1 } },
     { $group: { _id: "$organizationId", doc: { $first: "$$ROOT" } } },
+    {
+      $lookup: {
+        from: Plan.collection.name,
+        localField: "doc.planId",
+        foreignField: "_id",
+        pipeline: [{ $project: { slug: 1, displayName: 1, price: 1, "limits.whatsappIntegration": 1 } }],
+        as: "plan",
+      },
+    },
   ]);
-  return new Map(rows.map((r) => [String(r._id), r.doc]));
+  return new Map(rows.map((r) => [String(r._id), { ...r.doc, plan: r.plan[0] || null }]));
 }
 
 /**
@@ -157,8 +187,16 @@ function factsOf(org, membership, messages, now) {
     membership: membership
       ? {
           status: membership.status,
-          trialEnd: iso(membership.trialEnd || (membership.status === "trial" ? membership.currentPeriodEnd : null)),
+          trialEnd: iso(trialEndOf(membership)),
           currentPeriodEnd: iso(membership.currentPeriodEnd),
+          plan: membership.plan
+            ? {
+                slug: membership.plan.slug,
+                name: membership.plan.displayName,
+                price: membership.plan.price,
+                whatsappIntegration: membership.plan.limits?.whatsappIntegration !== false,
+              }
+            : null,
         }
       : null,
     lastInboundAt: iso(messages?.inbound),
@@ -170,17 +208,20 @@ function factsOf(org, membership, messages, now) {
 const ORG_FIELDS =
   "name ownerName slug phoneNumber createdAt isActive setupCompleted waAgentEnabled onboardingMilestones outreach";
 
-/** Negocios con sus hitos y su estado de contacto. Por ids, o los registrados en los últimos días. */
-export async function listOrganizationsForOficina({ ids, createdSinceDays }) {
+/** Negocios con sus hitos y su estado de contacto. Por ids, todos, o los registrados en los últimos días. */
+export async function listOrganizationsForOficina({ ids, createdSinceDays, all }) {
   const now = new Date();
-  const filter = ids?.length
-    ? { _id: { $in: ids.map((id) => new mongoose.Types.ObjectId(id)) } }
-    : { createdAt: { $gte: new Date(now.getTime() - createdSinceDays * DAY_MS) } };
-  const orgs = await Organization.find(filter).select(ORG_FIELDS).sort({ createdAt: -1 }).limit(MAX_ORGANIZATIONS).lean();
+  let filter = { createdAt: { $gte: new Date(now.getTime() - createdSinceDays * DAY_MS) } };
+  if (ids?.length) filter = { _id: { $in: ids.map((id) => new mongoose.Types.ObjectId(id)) } };
+  else if (all) filter = {};
+  const found = await Organization.find(filter).select(ORG_FIELDS).sort({ createdAt: -1 }).limit(MAX_ORGANIZATIONS + 1).lean();
+  const orgs = found.slice(0, MAX_ORGANIZATIONS);
   const orgIds = orgs.map((o) => o._id);
   const [memberships, messages] = await Promise.all([latestMemberships(orgIds), lastMessages(orgIds)]);
   return {
     generatedAt: now.toISOString(),
+    // Hay más negocios que el máximo: faltan los más antiguos.
+    truncated: found.length > MAX_ORGANIZATIONS,
     templates: templateCatalog(),
     organizations: orgs.map((o) => factsOf(o, memberships.get(String(o._id)), messages.get(String(o._id)), now)),
   };
