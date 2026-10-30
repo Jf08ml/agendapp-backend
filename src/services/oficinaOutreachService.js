@@ -61,7 +61,7 @@ const TRIAL_PLAN = "plan-demo";
 // lugar de mejora_tu_plan.
 const TRIAL_ENDED_DAYS = 14;
 // Plantillas del catálogo que no existen en la cuenta del número de soporte. activa_tu_cuenta
-// se borró allí el 2026-10-30 ; la reemplaza configuracion_pendiente.
+// se borró allí el 2026-10-30; la reemplaza configuracion_pendiente.
 // Siguen en el catálogo porque el número oficial las usa (retargetingService).
 const NOT_ON_OFICINA_LINE = new Set(["activa_tu_cuenta"]);
 
