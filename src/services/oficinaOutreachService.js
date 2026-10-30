@@ -46,7 +46,7 @@ const countsAsContacted = { $or: [{ status: { $ne: "failed" } }, { errorCode: MA
 
 // Para qué sirve cada plantilla aprobada del número de plataforma.
 const TEMPLATE_PURPOSE = {
-  activa_tu_cuenta: "Se registró pero no terminó la configuración inicial",
+  configuracion_pendiente: "Se registró pero no terminó la configuración inicial",
   agenda_tu_primera_cita: "Configuró, pero no ha creado su primera cita",
   conecta_tu_whatsapp: "Ya usa la agenda, pero no ha conectado su WhatsApp",
   trial_por_vencer: "La prueba gratis termina en pocos días",
@@ -60,6 +60,10 @@ const TRIAL_PLAN = "plan-demo";
 // Días después de pasar al plan gratuito en que se ofrece tu_prueba_termino en
 // lugar de mejora_tu_plan.
 const TRIAL_ENDED_DAYS = 14;
+// Plantillas del catálogo que no existen en la cuenta del número de soporte. activa_tu_cuenta
+// se borró allí el 2026-10-30 (era Marketing); la reemplaza configuracion_pendiente (Utilidad).
+// Siguen en el catálogo porque el número oficial las usa (retargetingService).
+const NOT_ON_OFICINA_LINE = new Set(["activa_tu_cuenta"]);
 
 /** Plan gratuito: sin costo y fuera de la prueba. No paga, aunque la membresía diga "active". */
 function isFreePlan(membership) {
@@ -127,7 +131,7 @@ export function templateParamsFor(org, membership, now = new Date()) {
     if (!link) return;
     params[name] = extra.length ? [ownerName(org), org.name, ...extra, link] : [ownerName(org), org.name, link];
   };
-  if (!org.setupCompleted) add("activa_tu_cuenta", "/login-admin");
+  if (!org.setupCompleted) add("configuracion_pendiente", "/login-admin");
   if (org.setupCompleted && !ms.firstAppointmentAt) add("agenda_tu_primera_cita", "/gestionar-agenda");
   // El plan gratuito no incluye WhatsApp: invitarlo a conectarlo sería engañoso.
   const free = isFreePlan(membership);
@@ -146,12 +150,14 @@ export function templateParamsFor(org, membership, now = new Date()) {
 }
 
 export function templateCatalog() {
-  return Object.entries(PLATFORM_TEMPLATE_BODIES).map(([name, body]) => ({
-    name,
-    body,
-    paramCount: new Set(body.match(/\{\{\d+\}\}/g) || []).size,
-    purpose: TEMPLATE_PURPOSE[name] || "",
-  }));
+  return Object.entries(PLATFORM_TEMPLATE_BODIES)
+    .filter(([name]) => !NOT_ON_OFICINA_LINE.has(name))
+    .map(([name, body]) => ({
+      name,
+      body,
+      paramCount: new Set(body.match(/\{\{\d+\}\}/g) || []).size,
+      purpose: TEMPLATE_PURPOSE[name] || "",
+    }));
 }
 
 /** Última membresía de cada organización, con su plan (slug, nombre, precio y si incluye WhatsApp). */
@@ -383,7 +389,7 @@ export async function sendForOficina(input) {
     send = () => sendTextMessage(org.phoneNumber, input.channel.text, LINE);
   } else {
     const { templateName, params } = input.channel;
-    if (!PLATFORM_TEMPLATE_BODIES[templateName]) throw new OutreachBlocked("template_unavailable", "La plantilla no está en el catálogo");
+    if (!PLATFORM_TEMPLATE_BODIES[templateName] || NOT_ON_OFICINA_LINE.has(templateName)) throw new OutreachBlocked("template_unavailable", "La plantilla no está en el catálogo");
     const memberships = await latestMemberships([org._id]);
     const current = templateParamsFor(org, memberships.get(String(org._id)))[templateName];
     if (!current) throw new OutreachBlocked("template_unavailable", "La plantilla ya no aplica a este negocio");
