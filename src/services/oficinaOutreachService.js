@@ -6,7 +6,7 @@ import Appointment from "../models/appointmentModel.js";
 import PlatformWaMessage from "../models/platformWaMessageModel.js";
 import OficinaOutreachSend from "../models/oficinaOutreachSendModel.js";
 import { isOficinaLineConfigured, sendPlatformTemplate, sendTextMessage } from "./metaApiService.js";
-import { logOutboundMessage } from "./platformInboxService.js";
+import { logOutboundMessage, normalizePhone, organizationPhoneFilter } from "./platformInboxService.js";
 import { PLATFORM_TEMPLATE_BODIES, renderPlatformTemplate } from "./platformTemplateCatalog.js";
 
 /**
@@ -148,23 +148,30 @@ async function latestMemberships(orgIds) {
 }
 
 /**
- * Por organización: último mensaje recibido en el número de la Oficina (abre la
- * ventana de 24 h de ese número) y último enviado desde cualquiera de los dos.
+ * Por teléfono del negocio: último mensaje recibido en el número de la Oficina
+ * (abre la ventana de 24 h de ese número) y último enviado desde cualquiera de
+ * los dos que Meta no rechazó. Es por teléfono y no por organización porque un
+ * dueño puede tener varios negocios con el mismo número, y lo que escribe queda
+ * guardado a nombre de uno solo.
  */
-async function lastMessages(orgIds) {
+async function lastMessages(orgs) {
+  const phones = [...new Set(orgs.map((o) => normalizePhone(o.phoneNumber)).filter(Boolean))];
   const rows = await PlatformWaMessage.aggregate([
-    { $match: { organizationId: { $in: orgIds } } },
+    { $match: { phone: { $in: phones } } },
     {
       $group: {
-        _id: "$organizationId",
+        _id: "$phone",
         inbound: {
           $max: { $cond: [{ $and: [{ $eq: ["$direction", "inbound"] }, isLine("$line")] }, "$createdAt", null] },
         },
-        outbound: { $max: { $cond: [{ $eq: ["$direction", "outbound"] }, "$createdAt", null] } },
+        outbound: {
+          $max: { $cond: [{ $and: [{ $eq: ["$direction", "outbound"] }, { $ne: ["$status", "failed"] }] }, "$createdAt", null] },
+        },
       },
     },
   ]);
-  return new Map(rows.map((r) => [String(r._id), { inbound: r.inbound, outbound: r.outbound }]));
+  const byPhone = new Map(rows.map((r) => [r._id, { inbound: r.inbound, outbound: r.outbound }]));
+  return new Map(orgs.map((o) => [String(o._id), byPhone.get(normalizePhone(o.phoneNumber))]));
 }
 
 /**
@@ -246,7 +253,7 @@ export async function listOrganizationsForOficina({ ids, createdSinceDays, all }
   const found = await Organization.find(filter).select(ORG_FIELDS).sort({ createdAt: -1 }).limit(MAX_ORGANIZATIONS + 1).lean();
   const orgs = found.slice(0, MAX_ORGANIZATIONS);
   const orgIds = orgs.map((o) => o._id);
-  const [memberships, messages, usage] = await Promise.all([latestMemberships(orgIds), lastMessages(orgIds), agendaUsage(orgIds, now)]);
+  const [memberships, messages, usage] = await Promise.all([latestMemberships(orgIds), lastMessages(orgs), agendaUsage(orgIds, now)]);
   const of = (map, org) => map.get(String(org._id));
   return {
     generatedAt: now.toISOString(),
@@ -258,7 +265,10 @@ export async function listOrganizationsForOficina({ ids, createdSinceDays, all }
 }
 
 export async function listMessagesForOficina(organizationId, limit) {
-  const rows = await PlatformWaMessage.find({ organizationId: new mongoose.Types.ObjectId(organizationId) })
+  // Por teléfono, como lastMessages: incluye lo que escribió el dueño aunque haya quedado a nombre de otro de sus negocios.
+  const org = await Organization.findById(organizationId).select("phoneNumber").lean();
+  const phone = normalizePhone(org?.phoneNumber);
+  const rows = await PlatformWaMessage.find(phone ? { phone } : { organizationId: new mongoose.Types.ObjectId(organizationId) })
     .select("direction source line templateName body createdAt")
     .sort({ createdAt: -1 })
     .limit(limit)
@@ -282,6 +292,20 @@ export async function setOptOut(organizationId, optedOut, source) {
 }
 
 /**
+ * Baja pedida por WhatsApp: vale para todos los negocios con ese teléfono (un
+ * dueño puede tener varios). Conserva la fecha de quien ya estaba de baja.
+ * Devuelve cuántos negocios quedaron de baja.
+ */
+export async function setOptOutForPhone(phone, source) {
+  if (!normalizePhone(phone)) return 0;
+  const result = await Organization.updateMany(
+    { ...organizationPhoneFilter(phone), "outreach.optedOutAt": null },
+    { $set: { "outreach.optedOutAt": new Date(), "outreach.optedOutSource": source } }
+  );
+  return result.modifiedCount;
+}
+
+/**
  * Envía un mensaje aprobado en la Oficina. Devuelve { status: "sent", ... } o
  * lanza OutreachBlocked (regla) o un error de WhatsApp (con .retriable).
  */
@@ -299,10 +323,11 @@ export async function sendForOficina(input) {
   if (!org) throw new OutreachBlocked("not_found", "El negocio no existe");
   if (org.outreach?.optedOutAt) throw new OutreachBlocked("opted_out", "El negocio pidió no recibir mensajes");
   if (!org.phoneNumber) throw new OutreachBlocked("no_phone", "El negocio no tiene teléfono");
+  const phone = normalizePhone(org.phoneNumber);
 
   let send;
   if (input.channel.kind === "text") {
-    const lastInbound = await PlatformWaMessage.findOne({ organizationId: org._id, direction: "inbound", line: LINE })
+    const lastInbound = await PlatformWaMessage.findOne({ phone, direction: "inbound", line: LINE })
       .sort({ createdAt: -1 })
       .select("createdAt")
       .lean();
@@ -322,6 +347,18 @@ export async function sendForOficina(input) {
     }
     if (renderPlatformTemplate(templateName, params) !== input.preview) {
       throw new OutreachBlocked("template_changed", "El texto de la plantilla no coincide con el aprobado");
+    }
+    // La Oficina cuenta los días entre mensajes por negocio y con los datos de antes
+    // de enviar el lote: si dos negocios del mismo dueño van en el mismo lote, aquí
+    // se evita que esa persona reciba dos plantillas el mismo día.
+    const recentOutbound = await PlatformWaMessage.exists({
+      phone,
+      direction: "outbound",
+      status: { $ne: "failed" },
+      createdAt: { $gte: new Date(Date.now() - DAY_MS) },
+    });
+    if (recentOutbound) {
+      throw new OutreachBlocked("contacted_today", "Ese teléfono ya recibió un mensaje en las últimas 24 h (puede ser por otro negocio del mismo dueño)");
     }
     send = () => sendPlatformTemplate(org.phoneNumber, templateName, params, LINE);
   }
