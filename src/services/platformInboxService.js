@@ -71,16 +71,24 @@ const STATUS_RANK = { failed: 1, sent: 1, delivered: 2, read: 3 };
 /** Actualiza el status (ticks) de un mensaje saliente a partir del webhook de Meta.
  * No hace nada si el metaMessageId no corresponde a ningún mensaje logueado
  * (ej. mensajes de un número Meta de una org, que no pasan por este inbox). */
-export async function updateMessageStatus({ metaMessageId, status }) {
+export async function updateMessageStatus({ metaMessageId, status, error }) {
   if (!metaMessageId || !STATUS_RANK[status]) return;
 
   const existing = await PlatformWaMessage.findOne({ metaMessageId }).select("status").lean();
   if (!existing) return;
   if (existing.status && STATUS_RANK[status] < STATUS_RANK[existing.status]) return;
 
+  const failed = status === "failed";
   await PlatformWaMessage.updateOne(
     { metaMessageId },
-    { $set: { status, statusUpdatedAt: new Date() } }
+    {
+      $set: {
+        status,
+        statusUpdatedAt: new Date(),
+        errorCode: failed && Number.isInteger(error?.code) ? error.code : null,
+        errorTitle: failed && error?.title ? String(error.title).slice(0, 300) : null,
+      },
+    }
   );
 }
 

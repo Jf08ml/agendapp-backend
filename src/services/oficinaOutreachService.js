@@ -32,6 +32,12 @@ const MAX_ORGANIZATIONS = 1000;
 // Ventana del uso de la agenda (citas creadas en los últimos N días).
 const USAGE_WINDOW_DAYS = 30;
 const MAX_IDS = 100;
+// Meta no entregó el mensaje para limitar el marketing que recibe esa persona.
+// Reintentar enseguida vuelve a fallar: cuenta como contactado, a diferencia de
+// los demás fallos (facturación, número inválido), en los que no le llegó nada
+// por un problema nuestro o del número.
+const MARKETING_LIMIT_CODE = 131049;
+const countsAsContacted = { $or: [{ status: { $ne: "failed" } }, { errorCode: MARKETING_LIMIT_CODE }] };
 
 // Para qué sirve cada plantilla aprobada del número de plataforma.
 const TEMPLATE_PURPOSE = {
@@ -150,7 +156,7 @@ async function latestMemberships(orgIds) {
 /**
  * Por teléfono del negocio: último mensaje recibido en el número de la Oficina
  * (abre la ventana de 24 h de ese número) y último enviado desde cualquiera de
- * los dos que Meta no rechazó. Es por teléfono y no por organización porque un
+ * los dos que cuenta como contacto (countsAsContacted). Es por teléfono y no por organización porque un
  * dueño puede tener varios negocios con el mismo número, y lo que escribe queda
  * guardado a nombre de uno solo.
  */
@@ -165,7 +171,18 @@ async function lastMessages(orgs) {
           $max: { $cond: [{ $and: [{ $eq: ["$direction", "inbound"] }, isLine("$line")] }, "$createdAt", null] },
         },
         outbound: {
-          $max: { $cond: [{ $and: [{ $eq: ["$direction", "outbound"] }, { $ne: ["$status", "failed"] }] }, "$createdAt", null] },
+          $max: {
+            $cond: [
+              {
+                $and: [
+                  { $eq: ["$direction", "outbound"] },
+                  { $or: [{ $ne: ["$status", "failed"] }, { $eq: ["$errorCode", MARKETING_LIMIT_CODE] }] },
+                ],
+              },
+              "$createdAt",
+              null,
+            ],
+          },
         },
       },
     },
@@ -354,8 +371,8 @@ export async function sendForOficina(input) {
     const recentOutbound = await PlatformWaMessage.exists({
       phone,
       direction: "outbound",
-      status: { $ne: "failed" },
       createdAt: { $gte: new Date(Date.now() - DAY_MS) },
+      ...countsAsContacted,
     });
     if (recentOutbound) {
       throw new OutreachBlocked("contacted_today", "Ese teléfono ya recibió un mensaje en las últimas 24 h (puede ser por otro negocio del mismo dueño)");
@@ -414,6 +431,32 @@ export async function sendForOficina(input) {
     line: LINE,
   }).catch((err) => console.error("[oficinaOutreach] Error guardando el envío en el inbox:", err.message));
   return { status: "sent", metaMessageId: messageId || null, sentAt: sentAt.toISOString(), duplicate: false };
+}
+
+/**
+ * Estado de entrega que informó Meta (por webhook) para envíos de la Oficina:
+ * sent, delivered, read o failed con su código. null mientras Meta no informe
+ * nada, o si el envío no salió de este backend.
+ */
+export async function getDeliveryStatuses(messageIds) {
+  const sends = await OficinaOutreachSend.find({ messageId: { $in: messageIds }, status: "sent" })
+    .select("messageId metaMessageId")
+    .lean();
+  const metaIds = sends.map((s) => s.metaMessageId).filter(Boolean);
+  const messages = await PlatformWaMessage.find({ metaMessageId: { $in: metaIds } })
+    .select("metaMessageId status statusUpdatedAt errorCode errorTitle")
+    .lean();
+  const byMetaId = new Map(messages.map((m) => [m.metaMessageId, m]));
+  return sends.map((s) => {
+    const m = byMetaId.get(s.metaMessageId);
+    return {
+      messageId: s.messageId,
+      status: m?.status || null,
+      errorCode: m?.status === "failed" ? m.errorCode ?? null : null,
+      errorTitle: m?.status === "failed" ? m.errorTitle ?? null : null,
+      updatedAt: iso(m?.statusUpdatedAt),
+    };
+  });
 }
 
 // Mensajes con los que un negocio pide no recibir más mensajes. Solo el mensaje

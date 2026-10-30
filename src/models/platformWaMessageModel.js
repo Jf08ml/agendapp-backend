@@ -34,6 +34,9 @@ const platformWaMessageSchema = new mongoose.Schema(
     // que llegan por el webhook de Meta como eventos "statuses", matcheados por metaMessageId.
     status: { type: String, enum: ["sent", "delivered", "read", "failed"], default: null },
     statusUpdatedAt: { type: Date, default: null },
+    // Solo con status "failed": código y motivo que dio Meta (p. ej. 131049, límite de marketing).
+    errorCode: { type: Number, default: null },
+    errorTitle: { type: String, default: null },
     repliedByAdminId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "AdminUser",

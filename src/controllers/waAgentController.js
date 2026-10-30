@@ -200,7 +200,8 @@ export async function handleMetaIncoming(req, res) {
       console.log(
         `[WaAgent] Status recibido de Meta: ${s.status} — ${s.id} (recipient ${s.recipient_id})${errorText ? ` — ${errorText}` : ""}`
       );
-      updateMessageStatus({ metaMessageId: s.id, status: s.status }).catch((err) =>
+      const error = metaErr ? { code: metaErr.code, title: metaErr.error_data?.details || metaErr.title || metaErr.message } : null;
+      updateMessageStatus({ metaMessageId: s.id, status: s.status, error }).catch((err) =>
         console.error("[WaAgent] Error actualizando status de mensaje:", err.message)
       );
       if (s.biz_opaque_callback_data) {
