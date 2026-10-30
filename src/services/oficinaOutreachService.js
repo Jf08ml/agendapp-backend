@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import Organization from "../models/organizationModel.js";
 import Membership from "../models/membershipModel.js";
 import Plan from "../models/planModel.js";
+import Appointment from "../models/appointmentModel.js";
 import PlatformWaMessage from "../models/platformWaMessageModel.js";
 import OficinaOutreachSend from "../models/oficinaOutreachSendModel.js";
 import { isOficinaLineConfigured, sendPlatformTemplate, sendTextMessage } from "./metaApiService.js";
@@ -28,6 +29,8 @@ import { PLATFORM_TEMPLATE_BODIES, renderPlatformTemplate } from "./platformTemp
 const DAY_MS = 24 * 60 * 60 * 1000;
 const REPLY_WINDOW_MS = DAY_MS;
 const MAX_ORGANIZATIONS = 1000;
+// Ventana del uso de la agenda (citas creadas en los últimos N días).
+const USAGE_WINDOW_DAYS = 30;
 const MAX_IDS = 100;
 
 // Para qué sirve cada plantilla aprobada del número de plataforma.
@@ -164,7 +167,27 @@ async function lastMessages(orgIds) {
   return new Map(rows.map((r) => [String(r._id), { inbound: r.inbound, outbound: r.outbound }]));
 }
 
-function factsOf(org, membership, messages, now) {
+/**
+ * Uso de la agenda por organización: citas creadas en los últimos días y la
+ * última creada. Solo conteos y fechas, nada de clientes. El producto no crea
+ * citas de ejemplo ("explorar primero" solo crea servicios y profesionales).
+ */
+async function agendaUsage(orgIds, now) {
+  const since = new Date(now.getTime() - USAGE_WINDOW_DAYS * DAY_MS);
+  const rows = await Appointment.aggregate([
+    { $match: { organizationId: { $in: orgIds } } },
+    {
+      $group: {
+        _id: "$organizationId",
+        recent: { $sum: { $cond: [{ $gte: ["$createdAt", since] }, 1, 0] } },
+        last: { $max: "$createdAt" },
+      },
+    },
+  ]);
+  return new Map(rows.map((r) => [String(r._id), { recent: r.recent, last: r.last }]));
+}
+
+function factsOf(org, membership, messages, usage, now) {
   const ms = org.onboardingMilestones || {};
   // Las organizaciones más antiguas no tienen createdAt: su _id guarda cuándo se creó.
   const registeredAt = org.createdAt || org._id.getTimestamp();
@@ -203,6 +226,10 @@ function factsOf(org, membership, messages, now) {
       : null,
     lastInboundAt: iso(messages?.inbound),
     lastOutboundAt: iso(messages?.outbound),
+    usage: {
+      appointmentsLast30Days: usage?.recent ?? 0,
+      lastAppointmentAt: iso(usage?.last),
+    },
     templateParams: templateParamsFor(org, membership, now),
   };
 }
@@ -219,13 +246,14 @@ export async function listOrganizationsForOficina({ ids, createdSinceDays, all }
   const found = await Organization.find(filter).select(ORG_FIELDS).sort({ createdAt: -1 }).limit(MAX_ORGANIZATIONS + 1).lean();
   const orgs = found.slice(0, MAX_ORGANIZATIONS);
   const orgIds = orgs.map((o) => o._id);
-  const [memberships, messages] = await Promise.all([latestMemberships(orgIds), lastMessages(orgIds)]);
+  const [memberships, messages, usage] = await Promise.all([latestMemberships(orgIds), lastMessages(orgIds), agendaUsage(orgIds, now)]);
+  const of = (map, org) => map.get(String(org._id));
   return {
     generatedAt: now.toISOString(),
     // Hay más negocios que el máximo: faltan los más antiguos.
     truncated: found.length > MAX_ORGANIZATIONS,
     templates: templateCatalog(),
-    organizations: orgs.map((o) => factsOf(o, memberships.get(String(o._id)), messages.get(String(o._id)), now)),
+    organizations: orgs.map((o) => factsOf(o, of(memberships, o), of(messages, o), of(usage, o), now)),
   };
 }
 
