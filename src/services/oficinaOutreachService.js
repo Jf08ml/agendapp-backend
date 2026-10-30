@@ -45,12 +45,16 @@ const TEMPLATE_PURPOSE = {
   agenda_tu_primera_cita: "Configuró, pero no ha creado su primera cita",
   conecta_tu_whatsapp: "Ya usa la agenda, pero no ha conectado su WhatsApp",
   trial_por_vencer: "La prueba gratis termina en pocos días",
+  tu_prueba_termino: "Su prueba terminó hace poco y pasó al plan gratuito: invitarlo a un plan pago",
   mejora_tu_plan: "Está en el plan gratuito (sin WhatsApp automático): invitarlo a un plan pago",
 };
 
 // Plan de la prueba. Al vencer, el producto pasa el negocio al plan gratuito
 // (membershipService.convertTrialToFree): membresía "active", precio 0, sin WhatsApp.
 const TRIAL_PLAN = "plan-demo";
+// Días después de pasar al plan gratuito en que se ofrece tu_prueba_termino en
+// lugar de mejora_tu_plan.
+const TRIAL_ENDED_DAYS = 14;
 
 /** Plan gratuito: sin costo y fuera de la prueba. No paga, aunque la membresía diga "active". */
 function isFreePlan(membership) {
@@ -119,7 +123,10 @@ export function templateParamsFor(org, membership, now = new Date()) {
   if (membership?.status === "trial" && left !== null && left >= 1 && left <= 7) {
     add("trial_por_vencer", "/my-membership", [String(left)]);
   }
-  if (free) add("mejora_tu_plan", "/my-membership");
+  // convertTrialToFree conserva trialEnd y pone currentPeriodStart en el día del cambio.
+  const sinceFree = free && membership.trialEnd && membership.currentPeriodStart ? now - new Date(membership.currentPeriodStart) : null;
+  if (sinceFree !== null && sinceFree < TRIAL_ENDED_DAYS * DAY_MS) add("tu_prueba_termino", "/my-membership");
+  else if (free) add("mejora_tu_plan", "/my-membership");
   // Mismo colapso de espacios que sendPlatformTemplate antes de enviar a Meta.
   for (const name of Object.keys(params)) params[name] = params[name].map((p) => String(p).replace(/\s+/g, " ").trim() || "—");
   return params;

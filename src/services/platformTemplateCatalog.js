@@ -13,6 +13,8 @@ export const PLATFORM_TEMPLATE_BODIES = {
   trial_por_vencer:
     "¡Hola {{1}}! ⏳ Tu prueba gratuita de *{{2}}* en AgenditApp vence en *{{3}} días*. No pierdas el acceso a tu agenda, recordatorios de WhatsApp y reportes.\n\nElige tu plan aquí: {{4}}\n\nSi tienes preguntas sobre precios o necesitas más tiempo, escríbenos al +57 350 667 4686.",
   // Solo en la cuenta del número de soporte y ventas (AgenditApp Oficina IA).
+  tu_prueba_termino:
+    "¡Hola {{1}}! Tu prueba gratuita de *{{2}}* en AgenditApp terminó y tu cuenta pasó al Plan Gratuito. Tu agenda y tus clientes siguen ahí, pero desde ahora tus clientes ya no reciben la confirmación ni el recordatorio de su cita por WhatsApp.\n\nSi quieres seguir con todo lo que usabas en la prueba, elige tu plan aquí: {{3}}\n\n¿Tienes dudas o necesitas más tiempo? Responde este mensaje y te ayudamos.",
   mejora_tu_plan:
     "¡Hola {{1}}! 👋 *{{2}}* está en el Plan Gratuito de AgenditApp. Con un plan pago tus clientes reciben la confirmación y el recordatorio de su cita por WhatsApp de forma automática, y puedes tener servicios ilimitados. Menos inasistencias y menos mensajes manuales para ti.\n\nMira los planes aquí: {{3}}\n\n¿Tienes dudas? Responde este mensaje y te ayudamos.",
 };
