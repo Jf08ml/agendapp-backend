@@ -166,18 +166,20 @@ async function lastMessages(orgIds) {
 
 function factsOf(org, membership, messages, now) {
   const ms = org.onboardingMilestones || {};
+  // Las organizaciones más antiguas no tienen createdAt: su _id guarda cuándo se creó.
+  const registeredAt = org.createdAt || org._id.getTimestamp();
   return {
     id: String(org._id),
     name: org.name,
     contactName: ownerName(org) || null,
-    createdAt: iso(org.createdAt),
+    createdAt: iso(registeredAt),
     hasPhone: Boolean(org.phoneNumber),
     optedOut: Boolean(org.outreach?.optedOutAt),
     waAgentEnabled: Boolean(org.waAgentEnabled),
     isActive: org.isActive !== false,
     milestones: {
       // Los registros anteriores al hito solo tienen el booleano setupCompleted.
-      setupCompletedAt: iso(ms.setupCompletedAt || (org.setupCompleted ? org.createdAt : null)),
+      setupCompletedAt: iso(ms.setupCompletedAt || (org.setupCompleted ? registeredAt : null)),
       seededDemoAt: iso(ms.seededDemoAt),
       firstAppointmentAt: iso(ms.firstAppointmentAt),
       whatsappConnectedAt: iso(ms.whatsappConnectedAt),
