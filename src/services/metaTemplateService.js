@@ -89,7 +89,7 @@ function getOrgCredentials(org) {
 export async function listTemplates(org) {
   assertMetaActive(org);
   const { token, wabaId, usePrefix } = getOrgCredentials(org);
-  const client = axios.create({ baseURL: GRAPH_URL, params: { access_token: token } });
+  const client = axios.create({ baseURL: GRAPH_URL, headers: { Authorization: `Bearer ${token}` } });
   const params = { fields: "id,name,status,category,language,components", limit: 100 };
   if (usePrefix) params.name_prefix = getOrgPrefix(org);
   const res = await client.get(`/${wabaId}/message_templates`, { params });
@@ -102,7 +102,7 @@ export async function listTemplates(org) {
  * Crea un cliente axios para un token dado.
  */
 function makeClient(token) {
-  return axios.create({ baseURL: GRAPH_URL, params: { access_token: token } });
+  return axios.create({ baseURL: GRAPH_URL, headers: { Authorization: `Bearer ${token}` } });
 }
 
 /**
@@ -186,7 +186,7 @@ const MAX_CALLBACK_DATA = 512;
 export async function sendTemplateMessage(org, toPhone, templateName, language, components = [], externalRef) {
   if (!org.metaPhoneNumberId) throw new Error("La organización no tiene Meta API configurada.");
   const { token, usePrefix } = getOrgCredentials(org);
-  const client = axios.create({ baseURL: GRAPH_URL, params: { access_token: token } });
+  const client = axios.create({ baseURL: GRAPH_URL, headers: { Authorization: `Bearer ${token}` } });
   const fullName = usePrefix ? prefixName(org, templateName) : templateName;
   const res = await client.post(`/${org.metaPhoneNumberId}/messages`, {
     messaging_product: "whatsapp",
@@ -218,7 +218,7 @@ export async function getPhoneHealthStatus(org) {
 export async function sendTextMessage(org, toPhone, text) {
   if (!org.metaPhoneNumberId) throw new Error("La organización no tiene Meta API configurada.");
   const { token } = getOrgCredentials(org);
-  const client = axios.create({ baseURL: GRAPH_URL, params: { access_token: token } });
+  const client = axios.create({ baseURL: GRAPH_URL, headers: { Authorization: `Bearer ${token}` } });
   try {
     const res = await client.post(`/${org.metaPhoneNumberId}/messages`, {
       messaging_product: "whatsapp",
