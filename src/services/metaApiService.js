@@ -11,12 +11,17 @@ export function isOficinaLineConfigured() {
   return Boolean(process.env.META_OFICINA_PHONE_NUMBER_ID);
 }
 
+// Tiempo máximo de una llamada de la Oficina a WhatsApp. Sin él, una llamada colgada
+// deja el envío a medias hasta que se reinicie el backend.
+export const OFICINA_SEND_TIMEOUT_MS = 20_000;
+
 function getConfig(line = "platform") {
   if (line === "oficina") {
     if (!isOficinaLineConfigured()) throw new Error("META_OFICINA_PHONE_NUMBER_ID no está configurado");
     return {
       phoneNumberId: process.env.META_OFICINA_PHONE_NUMBER_ID,
       accessToken: process.env.META_OFICINA_ACCESS_TOKEN || process.env.META_PLATFORM_ACCESS_TOKEN,
+      timeout: OFICINA_SEND_TIMEOUT_MS,
     };
   }
   return {
@@ -33,7 +38,7 @@ function getConfig(line = "platform") {
  * @returns {Promise<{ messageId: string }>}
  */
 export async function sendTextMessage(toPhone, text, line = "platform") {
-  const { phoneNumberId, accessToken } = getConfig(line);
+  const { phoneNumberId, accessToken, timeout } = getConfig(line);
 
   const response = await axios.post(
     `${GRAPH_URL}/${phoneNumberId}/messages`,
@@ -48,6 +53,7 @@ export async function sendTextMessage(toPhone, text, line = "platform") {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
+      ...(timeout && { timeout }),
     }
   );
 
@@ -91,7 +97,7 @@ export async function markMessageAsRead(messageId, line = "platform") {
  * @returns {Promise<{ messageId: string }>}
  */
 export async function sendTemplateMessage(toPhone, templateName, languageCode = "es", components = [], line = "platform") {
-  const { phoneNumberId, accessToken } = getConfig(line);
+  const { phoneNumberId, accessToken, timeout } = getConfig(line);
 
   const response = await axios.post(
     `${GRAPH_URL}/${phoneNumberId}/messages`,
@@ -110,6 +116,7 @@ export async function sendTemplateMessage(toPhone, templateName, languageCode = 
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
+      ...(timeout && { timeout }),
     }
   );
 

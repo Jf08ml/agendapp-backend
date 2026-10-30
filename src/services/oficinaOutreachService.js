@@ -32,6 +32,11 @@ const MAX_ORGANIZATIONS = 1000;
 // Ventana del uso de la agenda (citas creadas en los últimos N días).
 const USAGE_WINDOW_DAYS = 30;
 const MAX_IDS = 100;
+// Un envío que lleva más que esto en "sending" quedó a medias (el backend se cayó en plena
+// llamada). Es mucho más que el tiempo máximo de la llamada a WhatsApp.
+const STALE_SENDING_MS = 5 * 60_000;
+// Errores en los que la conexión con WhatsApp ni siquiera se abrió: el mensaje no salió.
+const NOT_CONNECTED = new Set(["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED"]);
 // Meta no entregó el mensaje para limitar el marketing que recibe esa persona.
 // Reintentar enseguida vuelve a fallar: cuenta como contactado, a diferencia de
 // los demás fallos (facturación, número inválido), en los que no le llegó nada
@@ -41,7 +46,7 @@ const countsAsContacted = { $or: [{ status: { $ne: "failed" } }, { errorCode: MA
 
 // Para qué sirve cada plantilla aprobada del número de plataforma.
 const TEMPLATE_PURPOSE = {
-  activa_tu_cuenta: "Se registró pero no terminó la configuración inicial",
+  configuracion_pendiente: "Se registró pero no terminó la configuración inicial",
   agenda_tu_primera_cita: "Configuró, pero no ha creado su primera cita",
   conecta_tu_whatsapp: "Ya usa la agenda, pero no ha conectado su WhatsApp",
   trial_por_vencer: "La prueba gratis termina en pocos días",
@@ -55,6 +60,10 @@ const TRIAL_PLAN = "plan-demo";
 // Días después de pasar al plan gratuito en que se ofrece tu_prueba_termino en
 // lugar de mejora_tu_plan.
 const TRIAL_ENDED_DAYS = 14;
+// Plantillas del catálogo que no existen en la cuenta del número de soporte. activa_tu_cuenta
+// se borró allí el 2026-10-30; la reemplaza configuracion_pendiente.
+// Siguen en el catálogo porque el número oficial las usa (retargetingService).
+const NOT_ON_OFICINA_LINE = new Set(["activa_tu_cuenta"]);
 
 /** Plan gratuito: sin costo y fuera de la prueba. No paga, aunque la membresía diga "active". */
 function isFreePlan(membership) {
@@ -73,6 +82,14 @@ export class OutreachBlocked extends Error {
     super(message);
     this.code = code;
   }
+}
+
+/** No se sabe si el mensaje salió. No se reintenta solo: un segundo intento podría duplicarlo. */
+function outcomeUnknown() {
+  return new OutreachBlocked(
+    "outcome_unknown",
+    "No se sabe si el mensaje salió: WhatsApp no respondió o el envío quedó a medias. Revisa el chat en el número de soporte antes de volver a escribirle"
+  );
 }
 
 /** Falta configurar el número de envío: no salió nada y se puede reintentar después. */
@@ -114,7 +131,7 @@ export function templateParamsFor(org, membership, now = new Date()) {
     if (!link) return;
     params[name] = extra.length ? [ownerName(org), org.name, ...extra, link] : [ownerName(org), org.name, link];
   };
-  if (!org.setupCompleted) add("activa_tu_cuenta", "/login-admin");
+  if (!org.setupCompleted) add("configuracion_pendiente", "/login-admin");
   if (org.setupCompleted && !ms.firstAppointmentAt) add("agenda_tu_primera_cita", "/gestionar-agenda");
   // El plan gratuito no incluye WhatsApp: invitarlo a conectarlo sería engañoso.
   const free = isFreePlan(membership);
@@ -133,12 +150,14 @@ export function templateParamsFor(org, membership, now = new Date()) {
 }
 
 export function templateCatalog() {
-  return Object.entries(PLATFORM_TEMPLATE_BODIES).map(([name, body]) => ({
-    name,
-    body,
-    paramCount: new Set(body.match(/\{\{\d+\}\}/g) || []).size,
-    purpose: TEMPLATE_PURPOSE[name] || "",
-  }));
+  return Object.entries(PLATFORM_TEMPLATE_BODIES)
+    .filter(([name]) => !NOT_ON_OFICINA_LINE.has(name))
+    .map(([name, body]) => ({
+      name,
+      body,
+      paramCount: new Set(body.match(/\{\{\d+\}\}/g) || []).size,
+      purpose: TEMPLATE_PURPOSE[name] || "",
+    }));
 }
 
 /** Última membresía de cada organización, con su plan (slug, nombre, precio y si incluye WhatsApp). */
@@ -338,7 +357,15 @@ export async function sendForOficina(input) {
   if (existing?.status === "sent") {
     return { status: "sent", metaMessageId: existing.metaMessageId, sentAt: iso(existing.sentAt), duplicate: true };
   }
+  if (existing?.status === "uncertain") throw outcomeUnknown();
   if (existing?.status === "sending") {
+    if (Date.now() - new Date(existing.updatedAt).getTime() > STALE_SENDING_MS) {
+      await OficinaOutreachSend.updateOne(
+        { messageId: input.messageId, status: "sending" },
+        { $set: { status: "uncertain", error: "El intento quedó a medias" } }
+      );
+      throw outcomeUnknown();
+    }
     throw new OutreachBlocked("in_progress", "Otro intento con el mismo messageId está en curso");
   }
   if (!isOficinaLineConfigured()) throw new OutreachNotConfigured();
@@ -362,7 +389,7 @@ export async function sendForOficina(input) {
     send = () => sendTextMessage(org.phoneNumber, input.channel.text, LINE);
   } else {
     const { templateName, params } = input.channel;
-    if (!PLATFORM_TEMPLATE_BODIES[templateName]) throw new OutreachBlocked("template_unavailable", "La plantilla no está en el catálogo");
+    if (!PLATFORM_TEMPLATE_BODIES[templateName] || NOT_ON_OFICINA_LINE.has(templateName)) throw new OutreachBlocked("template_unavailable", "La plantilla no está en el catálogo");
     const memberships = await latestMemberships([org._id]);
     const current = templateParamsFor(org, memberships.get(String(org._id)))[templateName];
     if (!current) throw new OutreachBlocked("template_unavailable", "La plantilla ya no aplica a este negocio");
@@ -420,7 +447,16 @@ export async function sendForOficina(input) {
       error.whatsapp = true;
       throw error;
     }
-    throw err;
+    if (NOT_CONNECTED.has(err.code)) {
+      await OficinaOutreachSend.updateOne({ messageId: input.messageId }, { $set: { status: "failed", error: String(err.message).slice(0, 500) } });
+      const error = new Error(`No se pudo conectar con WhatsApp: ${err.message}`);
+      error.retriable = true;
+      error.whatsapp = true;
+      throw error;
+    }
+    // Sin respuesta (tiempo agotado, conexión cortada): pudo haber salido.
+    await OficinaOutreachSend.updateOne({ messageId: input.messageId }, { $set: { status: "uncertain", error: String(err.message).slice(0, 500) } });
+    throw outcomeUnknown();
   }
 
   const sentAt = new Date();
