@@ -33,12 +33,12 @@ function platformWabaId() {
 function graphClient() {
   return axios.create({
     baseURL: GRAPH_URL,
-    params: { access_token: platformToken() },
+    headers: { Authorization: `Bearer ${platformToken()}` },
   });
 }
 
 function makeClient(token) {
-  return axios.create({ baseURL: GRAPH_URL, params: { access_token: token } });
+  return axios.create({ baseURL: GRAPH_URL, headers: { Authorization: `Bearer ${token}` } });
 }
 
 /**
@@ -326,7 +326,8 @@ export async function connectOrgEmbedded(orgId, code, redirectUri, providedWabaI
   let wabaId = providedWabaId;
   if (!wabaId) {
     const debugRes = await axios.get(`${GRAPH_URL}/debug_token`, {
-      params: { input_token: accessToken, access_token: `${APP_ID}|${APP_SECRET}`, fields: "granular_scopes" },
+      headers: { Authorization: `Bearer ${APP_ID}|${APP_SECRET}` },
+      params: { input_token: accessToken, fields: "granular_scopes" },
     }).catch(() => null);
     const wabaScope = debugRes?.data?.data?.granular_scopes?.find(
       (s) => s.scope === "whatsapp_business_management"
@@ -341,19 +342,21 @@ export async function connectOrgEmbedded(orgId, code, redirectUri, providedWabaI
   let phoneData;
   if (providedPhoneNumberId) {
     const r = await axios.get(`${GRAPH_URL}/${providedPhoneNumberId}`, {
-      params: { access_token: accessToken, fields: PHONE_FIELDS },
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: { fields: PHONE_FIELDS },
     });
     phoneData = r.data;
   } else {
     const r = await axios.get(`${GRAPH_URL}/${wabaId}/phone_numbers`, {
-      params: { access_token: accessToken, fields: PHONE_FIELDS },
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: { fields: PHONE_FIELDS },
     });
     phoneData = r.data?.data?.[0];
   }
   if (!phoneData) throw new Error("No se encontró número de teléfono en la WABA.");
 
   // 5. Suscribir el WABA al webhook de la app
-  await axios.post(`${GRAPH_URL}/${wabaId}/subscribed_apps`, {}, { params: { access_token: accessToken } });
+  await axios.post(`${GRAPH_URL}/${wabaId}/subscribed_apps`, {}, { headers: { Authorization: `Bearer ${accessToken}` } });
 
   // 6. Agregar el System User de AgenditApp al WABA del cliente
   //    Esto permite usar el token de plataforma para enviar mensajes (billing → AgenditApp)
@@ -363,7 +366,7 @@ export async function connectOrgEmbedded(orgId, code, redirectUri, providedWabaI
       await axios.post(
         `${GRAPH_URL}/${wabaId}/assigned_users`,
         { user: systemUserId, tasks: ["MANAGE", "DEVELOP", "ADVERTISE", "ANALYZE"] },
-        { params: { access_token: accessToken } }
+        { headers: { Authorization: `Bearer ${accessToken}` } }
       );
       console.log(`[metaConnect] System user ${systemUserId} agregado al WABA ${wabaId}`);
     } catch (sysErr) {
@@ -381,7 +384,7 @@ export async function connectOrgEmbedded(orgId, code, redirectUri, providedWabaI
       await axios.post(
         `${GRAPH_URL}/${creditLineId}/whatsapp_credit_sharing_and_attach`,
         { waba_id: wabaId, waba_currency: "COP" },
-        { params: { access_token: platformToken() } }
+        { headers: { Authorization: `Bearer ${platformToken()}` } }
       );
       console.log(`[metaConnect] Línea de crédito ${creditLineId} asignada al WABA ${wabaId}`);
     } catch (creditErr) {
