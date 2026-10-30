@@ -15,7 +15,7 @@ import {
   updateMessageStatus,
 } from "../services/platformInboxService.js";
 import Appointment from "../models/appointmentModel.js";
-import { isOptOutMessage, setOptOut } from "../services/oficinaOutreachService.js";
+import { isOptOutMessage, setOptOutForPhone } from "../services/oficinaOutreachService.js";
 
 // Dedupe de webhooks: Meta puede reintentar la entrega del mismo mensaje.
 // Map message.id → timestamp; se poda cada vez que crece.
@@ -63,9 +63,9 @@ async function handleOficinaInbound(message) {
   const body = messageBodyForInbox(message);
   const org = await findOrganizationByPhone(fromPhone);
   await logInboundMessage({ phone: fromPhone, organizationId: org?._id || null, body, metaMessageId: message.id, line: "oficina" });
-  if (org && isOptOutMessage(body)) {
-    await setOptOut(String(org._id), true, "whatsapp");
-    console.log(`[WaAgent] Org ${org._id} pidió no recibir mensajes (número de soporte)`);
+  if (isOptOutMessage(body)) {
+    const count = await setOptOutForPhone(fromPhone, "whatsapp");
+    console.log(`[WaAgent] Baja pedida por WhatsApp (número de soporte): ${count} negocio(s) con ese teléfono`);
   }
 }
 
@@ -275,10 +275,10 @@ export async function handleMetaIncoming(req, res) {
     // "Baja", "stop", "no me escriban"...: no se le vuelve a enviar nada desde
     // ningún número de AgenditApp (ni Oficina IA ni retargeting). Queda en el inbox para revisión.
     if (isOptOutMessage(body)) {
-      setOptOut(String(org._id), true, "whatsapp").catch((err) =>
-        console.error("[WaAgent] Error guardando la baja de mensajes:", err.message),
-      );
-      console.log(`[WaAgent] Org ${org._id} pidió no recibir mensajes del número de AgenditApp`);
+      // Vale para todos los negocios con ese teléfono, no solo para `org`.
+      setOptOutForPhone(fromPhone, "whatsapp")
+        .then((count) => console.log(`[WaAgent] Baja pedida por WhatsApp (número de AgenditApp): ${count} negocio(s) con ese teléfono`))
+        .catch((err) => console.error("[WaAgent] Error guardando la baja de mensajes:", err.message));
       return;
     }
 

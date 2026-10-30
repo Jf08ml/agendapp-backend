@@ -18,17 +18,24 @@ export function normalizePhone(phone) {
   return String(phone || "").replace(/\D/g, "");
 }
 
-/** Busca la org dueña de un teléfono, sin filtrar por waAgentEnabled (a diferencia
- * del routing del webhook) — se usa solo para etiquetar el mensaje en el inbox. */
-export async function findOrganizationByPhone(phone) {
+/** Filtro de organizaciones por teléfono (guardado con o sin "+"). Un dueño puede
+ * tener varios negocios con el mismo número. */
+export function organizationPhoneFilter(phone) {
   const digits = normalizePhone(phone);
-  if (!digits) return null;
-  return Organization.findOne({
+  return {
     $or: [
       { phoneNumber: { $in: [digits, `+${digits}`] } },
       { waPhone: { $in: [digits, `+${digits}`] } },
     ],
-  }).lean();
+  };
+}
+
+/** Busca la org dueña de un teléfono, sin filtrar por waAgentEnabled (a diferencia
+ * del routing del webhook) — se usa solo para etiquetar el mensaje en el inbox.
+ * Si varias comparten el teléfono, devuelve una cualquiera. */
+export async function findOrganizationByPhone(phone) {
+  if (!normalizePhone(phone)) return null;
+  return Organization.findOne(organizationPhoneFilter(phone)).lean();
 }
 
 export async function logInboundMessage({ phone, organizationId, body, metaMessageId, line }) {
