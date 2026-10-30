@@ -24,9 +24,11 @@ export async function getOrganizations(req, res) {
   try {
     const ids = typeof req.query.ids === "string" && req.query.ids ? req.query.ids.split(",") : undefined;
     if (ids && (ids.length > 100 || ids.some((id) => !OBJECT_ID.test(id)))) return bad(res, "ids inválidos");
+    // all=1: todos los negocios (hasta el máximo), sin importar cuándo se registraron.
+    const all = req.query.all === "1";
     const days = req.query.createdSinceDays === undefined ? 45 : Number(req.query.createdSinceDays);
-    if (!Number.isInteger(days) || days < 1 || days > 180) return bad(res, "createdSinceDays debe estar entre 1 y 180");
-    return res.json(await listOrganizationsForOficina({ ids, createdSinceDays: days }));
+    if (!Number.isInteger(days) || days < 1 || days > 3650) return bad(res, "createdSinceDays debe estar entre 1 y 3650");
+    return res.json(await listOrganizationsForOficina({ ids, createdSinceDays: days, all }));
   } catch (err) {
     console.error("[oficinaOutreach] getOrganizations:", err.message);
     return res.status(500).json({ error: { code: "internal", message: "Error interno" } });

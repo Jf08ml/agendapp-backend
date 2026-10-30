@@ -12,6 +12,9 @@ export const PLATFORM_TEMPLATE_BODIES = {
     "¡Hola {{1}}! 📱 *{{2}}* ya está funcionando en AgenditApp, pero aún no conectas tu WhatsApp. Al conectarlo, tus clientes reciben recordatorios y confirmaciones automáticas: menos inasistencias y menos mensajes manuales para ti.\n\nConéctalo aquí: {{3}}\n\nSi tienes dudas sobre cómo hacerlo, escríbenos al +57 350 667 4686 y te guiamos paso a paso.",
   trial_por_vencer:
     "¡Hola {{1}}! ⏳ Tu prueba gratuita de *{{2}}* en AgenditApp vence en *{{3}} días*. No pierdas el acceso a tu agenda, recordatorios de WhatsApp y reportes.\n\nElige tu plan aquí: {{4}}\n\nSi tienes preguntas sobre precios o necesitas más tiempo, escríbenos al +57 350 667 4686.",
+  // Solo en la cuenta del número de soporte y ventas (AgenditApp Oficina IA).
+  mejora_tu_plan:
+    "¡Hola {{1}}! 👋 *{{2}}* está en el Plan Gratuito de AgenditApp. Con un plan pago tus clientes reciben la confirmación y el recordatorio de su cita por WhatsApp de forma automática, y puedes tener servicios ilimitados. Menos inasistencias y menos mensajes manuales para ti.\n\nMira los planes aquí: {{3}}\n\n¿Tienes dudas? Responde este mensaje y te ayudamos.",
 };
 
 /**
