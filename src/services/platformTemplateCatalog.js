@@ -13,7 +13,7 @@ export const PLATFORM_TEMPLATE_BODIES = {
   trial_por_vencer:
     "¡Hola {{1}}! ⏳ Tu prueba gratuita de *{{2}}* en AgenditApp vence en *{{3}} días*. No pierdas el acceso a tu agenda, recordatorios de WhatsApp y reportes.\n\nElige tu plan aquí: {{4}}\n\nSi tienes preguntas sobre precios o necesitas más tiempo, escríbenos al +57 350 667 4686.",
   // Solo en la cuenta del número de soporte y ventas (AgenditApp Oficina IA).
-  // Categoría Utilidad; reemplaza ahí a activa_tu_cuenta.
+  // Reemplaza ahí a activa_tu_cuenta (Meta la dejó en Marketing, igual que la anterior).
   configuracion_pendiente:
     "Hola {{1}}, tu cuenta de *{{2}}* en AgenditApp está creada, pero la configuración inicial no está completa.\n\nPara terminarla, entra aquí: {{3}}\n\nSi tienes algún problema con la configuración, responde este mensaje.",
   tu_prueba_termino:
