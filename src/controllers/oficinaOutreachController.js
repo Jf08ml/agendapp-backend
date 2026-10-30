@@ -1,4 +1,5 @@
 import {
+  getDeliveryStatuses,
   listMessagesForOficina,
   listOrganizationsForOficina,
   OutreachBlocked,
@@ -78,6 +79,20 @@ export async function postSend(req, res) {
     if (err.whatsapp) return res.status(502).json({ error: { code: "whatsapp_error", message: err.message, retriable: Boolean(err.retriable) } });
     console.error("[oficinaOutreach] postSend:", input.messageId, err.message);
     return res.status(500).json({ error: { code: "internal", message: "Error interno; no se sabe si el mensaje salió" } });
+  }
+}
+
+// POST y no GET: hasta 100 messageIds no caben con holgura en la URL. Solo lee.
+export async function postDeliveryStatus(req, res) {
+  try {
+    const ids = req.body?.messageIds;
+    if (!Array.isArray(ids) || ids.length < 1 || ids.length > 100 || ids.some((id) => typeof id !== "string" || !MESSAGE_ID.test(id))) {
+      return bad(res, "messageIds debe ser una lista de 1 a 100 ids válidos");
+    }
+    return res.json({ statuses: await getDeliveryStatuses(ids) });
+  } catch (err) {
+    console.error("[oficinaOutreach] postDeliveryStatus:", err.message);
+    return res.status(500).json({ error: { code: "internal", message: "Error interno" } });
   }
 }
 
