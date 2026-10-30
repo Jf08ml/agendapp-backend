@@ -193,16 +193,18 @@ export async function handleMetaIncoming(req, res) {
   const statuses = change?.statuses;
   if (statuses?.length) {
     for (const s of statuses) {
-      console.log(`[WaAgent] Status recibido de Meta: ${s.status} — ${s.id} (recipient ${s.recipient_id})`);
+      const metaErr = s.errors?.[0];
+      const errorText = metaErr
+        ? `Meta no entregó el mensaje: ${metaErr.error_data?.details || metaErr.title || metaErr.message} (Meta ${metaErr.code})`
+        : undefined;
+      console.log(
+        `[WaAgent] Status recibido de Meta: ${s.status} — ${s.id} (recipient ${s.recipient_id})${errorText ? ` — ${errorText}` : ""}`
+      );
       updateMessageStatus({ metaMessageId: s.id, status: s.status }).catch((err) =>
         console.error("[WaAgent] Error actualizando status de mensaje:", err.message)
       );
       if (s.biz_opaque_callback_data) {
         const deliveryStatus = s.status === "read" ? "delivered" : s.status;
-        const metaErr = s.errors?.[0];
-        const errorText = metaErr
-          ? `Meta no entregó el mensaje: ${metaErr.error_data?.details || metaErr.title || metaErr.message} (Meta ${metaErr.code})`
-          : undefined;
         applyDeliveryStatus(s.biz_opaque_callback_data, deliveryStatus, errorText).catch((err) =>
           console.error("[WaAgent] Error actualizando entrega Meta en citas:", err.message)
         );
