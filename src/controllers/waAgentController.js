@@ -396,24 +396,15 @@ async function applyDeliveryStatus(externalRef, status, errorText) {
   const appointmentIds = externalRef.slice(sepIndex + 1).split(",").filter(Boolean);
   if (!appointmentIds.length) return;
 
-  const appointments = await Appointment.find({ _id: { $in: appointmentIds } })
-    .select(fields.statusField)
-    .lean();
-
-  const toUpdateIds = appointments
-    .filter((a) => {
-      const current = a[fields.statusField];
-      return !current || DELIVERY_STATUS_RANK[status] >= DELIVERY_STATUS_RANK[current];
-    })
-    .map((a) => a._id);
-
-  if (!toUpdateIds.length) return;
-
+  // La condición va en el mismo updateMany: un webhook de Meta trae varios estados
+  // que se procesan a la vez, y leer antes de escribir dejaba que uno menos avanzado
+  // pisara al otro.
+  const notAhead = Object.keys(DELIVERY_STATUS_RANK).filter((s) => DELIVERY_STATUS_RANK[s] <= DELIVERY_STATUS_RANK[status]);
   const $set = { [fields.statusField]: status, [fields.updatedAtField]: new Date() };
   if (status === "failed" && errorText && fields.errorField) {
     $set[fields.errorField] = String(errorText).slice(0, 500);
   }
-  await Appointment.updateMany({ _id: { $in: toUpdateIds } }, { $set });
+  await Appointment.updateMany({ _id: { $in: appointmentIds }, [fields.statusField]: { $in: [null, ...notAhead] } }, { $set });
 }
 
 /**

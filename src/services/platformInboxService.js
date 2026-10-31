@@ -74,13 +74,12 @@ const STATUS_RANK = { failed: 1, sent: 1, delivered: 2, read: 3 };
 export async function updateMessageStatus({ metaMessageId, status, error }) {
   if (!metaMessageId || !STATUS_RANK[status]) return;
 
-  const existing = await PlatformWaMessage.findOne({ metaMessageId }).select("status").lean();
-  if (!existing) return;
-  if (existing.status && STATUS_RANK[status] < STATUS_RANK[existing.status]) return;
-
+  // La condición va en el mismo updateOne: un webhook trae varios estados que se
+  // procesan a la vez, y leer antes de escribir dejaba que "delivered" pisara a "read".
+  const notAhead = Object.keys(STATUS_RANK).filter((s) => STATUS_RANK[s] <= STATUS_RANK[status]);
   const failed = status === "failed";
   await PlatformWaMessage.updateOne(
-    { metaMessageId },
+    { metaMessageId, status: { $in: [null, ...notAhead] } },
     {
       $set: {
         status,
