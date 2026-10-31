@@ -37,12 +37,13 @@ const MAX_IDS = 100;
 const STALE_SENDING_MS = 5 * 60_000;
 // Errores en los que la conexión con WhatsApp ni siquiera se abrió: el mensaje no salió.
 const NOT_CONNECTED = new Set(["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED"]);
-// Meta no entregó el mensaje para limitar el marketing que recibe esa persona.
-// Reintentar enseguida vuelve a fallar: cuenta como contactado, a diferencia de
-// los demás fallos (facturación, número inválido), en los que no le llegó nada
-// por un problema nuestro o del número.
-const MARKETING_LIMIT_CODE = 131049;
-const countsAsContacted = { $or: [{ status: { $ne: "failed" } }, { errorCode: MARKETING_LIMIT_CODE }] };
+// Meta no entregó el mensaje por decisión propia: 131049 limita el marketing que
+// recibe esa persona y 130472 la reservó para un experimento de Meta sin mensajes
+// de marketing. Reintentar enseguida vuelve a fallar: cuentan como contactado, a
+// diferencia de los demás fallos (facturación, número inválido), en los que no le
+// llegó nada por un problema nuestro o del número.
+const META_WITHHELD_CODES = [131049, 130472];
+const countsAsContacted = { $or: [{ status: { $ne: "failed" } }, { errorCode: { $in: META_WITHHELD_CODES } }] };
 
 // Para qué sirve cada plantilla aprobada del número de plataforma.
 const TEMPLATE_PURPOSE = {
@@ -202,7 +203,7 @@ async function lastMessages(orgs) {
               {
                 $and: [
                   { $eq: ["$direction", "outbound"] },
-                  { $or: [{ $ne: ["$status", "failed"] }, { $eq: ["$errorCode", MARKETING_LIMIT_CODE] }] },
+                  { $or: [{ $ne: ["$status", "failed"] }, { $in: ["$errorCode", META_WITHHELD_CODES] }] },
                 ],
               },
               "$createdAt",
