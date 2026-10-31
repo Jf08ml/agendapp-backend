@@ -71,6 +71,7 @@ router.get("/organization-config", organizationResolver, async (req, res) => {
   const orgObj = organization.toObject();
   delete orgObj.password;
   delete orgObj.__v;
+  delete orgObj.brandingBackup;
 
   // 🔐 No exponer credenciales de cobro (tokens del vendedor). Solo el flag de
   // conexión, que el flujo de depósito público necesita.

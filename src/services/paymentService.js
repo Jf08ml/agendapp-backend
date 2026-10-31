@@ -3,6 +3,9 @@ import PaymentSession from "../models/paymentSessionModel.js";
 import { emitSubscriptionPaid } from "./oficinaEventsService.js";
 import PaymentEvent from "../models/paymentEventModel.js";
 import Membership from "../models/membershipModel.js";
+import Organization from "../models/organizationModel.js";
+import Plan from "../models/planModel.js";
+import mongoose from "mongoose";
 import membershipService from "./membershipService.js";
 import ManualPaymentProvider from "./paymentProviders/ManualPaymentProvider.js";
 import PayPalPaymentProvider from "./paymentProviders/PayPalPaymentProvider.js";
@@ -26,6 +29,17 @@ const paymentService = {
    * La activación real de la membresía ocurre cuando llega el webhook
    * BILLING.SUBSCRIPTION.ACTIVATED de PayPal.
    */
+  /**
+   * Registra la sesión de una suscripción PayPal resolviendo el plan por el
+   * plan_id de PayPal (nunca por un planId que mande el cliente: evitaría que
+   * alguien se suscriba al plan barato y active el caro).
+   */
+  async recordPaypalSubscription({ subscriptionId, organizationId, paypalPlanId, amount, currency }) {
+    const plan = await Plan.findOne({ paypalPlanId });
+    if (!plan) throw new Error(`Ningún plan tiene paypalPlanId=${paypalPlanId}`);
+    return this.recordSubscription({ subscriptionId, organizationId, planId: plan._id, amount, currency });
+  },
+
   async recordSubscription({ subscriptionId, organizationId, planId, amount, currency }) {
     const sessionId = `sub_${subscriptionId}`;
 
@@ -86,7 +100,7 @@ const paymentService = {
    * Orden crítico: activar membresía ANTES de crear el PaymentEvent.
    * Si la activación falla, el PaymentEvent no se crea → el provider puede reintentar.
    */
-  async processPaymentEvent({ provider: providerName, eventId, type, sessionId, amount, currency, status, subscriptionId, paymentMode, raw }) {
+  async processPaymentEvent({ provider: providerName, eventId, type, sessionId, amount, currency, status, subscriptionId, paymentMode, customId, paypalPlanId, raw }) {
     // 1. Idempotencia: si el PaymentEvent ya existe, fue procesado correctamente
     const existingEvent = await PaymentEvent.findOne({ provider: providerName, eventId });
     if (existingEvent) {
@@ -109,6 +123,14 @@ const paymentService = {
         fallbackPlanId = membership.planId;
         fallbackMembershipId = membership._id;
       }
+    }
+
+    // Suscripción nueva sin sesión (el aviso del frontend nunca llegó): la org viaja
+    // en el custom_id de la suscripción y el plan se resuelve por el plan_id de PayPal.
+    if (!session && !fallbackOrganizationId && subscriptionId && customId && paypalPlanId
+        && mongoose.isValidObjectId(customId) && await Organization.exists({ _id: customId })) {
+      console.log(`[Payment] Sesión ${sessionId} no encontrada, registrándola desde custom_id (org ${customId})`);
+      session = await this.recordPaypalSubscription({ subscriptionId, organizationId: customId, paypalPlanId, amount, currency });
     }
 
     if (!session && !fallbackOrganizationId) {

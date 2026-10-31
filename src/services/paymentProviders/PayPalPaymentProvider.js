@@ -215,6 +215,9 @@ export default class PayPalPaymentProvider extends PaymentProvider {
           currency,
           status: "succeeded",
           subscriptionId,
+          // Permiten registrar la sesión si el frontend no alcanzó a hacerlo
+          customId: resource.custom_id,
+          paypalPlanId: resource.plan_id,
           raw: body,
         };
       }

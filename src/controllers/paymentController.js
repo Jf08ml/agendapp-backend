@@ -39,31 +39,48 @@ const paymentController = {
   /**
    * POST /payments/paypal/subscription-created
    * El frontend avisa que el usuario aprobó una suscripción en el popup de PayPal.
-   * Se registra la sesión; la activación real llega con el webhook BILLING.SUBSCRIPTION.ACTIVATED.
+   * Se registra la sesión y, si PayPal ya la reporta ACTIVE, se activa la membresía
+   * de una vez (mismo eventId que el webhook BILLING.SUBSCRIPTION.ACTIVATED → idempotente).
+   * Si este aviso no llega, el webhook registra la sesión desde el custom_id.
    *
-   * Body: { subscriptionId, planId, organizationId }
+   * Body: { subscriptionId, planId, organizationId }  (planId se ignora: manda el plan de PayPal)
    */
   subscriptionCreated: async (req, res) => {
     try {
-      const { subscriptionId, planId } = req.body;
+      const { subscriptionId } = req.body;
       const organizationId = req.user?.organizationId || req.body.organizationId;
 
-      if (!subscriptionId || !planId || !organizationId) {
-        return sendResponse(res, 400, null, "Faltan campos: subscriptionId, planId, organizationId");
+      if (!subscriptionId || !organizationId) {
+        return sendResponse(res, 400, null, "Faltan campos: subscriptionId, organizationId");
       }
 
       // Verificar que la suscripción existe en PayPal (ACTIVE o APPROVED)
       const provider = paymentService.getProvider("paypal");
       const verified = await provider.verifySubscription(subscriptionId);
 
-      // Registrar la sesión (la activación la hace el webhook, esto es solo el registro)
-      const session = await paymentService.recordSubscription({
+      const session = await paymentService.recordPaypalSubscription({
         subscriptionId,
         organizationId,
-        planId,
+        paypalPlanId: verified.paypalPlanId,
         amount: verified.amount,
         currency: verified.currency,
       });
+
+      if (verified.status === "ACTIVE") {
+        await paymentService.processPaymentEvent({
+          provider: "paypal",
+          eventId: `sub_activated_${subscriptionId}`,
+          type: "BILLING.SUBSCRIPTION.ACTIVATED",
+          sessionId: session.sessionId,
+          amount: verified.amount,
+          currency: verified.currency,
+          status: "succeeded",
+          subscriptionId,
+          paymentMode: "subscription",
+          raw: verified.raw,
+        });
+        return sendResponse(res, 200, { session, subscriptionId }, "Suscripción activada");
+      }
 
       sendResponse(res, 200, { session, subscriptionId }, "Suscripción registrada, esperando activación");
     } catch (error) {

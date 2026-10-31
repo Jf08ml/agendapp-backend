@@ -5,11 +5,29 @@ import organizationModel from "../models/organizationModel.js";
 import planModel from "../models/planModel.js";
 import notificationModel from "../models/notificationModel.js";
 
+// Campos de branding que se limpian sin customBranding, con su valor por defecto.
+const BRANDING_RESET = {
+  logoUrl: null,
+  faviconUrl: null,
+  pwaIcon: null,
+  primaryColor: null,
+  themeColor: null,
+  footerTextColor: null,
+  fontFamily: "inter",
+};
+
 /**
  * Construye los campos a resetear en la org cuando cambia a un plan con menos features.
  * Solo resetea lo que el nuevo plan NO permite — no toca lo que sí está incluido.
+ *
+ * El branding no se pierde: al limpiarlo se guarda en org.brandingBackup y, al
+ * pasar a un plan con customBranding, se restaura en los campos que sigan en su
+ * valor por defecto (sin pisar lo que el negocio haya cambiado entretanto).
+ *
+ * @param {Object} plan
+ * @param {Object} org  la organización con `branding` y `brandingBackup`
  */
-function buildPlanResetFields(plan) {
+function buildPlanResetFields(plan, org) {
   const limits = plan.limits || {};
   const reset = {};
 
@@ -22,15 +40,26 @@ function buildPlanResetFields(plan) {
   if (!limits.loyaltyProgram) {
     reset.showLoyaltyProgram = false;
   }
+  const current = org?.branding || {};
   if (!limits.customBranding) {
     // Limpiar branding personalizado → frontend cae en defaults de AgenditApp
-    reset["branding.logoUrl"] = null;
-    reset["branding.faviconUrl"] = null;
-    reset["branding.pwaIcon"] = null;
-    reset["branding.primaryColor"] = null;
-    reset["branding.themeColor"] = null;
-    reset["branding.footerTextColor"] = null;
-    reset["branding.fontFamily"] = "inter";
+    const customized = Object.keys(BRANDING_RESET).filter(
+      (k) => current[k] != null && current[k] !== BRANDING_RESET[k]
+    );
+    // Sin nada personalizado se conserva la copia anterior (si la hay)
+    if (customized.length > 0) {
+      reset.brandingBackup = Object.fromEntries(customized.map((k) => [k, current[k]]));
+    }
+    for (const [k, value] of Object.entries(BRANDING_RESET)) {
+      reset[`branding.${k}`] = value;
+    }
+  } else if (org?.brandingBackup) {
+    for (const [k, value] of Object.entries(org.brandingBackup)) {
+      if (k in BRANDING_RESET && (current[k] == null || current[k] === BRANDING_RESET[k])) {
+        reset[`branding.${k}`] = value;
+      }
+    }
+    reset.brandingBackup = null;
   }
 
   return reset;
@@ -160,11 +189,12 @@ const membershipService = {
     membership.lastCheckedAt = new Date();
     await membership.save();
 
+    const org = await organizationModel.findById(organizationId).select("branding brandingBackup").lean();
     await organizationModel.findByIdAndUpdate(organizationId, {
       currentMembershipId: membership._id,
       membershipStatus: "active",
       hasAccessBlocked: false,
-      ...buildPlanResetFields(freePlan),
+      ...buildPlanResetFields(freePlan, org),
     });
 
     console.log(`[convertTrialToFree] Org ${organizationId} convertida a plan gratuito (membresía ${membership._id} actualizada in-place)`);
@@ -420,11 +450,13 @@ const membershipService = {
     }
 
     // Sincronizar organización y resetear features que el nuevo plan no incluye
+    // (o restaurar el branding guardado si el nuevo plan lo incluye)
+    const org = await organizationModel.findById(organizationId).select("branding brandingBackup").lean();
     const orgUpdate = {
       currentMembershipId: membership._id,
       membershipStatus: "active",
       hasAccessBlocked: false,
-      ...buildPlanResetFields(plan),
+      ...buildPlanResetFields(plan, org),
     };
     await organizationModel.findByIdAndUpdate(organizationId, orgUpdate);
 

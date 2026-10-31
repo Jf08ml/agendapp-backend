@@ -327,6 +327,13 @@ const organizationSchema = new mongoose.Schema({
     type: BrandingSchema,
     default: {},
   },
+  // Copia del branding personalizado que se limpió al bajar a un plan sin
+  // customBranding (p. ej. trial → gratuito). Se restaura al volver a un plan
+  // que lo incluya — ver buildPlanResetFields en membershipService.
+  brandingBackup: {
+    type: Object,
+    default: null,
+  },
   // Slug para subdominio wildcard: {slug}.agenditapp.com
   // Pre-migration: unique + sparse; Post-migration: unique + required (remove sparse)
   slug: {
