@@ -30,8 +30,13 @@ const chatLogSchema = new mongoose.Schema(
     // Métricas de ejecución
     rounds: { type: Number, default: 0 },
     toolsUsed: [{ type: String }],
+    // inputTokens es solo la entrada SIN caché (con el breakpoint rodante del
+    // 2026-10-26 casi todo es lectura de caché). Para el costo real hacen falta
+    // los dos campos de caché (desde 2026-11-02; los logs anteriores no los tienen).
     inputTokens: { type: Number, default: 0 },
     outputTokens: { type: Number, default: 0 },
+    cacheReadTokens: { type: Number, default: 0 },
+    cacheWriteTokens: { type: Number, default: 0 },
     durationMs: { type: Number },
 
     // Solo para tipo "booking": payload construido por prepare_reservation
