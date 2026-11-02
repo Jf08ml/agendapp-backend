@@ -456,6 +456,8 @@ export async function processClientBookingMessage(org, clientPhone, body) {
       rounds: meta.rounds || 0,
       inputTokens: meta.inputTokens || 0,
       outputTokens: meta.outputTokens || 0,
+      cacheReadTokens: meta.cacheReadTokens || 0,
+      cacheWriteTokens: meta.cacheWriteTokens || 0,
     },
     ...(meta.toolsUsed?.length ? { $addToSet: { toolsUsed: { $each: meta.toolsUsed } } } : {}),
   };

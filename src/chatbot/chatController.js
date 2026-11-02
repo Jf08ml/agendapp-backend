@@ -79,6 +79,8 @@ export const chat = async (req, res) => {
           rounds: _meta.rounds,
           inputTokens: _meta.inputTokens,
           outputTokens: _meta.outputTokens,
+          cacheReadTokens: _meta.cacheReadTokens || 0,
+          cacheWriteTokens: _meta.cacheWriteTokens || 0,
           durationMs: Date.now() - startTime,
         },
         $addToSet: { toolsUsed: { $each: _meta.toolsUsed } },

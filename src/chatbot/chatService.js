@@ -188,6 +188,9 @@ export const processChat = async (organization, user, messages, { actionLog = []
   const actions = [];
   let inputTokens = 0;
   let outputTokens = 0;
+  // input_tokens excluye la caché: sin estos dos el costo real no se puede calcular
+  let cacheReadTokens = 0;
+  let cacheWriteTokens = 0;
   let rounds = 0;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -210,6 +213,8 @@ export const processChat = async (organization, user, messages, { actionLog = []
 
     inputTokens += response.usage?.input_tokens ?? 0;
     outputTokens += response.usage?.output_tokens ?? 0;
+    cacheReadTokens += response.usage?.cache_read_input_tokens ?? 0;
+    cacheWriteTokens += response.usage?.cache_creation_input_tokens ?? 0;
 
     if (response.stop_reason !== "tool_use") {
       // Fallback: si el modelo terminó el turno sin bloque de texto (puede pasar en
@@ -320,7 +325,7 @@ export const processChat = async (organization, user, messages, { actionLog = []
       return {
         reply,
         invalidates,
-        _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors, actions },
+        _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, hitRoundLimit: false, toolErrors, actions },
       };
     }
 
@@ -371,6 +376,6 @@ export const processChat = async (organization, user, messages, { actionLog = []
   return {
     reply: `No pude completar la operación en el tiempo disponible.${manualHint} Por favor intenta de nuevo con una solicitud más específica o realízalo directamente desde la interfaz.`,
     invalidates: autoCompletedAtLimit ? ["organization"] : [],
-    _meta: { rounds, toolsUsed: usedTools, inputTokens, outputTokens, hitRoundLimit: true, toolErrors, actions },
+    _meta: { rounds, toolsUsed: usedTools, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, hitRoundLimit: true, toolErrors, actions },
   };
 };

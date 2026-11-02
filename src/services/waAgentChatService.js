@@ -160,6 +160,8 @@ export async function processAdminCommand(org, messageBody) {
   let finalReply = null;
   let inputTokens = 0;
   let outputTokens = 0;
+  let cacheReadTokens = 0;
+  let cacheWriteTokens = 0;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const toolsWithCache = claudeTools.map((t, i) =>
@@ -180,6 +182,8 @@ export async function processAdminCommand(org, messageBody) {
 
     inputTokens += response.usage?.input_tokens ?? 0;
     outputTokens += response.usage?.output_tokens ?? 0;
+    cacheReadTokens += response.usage?.cache_read_input_tokens ?? 0;
+    cacheWriteTokens += response.usage?.cache_creation_input_tokens ?? 0;
 
     if (response.stop_reason !== "tool_use") {
       const textBlock = response.content.find((b) => b.type === "text");
@@ -228,6 +232,8 @@ export async function processAdminCommand(org, messageBody) {
     content: finalReply,
     inputTokens,
     outputTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
   }).catch((err) => console.error("[WaAgentChat] Error guardando mensaje assistant:", err.message));
 
   try {

@@ -159,6 +159,9 @@ export const processBookingChat = async (organization, messages, options = {}) =
   const actions = [];
   let inputTokens = 0;
   let outputTokens = 0;
+  // input_tokens excluye la caché: sin estos dos el costo real no se puede calcular
+  let cacheReadTokens = 0;
+  let cacheWriteTokens = 0;
   let rounds = 0;
   // WhatsApp: resumen oficial devuelto por prepare_reservation en este turno, y
   // resultado de confirm_reservation cuando abrió el cobro del abono.
@@ -202,6 +205,8 @@ export const processBookingChat = async (organization, messages, options = {}) =
 
     inputTokens += response.usage?.input_tokens ?? 0;
     outputTokens += response.usage?.output_tokens ?? 0;
+    cacheReadTokens += response.usage?.cache_read_input_tokens ?? 0;
+    cacheWriteTokens += response.usage?.cache_creation_input_tokens ?? 0;
 
     // Filtros de seguridad de Sonnet 5.5: la respuesta llega sin texto. Se
     // contesta algo neutro en vez de reintentar (el guard de respuesta vacía lo
@@ -211,13 +216,13 @@ export const processBookingChat = async (organization, messages, options = {}) =
       return {
         reply: SAFE_FALLBACK_REPLY,
         bookingPayload,
-        _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors, actions },
+        _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, hitRoundLimit: false, toolErrors, actions },
       };
     }
 
     if (response.stop_reason !== "tool_use") {
       const rawReply = extractText(response.content);
-      const meta = { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors, actions };
+      const meta = { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, hitRoundLimit: false, toolErrors, actions };
 
       // WhatsApp: si en este turno se preparó una reserva, el cliente recibe el
       // resumen armado por el servidor (nombres, fecha, precio y abono reales),
@@ -289,7 +294,7 @@ export const processBookingChat = async (organization, messages, options = {}) =
         return {
           reply: "No pude completar el cambio de tu cita todavía. ¿Me confirmas de nuevo qué cita quieres mover o cancelar y para cuándo?",
           bookingPayload,
-          _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors, actions },
+          _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, hitRoundLimit: false, toolErrors, actions },
         };
       }
 
@@ -341,13 +346,13 @@ export const processBookingChat = async (organization, messages, options = {}) =
               ? confirmedReply(confirmResult)
               : "Tuve un problema confirmando tu reserva. ¿La confirmas de nuevo, por favor?",
             bookingPayload,
-            _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors, actions },
+            _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, hitRoundLimit: false, toolErrors, actions },
           };
         }
         return {
           reply: "Necesito confirmar un par de datos más antes de agendar — ¿me cuentas de nuevo qué servicio y horario prefieres?",
           bookingPayload,
-          _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors, actions },
+          _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, hitRoundLimit: false, toolErrors, actions },
         };
       }
 
@@ -374,7 +379,7 @@ export const processBookingChat = async (organization, messages, options = {}) =
             ? "¡Listo! Toca el botón **'Sí, confirmar'** para finalizar tu reserva."
             : SAFE_FALLBACK_REPLY,
           bookingPayload,
-          _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors, actions },
+          _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, hitRoundLimit: false, toolErrors, actions },
         };
       }
 
@@ -400,7 +405,7 @@ export const processBookingChat = async (organization, messages, options = {}) =
         return {
           reply: "¡Ya casi! Confírmame el servicio, la fecha y la hora para prepararte el resumen de tu reserva.",
           bookingPayload,
-          _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors, actions },
+          _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, hitRoundLimit: false, toolErrors, actions },
         };
       }
 
@@ -476,7 +481,7 @@ export const processBookingChat = async (organization, messages, options = {}) =
         bookingPayload,
         noReply,
         handoff,
-        _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: false, toolErrors, actions },
+        _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, hitRoundLimit: false, toolErrors, actions },
       };
     }
 
@@ -530,7 +535,7 @@ export const processBookingChat = async (organization, messages, options = {}) =
     return {
       reply: `${preparedSummary}\n\n${SUMMARY_QUESTION}`,
       bookingPayload,
-      _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: true, toolErrors, actions },
+      _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, hitRoundLimit: true, toolErrors, actions },
     };
   }
   const reservationWasCreated = options.session?.reservationCreated === true;
@@ -540,6 +545,6 @@ export const processBookingChat = async (organization, messages, options = {}) =
         ? confirmedReply(depositCheckout)
         : "Lo siento, no pude completar el proceso. Por favor intenta de nuevo.",
     bookingPayload,
-    _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, hitRoundLimit: true, toolErrors, actions },
+    _meta: { rounds, toolsUsed: [...executedTools], inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, hitRoundLimit: true, toolErrors, actions },
   };
 };

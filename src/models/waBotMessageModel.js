@@ -27,6 +27,9 @@ const waBotMessageSchema = new mongoose.Schema(
     // Claude que generaron esta respuesta (puede ser >1 ronda de tool use).
     inputTokens: { type: Number },
     outputTokens: { type: Number },
+    // inputTokens excluye la caché; estos completan el costo real (desde 2026-11-02)
+    cacheReadTokens: { type: Number },
+    cacheWriteTokens: { type: Number },
 
     // Revisión manual (superadmin) — se aplica con updateMany a todos los
     // mensajes de una sesión, así el filtro parcial del TTL de abajo exime a
