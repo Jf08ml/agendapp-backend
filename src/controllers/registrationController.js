@@ -10,6 +10,7 @@ import Agent from "../models/agentModel.js";
 import Session from "../models/sessionModel.js";
 import membershipService from "../services/membershipService.js";
 import { notifyNewRegistration } from "../services/metaApiService.js";
+import { sanitizeBrowserEvent, sendMetaCapiEvent } from "../services/metaConversionsService.js";
 import sendResponse from "../utils/sendResponse.js";
 import getClientIp from "../utils/getClientIp.js";
 import { isValidSlug, isSlugAvailable, suggestSlugs } from "../utils/reservedSlugs.js";
@@ -46,9 +47,11 @@ const registrationController = {
   register: async (req, res) => {
     try {
       const { slug, businessName, ownerName, email, password, phone, turnstileToken,
-              default_country, timezone, currency, referralCode, businessVertical, attribution } = req.body;
+              default_country, timezone, currency, referralCode, businessVertical, attribution, metaEvent } = req.body;
       // UTM/fbclid con los que llegó desde la landing (opcional, saneado).
       const acquisition = sanitizeAttribution(attribution);
+      // event_id del Pixel y cookies de Meta del navegador (opcional, saneado).
+      const browserEvent = sanitizeBrowserEvent(metaEvent);
 
       // 1. Validar campos requeridos
       if (!slug || !businessName || !email || !password || !phone) {
@@ -155,6 +158,22 @@ const registrationController = {
 
       // Conversión para AgenditApp Oficina IA (nunca lanza; espera como mucho 2 s).
       await emitSignupCompleted({ organizationId: savedOrg._id, attribution: acquisition, occurredAt: savedOrg.createdAt });
+
+      // Registro para Meta (Conversions API), solo aquí: la cuenta ya existe.
+      // Con el event_id del navegador, Meta lo une al del Pixel y lo cuenta una
+      // vez. No se espera: nunca lanza y no debe retrasar la respuesta.
+      if (browserEvent) {
+        const ip = getClientIp(req);
+        sendMetaCapiEvent({
+          eventName: "CompleteRegistration",
+          ...browserEvent,
+          email: savedOrg.email,
+          phone: savedOrg.phoneNumber,
+          customData: { status: true },
+          clientIp: ip === "unknown" ? undefined : ip,
+          userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"].slice(0, 500) : undefined,
+        }).catch((err) => console.error("[register] CAPI:", err?.message || err));
+      }
 
       sendResponse(res, 201, {
         exchangeCode: code,

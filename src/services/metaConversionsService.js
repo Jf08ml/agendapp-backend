@@ -3,6 +3,43 @@ import { createHash } from "crypto";
 
 const GRAPH_API_VERSION = "v26.0";
 
+const EVENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Formato de las cookies _fbp y _fbc: fb.<subdominio>.<timestamp>.<valor>
+const FB_COOKIE = /^fb\.\d\.\d{10,16}\.[A-Za-z0-9_.-]{1,200}$/;
+
+function str(value, max = 300) {
+  return typeof value === "string" && value.trim() && value.length <= max ? value.trim() : undefined;
+}
+
+function sameSiteUrl(value) {
+  const raw = str(value, 1000);
+  if (!raw) return undefined;
+  try {
+    const url = new URL(raw);
+    return url.protocol === "https:" && (url.hostname === "agenditapp.com" || url.hostname.endsWith(".agenditapp.com"))
+      ? raw
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Datos del navegador que acompañan un evento: el event_id (el mismo que usa
+ * el Pixel, para que Meta no cuente el evento dos veces), la URL y las
+ * cookies _fbp/_fbc. Todo saneado; null si no hay un event_id válido.
+ */
+export function sanitizeBrowserEvent(input) {
+  const { event_id, event_source_url, fbp, fbc } = input || {};
+  if (typeof event_id !== "string" || !EVENT_ID.test(event_id)) return null;
+  return {
+    eventId: event_id,
+    eventSourceUrl: sameSiteUrl(event_source_url),
+    fbp: FB_COOKIE.test(str(fbp) ?? "") ? fbp : undefined,
+    fbc: FB_COOKIE.test(str(fbc) ?? "") ? fbc : undefined,
+  };
+}
+
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
