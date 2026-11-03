@@ -31,6 +31,9 @@ import Service from "../models/serviceModel.js";
 import Reservation from "../models/reservationModel.js";
 import Enrollment from "../models/enrollmentModel.js";
 import ServicePackage from "../models/servicePackageModel.js";
+import Client from "../models/clientModel.js";
+import "../models/classSessionModel.js"; // populate de Enrollment.sessionId
+import "../models/classModel.js"; // populate de ClassSession.classId
 import Order from "../models/orderModel.js";
 import { onlineBookingEmployeeError } from "../utils/onlineBooking.js";
 
@@ -587,6 +590,69 @@ export const listReceiptOrders = async (req, res) => {
             employee: r.employeeId?.names?.trim() || null,
             startDate: r.startDate,
             status: r.status,
+          })),
+        };
+      }
+    }
+
+    // Paquete vinculado (comprador, paquete y nivel). El comprador es un Client
+    // creado en el checkout (metadata.clientId); el nivel se resuelve contra los
+    // tiers actuales del paquete.
+    const packageOrders = orders.filter((o) => o.type === "package");
+    if (packageOrders.length) {
+      const clientIds = packageOrders.map((o) => o.metadata?.clientId).filter(Boolean);
+      const packageIds = packageOrders
+        .map((o) => o.metadata?.servicePackageId || o.refId)
+        .filter(Boolean);
+      const [clients, packages] = await Promise.all([
+        Client.find({ _id: { $in: clientIds } }).select("name phoneNumber documentId").lean(),
+        ServicePackage.find({ _id: { $in: packageIds } }).select("name tiers").lean(),
+      ]);
+      const clientById = new Map(clients.map((c) => [String(c._id), c]));
+      const packageById = new Map(packages.map((p) => [String(p._id), p]));
+      for (const o of packageOrders) {
+        const client = clientById.get(String(o.metadata?.clientId));
+        const pkg = packageById.get(String(o.metadata?.servicePackageId || o.refId));
+        if (!client && !pkg) continue;
+        const tier = o.metadata?.tierId
+          ? (pkg?.tiers || []).find((t) => String(t._id) === String(o.metadata.tierId))
+          : null;
+        o.linkedPackage = {
+          customerName: client?.name || "",
+          customerPhone: client?.phoneNumber || "",
+          customerDocumentId: client?.documentId || "",
+          packageName: pkg?.name || "",
+          tierLabel: tier?.label || null,
+        };
+      }
+    }
+
+    // Clase vinculada (asistentes, clase y fecha de la sesión).
+    const classGroupIds = orders.filter((o) => o.type === "class" && o.refId).map((o) => o.refId);
+    if (classGroupIds.length) {
+      const enrollments = await Enrollment.find({ groupId: { $in: classGroupIds } })
+        .populate({ path: "sessionId", select: "startDate classId", populate: { path: "classId", select: "name" } })
+        .select("groupId sessionId attendee status")
+        .lean();
+      const byGroup = new Map();
+      for (const e of enrollments) {
+        const key = String(e.groupId);
+        if (!byGroup.has(key)) byGroup.set(key, []);
+        byGroup.get(key).push(e);
+      }
+      for (const o of orders) {
+        if (o.type !== "class") continue;
+        const es = byGroup.get(String(o.refId));
+        if (!es?.length) continue;
+        o.linkedClass = {
+          customerName: es[0].attendee?.name || "",
+          customerPhone: es[0].attendee?.phone || "",
+          items: es.map((e) => ({
+            enrollmentId: e._id,
+            attendee: e.attendee?.name || "",
+            className: e.sessionId?.classId?.name || "",
+            startDate: e.sessionId?.startDate || null,
+            status: e.status,
           })),
         };
       }
