@@ -171,11 +171,16 @@ const sessionController = {
   // 🌐 Público: sesiones disponibles para reserva online
   getAvailable: async (req, res) => {
     try {
-      const { organizationId, classId, from, to } = req.query;
+      const { organizationId, classId, from, to, includeFull } = req.query;
       if (!organizationId) {
         return sendResponse(res, 400, null, "Se requiere organizationId");
       }
-      const sessions = await sessionService.getAvailable(organizationId, { classId, from, to });
+      const sessions = await sessionService.getAvailable(organizationId, {
+        classId,
+        from,
+        to,
+        includeFull: includeFull === "true",
+      });
       sendResponse(res, 200, sessions, "Sesiones disponibles obtenidas exitosamente");
     } catch (error) {
       sendResponse(res, 500, null, error.message);

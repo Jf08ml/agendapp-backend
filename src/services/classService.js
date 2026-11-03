@@ -260,10 +260,12 @@ const sessionService = {
   /**
    * Sesiones disponibles para reserva pública (status=open, fecha futura).
    */
-  async getAvailable(organizationId, { classId, from, to } = {}) {
+  // includeFull: también las llenas (el wizard las muestra como "sin cupo" al
+  // repetir una clase, en vez de que parezca que no hay sesión ese día).
+  async getAvailable(organizationId, { classId, from, to, includeFull = false } = {}) {
     const filter = {
       organizationId,
-      status: "open",
+      status: includeFull ? { $in: ["open", "full"] } : "open",
       startDate: { $gte: from ? new Date(from) : new Date() },
     };
     if (classId) filter.classId = classId;
