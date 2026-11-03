@@ -262,6 +262,23 @@ Hemos recibido tu solicitud de inscripción.
 
 Si tienes alguna pregunta, responde a este mensaje.`,
 
+      // 📚 Reserva de varias sesiones de una clase (un solo mensaje resumen).
+      // {{statusMessage}} dice si quedaron confirmadas o pendientes de aprobación.
+      classEnrollmentSeries: `📚 ¡Hola, {{names}}!
+
+{{statusMessage}}
+
+📚 Clase: *{{className}}*
+📍 Lugar: {{organization}}
+📍 Dirección: {{address}}
+
+🗓️ *Tus sesiones:*
+{{sessionsList}}
+
+💰 Valor: {{price}}
+{{cancelBlock}}
+¡Te esperamos!`,
+
       // 🔔 Recordatorio de clase
       classReminder: `🔔 ¡Hola, {{names}}!
 

@@ -212,9 +212,9 @@ export const createReceiptReservationCheckout = async (req, res) => {
 
 // POST /collection/receipt/class
 export const createReceiptClassCheckout = async (req, res) => {
-  const { sessionId, attendee, companion, notes, organizationId } = req.body;
+  const { sessionId, sessionIds, attendee, companion, notes, organizationId } = req.body;
 
-  if (!sessionId || !attendee?.name || !organizationId) {
+  if ((!sessionId && !sessionIds?.length) || !attendee?.name || !organizationId) {
     return sendResponse(res, 400, null, "Datos incompletos para el checkout de clase.");
   }
 
@@ -228,6 +228,7 @@ export const createReceiptClassCheckout = async (req, res) => {
     const hold = await enrollmentService.holdEnrollmentsForPayment({
       organizationId,
       sessionId,
+      sessionIds,
       attendee,
       companion,
       notes,

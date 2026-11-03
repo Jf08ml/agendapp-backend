@@ -6,13 +6,14 @@ const enrollmentController = {
   // 🌐 Público: cliente reserva desde la web
   createPublic: async (req, res) => {
     try {
-      const { organizationId, sessionId, attendee, companion, notes, clientPackageId } = req.body;
-      if (!organizationId || !sessionId || !attendee) {
-        return sendResponse(res, 400, null, "organizationId, sessionId y attendee son requeridos");
+      const { organizationId, sessionId, sessionIds, attendee, companion, notes, clientPackageId } = req.body;
+      if (!organizationId || (!sessionId && !sessionIds?.length) || !attendee) {
+        return sendResponse(res, 400, null, "organizationId, sessionIds y attendee son requeridos");
       }
       const enrollments = await enrollmentService.createPublicEnrollments({
         organizationId,
         sessionId,
+        sessionIds,
         attendee,
         companion,
         notes,

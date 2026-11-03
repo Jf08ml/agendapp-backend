@@ -55,6 +55,7 @@ const META_TEMPLATE_NAMES = {
   // 📚 Módulo de Clases
   classEnrollmentConfirmed:  "clase_confirmada",
   classEnrollmentPending:    "clase_pendiente",
+  classEnrollmentSeries:     "clases_inscritas",
   classEnrollmentCancelled:  "clase_cancelada",
   classReminder:             "recordatorio_clase",
   // 🎂 Cumpleaños
@@ -112,6 +113,7 @@ const VARIABLE_ORDER = {
   // 📚 Módulo de Clases
   clase_confirmada:        ["nombre_cliente", "nombre_clase", "fecha_clase", "hora_inicio", "hora_fin", "nombre_negocio", "direccion", "precio", "enlace_cancelacion"],
   clase_pendiente:         ["nombre_cliente", "nombre_clase", "fecha_clase", "hora_inicio", "hora_fin", "nombre_negocio", "precio"],
+  clases_inscritas:        ["nombre_cliente", "estado_inscripcion", "nombre_clase", "nombre_negocio", "direccion", "lista_sesiones", "precio", "enlace_cancelacion"],
   clase_cancelada:         ["nombre_cliente", "nombre_clase", "fecha_clase", "hora_inicio", "hora_fin", "nombre_negocio"],
   recordatorio_clase:      ["nombre_cliente", "nombre_clase", "fecha_clase", "hora_inicio", "hora_fin", "nombre_negocio", "direccion"],
   // 🎂 Cumpleaños
@@ -154,6 +156,8 @@ function buildMetaVarMap(data) {
     hora_inicio:          data.startTime          ?? "",
     hora_fin:             data.endTime            ?? "",
     precio:               data.price              ?? "",
+    estado_inscripcion:   data.statusMessage      ?? "",
+    lista_sesiones:       data.sessionsList       ?? "",
     beneficio:            data.beneficio          ?? "",
     // 🔁 Recordatorio de seguimiento entre servicios relacionados
     dias:                 String(data.days        ?? ""),

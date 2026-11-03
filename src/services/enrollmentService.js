@@ -5,6 +5,7 @@ import Enrollment from "../models/enrollmentModel.js";
 import ClassSession from "../models/classSessionModel.js";
 import Class from "../models/classModel.js";
 import Client from "../models/clientModel.js";
+import ClientPackage from "../models/clientPackageModel.js";
 import Organization from "../models/organizationModel.js";
 import WhatsappTemplate from "../models/whatsappTemplateModel.js";
 import { normalizePhoneNumber } from "../utils/phoneUtils.js";
@@ -99,40 +100,11 @@ async function findOrCreateClient(organizationId, attendee, org) {
 }
 
 /**
- * Envía WhatsApp de confirmación de inscripción a un asistente.
+ * Envía una plantilla de clases a un teléfono, respetando el toggle de la org.
  * Los errores son silenciosos (no deben fallar el flujo principal).
  */
-async function sendEnrollmentWhatsApp(templateType, organizationId, enrollment, session, classDoc, org) {
+async function sendClassTemplate(templateType, organizationId, phone, templateData) {
   try {
-    const phone = enrollment.attendee?.phone_e164 || enrollment.attendee?.phone;
-    if (!phone) return;
-
-    const tz = org.timezone || "America/Bogota";
-    const startMoment = moment(session.startDate).tz(tz);
-    const endMoment = moment(session.endDate).tz(tz);
-
-    const templateData = {
-      names: enrollment.attendee.name,
-      organization: org.name,
-      address: org.address || "",
-      className: classDoc.name,
-      date: startMoment.format("dddd D [de] MMMM [de] YYYY"),
-      startTime: startMoment.format("h:mm A"),
-      endTime: endMoment.format("h:mm A"),
-      // Si la clase tiene el precio oculto al cliente, no lo revelamos por WhatsApp.
-      price: classDoc.hidePrice
-        ? "Consultar"
-        : `$${enrollment.totalPrice.toLocaleString("es-CO")}`,
-      discount:
-        enrollment.discountPercent > 0
-          ? `🎉 Descuento grupal del ${enrollment.discountPercent}% aplicado\n`
-          : "",
-      cancelLink: enrollment.cancellationLink || "",
-      cancelBlock: enrollment.cancellationLink
-        ? `\n❌ Si necesitas cancelar tu inscripción, hazlo aquí:\n${enrollment.cancellationLink}\n`
-        : "",
-    };
-
     // Respetar el toggle de envío configurado por la organización
     const templateDoc = await WhatsappTemplate.findOne({ organizationId });
     if (templateDoc?.enabledTypes?.[templateType] === false) {
@@ -161,160 +133,384 @@ async function sendEnrollmentWhatsApp(templateType, organizationId, enrollment, 
   }
 }
 
+/**
+ * Envía WhatsApp de una inscripción (una sesión) a un asistente.
+ */
+async function sendEnrollmentWhatsApp(templateType, organizationId, enrollment, session, classDoc, org) {
+  const phone = enrollment.attendee?.phone_e164 || enrollment.attendee?.phone;
+  if (!phone) return;
+
+  const tz = org.timezone || "America/Bogota";
+  const startMoment = moment(session.startDate).tz(tz);
+  const endMoment = moment(session.endDate).tz(tz);
+
+  await sendClassTemplate(templateType, organizationId, phone, {
+    names: enrollment.attendee.name,
+    organization: org.name,
+    address: org.address || "",
+    className: classDoc.name,
+    date: startMoment.format("dddd D [de] MMMM [de] YYYY"),
+    startTime: startMoment.format("h:mm A"),
+    endTime: endMoment.format("h:mm A"),
+    // Si la clase tiene el precio oculto al cliente, no lo revelamos por WhatsApp.
+    price: classDoc.hidePrice
+      ? "Consultar"
+      : `$${enrollment.totalPrice.toLocaleString("es-CO")}`,
+    discount:
+      enrollment.discountPercent > 0
+        ? `🎉 Descuento grupal del ${enrollment.discountPercent}% aplicado\n`
+        : "",
+    cancelLink: enrollment.cancellationLink || "",
+    cancelBlock: enrollment.cancellationLink
+      ? `\n❌ Si necesitas cancelar tu inscripción, hazlo aquí:\n${enrollment.cancellationLink}\n`
+      : "",
+  });
+}
+
+/**
+ * Un solo WhatsApp con todas las sesiones que reservó un asistente
+ * (plantilla classEnrollmentSeries), en vez de un mensaje por sesión.
+ * @param {"confirmed"|"pending"} status
+ * @param {Array<{ enrollment, session }>} items  - del mismo asistente, misma clase
+ */
+async function sendEnrollmentSeriesWhatsApp(status, organizationId, items, classDoc, org) {
+  const first = items[0].enrollment;
+  const phone = first.attendee?.phone_e164 || first.attendee?.phone;
+  if (!phone) return;
+
+  const tz = org.timezone || "America/Bogota";
+  const sorted = [...items].sort(
+    (a, b) => new Date(a.session.startDate) - new Date(b.session.startDate)
+  );
+  const sessionsList = sorted
+    .map(({ session }) => {
+      const start = moment(session.startDate).tz(tz);
+      const end = moment(session.endDate).tz(tz);
+      return `• ${start.format("dddd D [de] MMMM")}, ${start.format("h:mm A")} - ${end.format("h:mm A")}`;
+    })
+    .join("\n");
+
+  const total = items.reduce((sum, { enrollment }) => sum + (enrollment.totalPrice || 0), 0);
+  const allCovered = items.every(({ enrollment }) => !!enrollment.clientPackageId);
+  const price = classDoc.hidePrice
+    ? "Consultar"
+    : allCovered
+      ? "Incluido en tu paquete"
+      : `$${total.toLocaleString("es-CO")} en total`;
+
+  // Cualquier enlace del grupo abre todas sus sesiones (findEnrollmentsByToken).
+  const cancelLink = first.cancellationLink || "";
+
+  await sendClassTemplate("classEnrollmentSeries", organizationId, phone, {
+    names: first.attendee.name,
+    statusMessage:
+      status === "confirmed"
+        ? `Tus ${items.length} sesiones quedaron *confirmadas*.`
+        : `Recibimos tu solicitud para ${items.length} sesiones. Están *pendientes de aprobación*; te avisaremos cuando sean confirmadas.`,
+    organization: org.name,
+    address: org.address || "",
+    className: classDoc.name,
+    sessionsList,
+    price,
+    cancelLink,
+    cancelBlock: cancelLink
+      ? `\n❌ Puedes cancelar todas tus sesiones o solo algunas aquí:\n${cancelLink}\n`
+      : "",
+  });
+}
+
+/**
+ * Avisa por WhatsApp a cada asistente de una reserva: con una sesión usa la
+ * plantilla de siempre (confirmada/pendiente); con varias, un único resumen.
+ * @param {"confirmed"|"pending"} status
+ * @param {Array<{ enrollment, session }>} items
+ */
+async function notifyEnrollmentGroup(status, organizationId, items, classDoc, org) {
+  const byAttendee = new Map();
+  for (const item of items) {
+    const e = item.enrollment;
+    const key = String(e.clientId || e.attendee?.phone_e164 || e.attendee?.name || e._id);
+    if (!byAttendee.has(key)) byAttendee.set(key, []);
+    byAttendee.get(key).push(item);
+  }
+
+  const singleTemplate = status === "confirmed" ? "classEnrollmentConfirmed" : "classEnrollmentPending";
+  for (const group of byAttendee.values()) {
+    if (group.length === 1) {
+      await sendEnrollmentWhatsApp(singleTemplate, organizationId, group[0].enrollment, group[0].session, classDoc, org);
+    } else {
+      await sendEnrollmentSeriesWhatsApp(status, organizationId, group, classDoc, org);
+    }
+  }
+}
+
+// ══════════════════════════════════════════════════════
+// RESERVA DE VARIAS SESIONES
+// ══════════════════════════════════════════════════════
+
+// Tope de sesiones por reserva pública (un mes de clases diarias cabe de sobra).
+const MAX_SESSIONS_PER_BOOKING = 31;
+
+/**
+ * Sesiones de la reserva: `sessionIds` (varias) o `sessionId` (una, contrato
+ * anterior). Sin duplicados.
+ */
+function normalizeSessionIds({ sessionId, sessionIds }) {
+  const raw = Array.isArray(sessionIds) && sessionIds.length ? sessionIds : [sessionId];
+  const ids = [...new Set(raw.filter(Boolean).map(String))];
+  if (!ids.length) throw new Error("Selecciona al menos una sesión");
+  if (ids.length > MAX_SESSIONS_PER_BOOKING) {
+    throw new Error(`Puedes reservar hasta ${MAX_SESSIONS_PER_BOOKING} sesiones a la vez`);
+  }
+  return ids;
+}
+
+function sessionDateLabel(session, tz) {
+  const start = moment(session.startDate).tz(tz);
+  return `${start.format("dddd D [de] MMMM")} a las ${start.format("h:mm A")}`;
+}
+
+/**
+ * Carga y valida las sesiones de una reserva pública: de la organización, de
+ * una misma clase, no canceladas y por empezar. Ordenadas por fecha.
+ */
+async function loadBookableSessions(organizationId, sessionIds, tz) {
+  const sessions = await ClassSession.find({ _id: { $in: sessionIds } })
+    .populate("classId")
+    .sort({ startDate: 1 });
+  if (sessions.length !== sessionIds.length) throw new Error("Sesión no encontrada");
+
+  const now = new Date();
+  for (const s of sessions) {
+    if (s.organizationId.toString() !== organizationId.toString()) {
+      throw new Error("La sesión no pertenece a esta organización");
+    }
+    const which = sessions.length > 1 ? ` (${sessionDateLabel(s, tz)})` : "";
+    if (s.status === "cancelled") throw new Error(`Esta sesión fue cancelada${which}`);
+    if (s.status === "completed" || new Date(s.startDate) <= now) {
+      throw new Error(`Esta sesión ya finalizó${which}`);
+    }
+  }
+
+  const classId = String(sessions[0].classId?._id);
+  if (sessions.some((s) => String(s.classId?._id) !== classId)) {
+    throw new Error("Todas las sesiones deben ser de la misma clase");
+  }
+  return { sessions, classDoc: sessions[0].classId };
+}
+
+/**
+ * Devuelve `numPeople` cupos a cada sesión y la re-abre si estaba llena.
+ */
+async function releaseSeats(sessionIds, numPeople) {
+  for (const id of sessionIds) {
+    const s = await ClassSession.findByIdAndUpdate(
+      id,
+      { $inc: { enrolledCount: -numPeople } },
+      { new: true }
+    );
+    if (s?.status === "full" && s.enrolledCount < s.capacity) {
+      s.status = "open";
+      await s.save();
+    }
+  }
+}
+
+/**
+ * Reserva `numPeople` cupos en cada sesión (atómico por sesión). Todo o nada:
+ * si una sesión no tiene cupo, devuelve los ya tomados y lanza el error.
+ */
+async function reserveSeats(sessions, numPeople, tz) {
+  const reserved = [];
+  for (const s of sessions) {
+    const updated = await ClassSession.findOneAndUpdate(
+      {
+        _id: s._id,
+        status: { $in: ["open"] },
+        $expr: { $lte: [{ $add: ["$enrolledCount", numPeople] }, "$capacity"] },
+      },
+      { $inc: { enrolledCount: numPeople } },
+      { new: true }
+    );
+    if (!updated) {
+      await releaseSeats(reserved.map((r) => r._id), numPeople);
+      throw new Error(
+        sessions.length > 1
+          ? `No hay cupos suficientes para la sesión del ${sessionDateLabel(s, tz)}`
+          : "No hay cupos suficientes disponibles para esta sesión"
+      );
+    }
+    // Si se llenó el cupo, actualizar status a 'full'
+    if (updated.enrolledCount >= updated.capacity) {
+      updated.status = "full";
+      await updated.save();
+    }
+    reserved.push(updated);
+  }
+  return reserved;
+}
+
+/**
+ * Con varias sesiones el paquete debe cubrirlas todas (la UI limita la
+ * selección a los créditos): se valida antes de tomar cupos para no cobrar a
+ * precio normal las que excedan.
+ */
+async function assertPackageCredits(clientPackageId, classId, needed) {
+  const pkg = await ClientPackage.findOne({
+    _id: clientPackageId,
+    status: { $in: ["active", "exhausted"] },
+  }).lean();
+  const entry = (pkg?.classes || []).find((c) => String(c.classId) === String(classId));
+  const remaining = entry?.sessionsRemaining ?? 0;
+  if (remaining < needed) {
+    throw new Error(
+      `Tu paquete tiene ${remaining} ${remaining === 1 ? "crédito" : "créditos"} para esta clase y elegiste ${needed} sesiones. Quita sesiones o reserva sin el paquete.`
+    );
+  }
+}
+
 // ══════════════════════════════════════════════════════
 // CREACIÓN DE INSCRIPCIONES (flujo público)
 // ══════════════════════════════════════════════════════
 
 /**
- * Crea una o dos inscripciones (titular + acompañante opcional).
- * Valida cupo, calcula descuento, incrementa enrolledCount atómicamente.
+ * Crea las inscripciones de una reserva pública: titular + acompañante
+ * opcional, en una o varias sesiones de la misma clase (ej: todo el mes).
+ * Valida cupo en cada sesión (todo o nada), calcula descuento e incrementa
+ * enrolledCount atómicamente.
  *
  * @param {Object} params
  * @param {string} params.organizationId
- * @param {string} params.sessionId
+ * @param {string[]} [params.sessionIds] - sesiones a reservar (o `sessionId` si es una)
+ * @param {string} [params.sessionId]
  * @param {Object} params.attendee       - { name, phone, phone_e164, phone_country, email }
  * @param {Object} [params.companion]    - datos del acompañante (opcional)
  * @param {string} [params.notes]
  */
-async function createPublicEnrollments({ organizationId, sessionId, attendee, companion, notes, clientPackageId }) {
+async function createPublicEnrollments({ organizationId, sessionId, sessionIds, attendee, companion, notes, clientPackageId }) {
   const numPeople = companion ? 2 : 1;
 
   // 0. Verificar que el plan incluya el módulo de clases
   await assertClassesModule(organizationId);
 
-  // 1. Cargar sesión y clase
-  const session = await ClassSession.findById(sessionId).populate("classId");
-  if (!session) throw new Error("Sesión no encontrada");
-  if (session.status === "cancelled") throw new Error("Esta sesión fue cancelada");
-  if (session.status === "completed") throw new Error("Esta sesión ya finalizó");
-  if (session.organizationId.toString() !== organizationId.toString()) {
-    throw new Error("La sesión no pertenece a esta organización");
+  // 1. Cargar y validar sesiones
+  const ids = normalizeSessionIds({ sessionId, sessionIds });
+  const org = await Organization.findById(organizationId);
+  const tz = org?.timezone || "America/Bogota";
+  const { sessions, classDoc } = await loadBookableSessions(organizationId, ids, tz);
+
+  // 📦 Con varias sesiones el paquete debe cubrirlas todas
+  if (clientPackageId && sessions.length > 1) {
+    await assertPackageCredits(clientPackageId, classDoc._id, sessions.length);
   }
 
-  const classDoc = session.classId;
-
-  // 2. Reservar cupos atómicamente
-  const updatedSession = await ClassSession.findOneAndUpdate(
-    {
-      _id: sessionId,
-      status: { $in: ["open"] },
-      $expr: { $lte: [{ $add: ["$enrolledCount", numPeople] }, "$capacity"] },
-    },
-    { $inc: { enrolledCount: numPeople } },
-    { new: true }
-  );
-  if (!updatedSession) {
-    throw new Error("No hay cupos suficientes disponibles para esta sesión");
-  }
-
-  // Si se llenó el cupo, actualizar status a 'full'
-  if (updatedSession.enrolledCount >= updatedSession.capacity) {
-    updatedSession.status = "full";
-    await updatedSession.save();
-  }
+  // 2. Reservar cupos atómicamente (todo o nada)
+  const reservedSessions = await reserveSeats(sessions, numPeople, tz);
 
   // 3. Calcular precios
   const discountPercent = computeDiscountPercent(classDoc.groupDiscount, numPeople);
   const totalPrice = computeTotalPrice(classDoc.pricePerPerson, discountPercent);
 
   // 4. Determinar modo de aprobación de la organización
-  const org = await Organization.findById(organizationId);
   const approvalMode = org?.classReservationPolicy === "auto_if_available" ? "auto" : "manual";
   const initialStatus = approvalMode === "auto" ? "confirmed" : "pending";
 
-  // 5. groupId compartido si hay acompañante
-  const groupId = companion ? new Types.ObjectId() : null;
+  // 5. groupId compartido si hay acompañante o varias sesiones: la aprobación,
+  //    la cancelación por enlace y los avisos operan sobre el grupo.
+  const groupId = companion || reservedSessions.length > 1 ? new Types.ObjectId() : null;
 
   // 6. Buscar o crear clientes
   const mainClient = await findOrCreateClient(organizationId, attendee, org);
   const companionClient = companion ? await findOrCreateClient(organizationId, companion, org) : null;
 
-  // 7. Crear inscripciones
+  // 7. Crear inscripciones (una por persona y sesión)
   const enrollmentsData = [{ attendeeData: attendee, client: mainClient }];
   if (companion) {
     enrollmentsData.push({ attendeeData: companion, client: companionClient });
   }
 
   const created = [];
-  for (let i = 0; i < enrollmentsData.length; i++) {
-    const { attendeeData, client } = enrollmentsData[i];
-    const { token, hash } = generateToken();
-    const normalized = normalizePhoneNumber(
-      attendeeData.phone,
-      attendeeData.phone_country || "CO"
-    );
+  const items = [];
+  for (const session of reservedSessions) {
+    for (let i = 0; i < enrollmentsData.length; i++) {
+      const { attendeeData, client } = enrollmentsData[i];
+      const { token, hash } = generateToken();
+      const normalized = normalizePhoneNumber(
+        attendeeData.phone,
+        attendeeData.phone_country || "CO"
+      );
 
-    const enrollment = new Enrollment({
-      sessionId,
-      classId: classDoc._id,
-      organizationId,
-      groupId,
-      clientId: client?._id || null,
-      attendee: {
-        name: attendeeData.name,
-        phone: attendeeData.phone,
-        phone_e164: normalized?.phone_e164 || attendeeData.phone,
-        phone_country: attendeeData.phone_country || null,
-        email: attendeeData.email || null,
-      },
-      pricePerPerson: classDoc.pricePerPerson,
-      discountPercent,
-      totalPrice,
-      status: initialStatus,
-      approvalMode,
-      cancelTokenHash: hash,
-      cancellationLink: generateClassCancellationLink(token, org),
-      notes: notes || "",
-    });
+      const enrollment = new Enrollment({
+        sessionId: session._id,
+        classId: classDoc._id,
+        organizationId,
+        groupId,
+        clientId: client?._id || null,
+        attendee: {
+          name: attendeeData.name,
+          phone: attendeeData.phone,
+          phone_e164: normalized?.phone_e164 || attendeeData.phone,
+          phone_country: attendeeData.phone_country || null,
+          email: attendeeData.email || null,
+        },
+        pricePerPerson: classDoc.pricePerPerson,
+        discountPercent,
+        totalPrice,
+        status: initialStatus,
+        approvalMode,
+        cancelTokenHash: hash,
+        cancellationLink: generateClassCancellationLink(token, org),
+        notes: notes || "",
+      });
 
-    await enrollment.save();
+      await enrollment.save();
 
-    // 📦 Cada persona usa SU PROPIO paquete:
-    //    - Titular (i===0): el paquete indicado en la reserva.
-    //    - Acompañante: su propio paquete activo para la clase, si tiene.
-    let pkgToUse = null;
-    if (i === 0) {
-      pkgToUse = clientPackageId || null;
-    } else if (client?._id) {
-      const ownPkgs = await packageService.getActivePackagesForClass(client._id, classDoc._id, organizationId);
-      pkgToUse = ownPkgs?.[0]?._id || null;
-    }
-
-    if (pkgToUse) {
-      try {
-        await packageService.consumeClassSession(pkgToUse, classDoc._id, enrollment._id);
-        enrollment.clientPackageId = pkgToUse;
-        enrollment.totalPrice = 0; // cubierta por el paquete
-        await enrollment.save(); // pre-save recalcula paymentStatus = 'free'
-      } catch {
-        // sin créditos disponibles → se mantiene el precio normal
+      // 📦 Cada persona usa SU PROPIO paquete:
+      //    - Titular (i===0): el paquete indicado en la reserva.
+      //    - Acompañante: su propio paquete activo para la clase, si tiene.
+      let pkgToUse = null;
+      if (i === 0) {
+        pkgToUse = clientPackageId || null;
+      } else if (client?._id) {
+        const ownPkgs = await packageService.getActivePackagesForClass(client._id, classDoc._id, organizationId);
+        pkgToUse = ownPkgs?.[0]?._id || null;
       }
-    }
 
-    // Guardar el token en el objeto para enviarlo en la respuesta (solo en creación)
-    enrollment._cancelToken = token;
-    created.push(enrollment);
+      if (pkgToUse) {
+        try {
+          await packageService.consumeClassSession(pkgToUse, classDoc._id, enrollment._id);
+          enrollment.clientPackageId = pkgToUse;
+          enrollment.totalPrice = 0; // cubierta por el paquete
+          await enrollment.save(); // pre-save recalcula paymentStatus = 'free'
+        } catch {
+          // sin créditos disponibles → se mantiene el precio normal
+        }
+      }
+
+      // Guardar el token en el objeto para enviarlo en la respuesta (solo en creación)
+      enrollment._cancelToken = token;
+      created.push(enrollment);
+      items.push({ enrollment, session });
+    }
   }
 
-  // 8. Enviar WhatsApp de acuse de recibo.
+  // 8. Enviar WhatsApp de acuse de recibo (un resumen por asistente si son varias sesiones).
   //    - Auto-aprobada → confirmación.
   //    - Aprobación manual → acuse "pendiente"; la confirmación se envía al aprobar.
-  const ackTemplate = initialStatus === "confirmed"
-    ? "classEnrollmentConfirmed"
-    : "classEnrollmentPending";
-  for (const enrollment of created) {
-    await sendEnrollmentWhatsApp(ackTemplate, organizationId, enrollment, updatedSession, classDoc, org);
-  }
+  await notifyEnrollmentGroup(initialStatus, organizationId, items, classDoc, org);
 
   // 9. Notificar al admin (BD + push). Silencioso para no afectar el flujo.
   try {
     const attendeeName = attendee.name;
+    const what = reservedSessions.length > 1
+      ? `${reservedSessions.length} sesiones de ${classDoc.name}`
+      : classDoc.name;
     const title = initialStatus === "confirmed"
       ? "Nueva inscripción a clase"
       : "Nueva inscripción pendiente";
     const message = initialStatus === "confirmed"
-      ? `${attendeeName} se inscribió en ${classDoc.name}`
-      : `${attendeeName} solicitó inscribirse en ${classDoc.name}. Pendiente de aprobación.`;
+      ? `${attendeeName} se inscribió en ${what}`
+      : `${attendeeName} solicitó inscribirse en ${what}. Pendiente de aprobación.`;
 
     await notificationService.createNotification({
       title,
@@ -476,23 +672,25 @@ async function approveEnrollment(enrollmentId) {
 
   const org = await Organization.findById(enrollment.organizationId);
 
-  // Aprobar toda la inscripción de grupo si corresponde
+  // Aprobar toda la inscripción de grupo si corresponde (acompañante y/o
+  // varias sesiones). Cada una con SU sesión: antes el aviso usaba la de la
+  // inscripción aprobada para todo el grupo.
   const toApprove = enrollment.groupId
-    ? await Enrollment.find({ groupId: enrollment.groupId, status: "pending" })
+    ? await Enrollment.find({ groupId: enrollment.groupId, status: "pending" }).populate("sessionId")
     : [enrollment];
 
   for (const e of toApprove) {
     e.status = "confirmed";
     await e.save();
-    await sendEnrollmentWhatsApp(
-      "classEnrollmentConfirmed",
-      e.organizationId,
-      e,
-      enrollment.sessionId,
-      enrollment.classId,
-      org
-    );
   }
+
+  await notifyEnrollmentGroup(
+    "confirmed",
+    enrollment.organizationId,
+    toApprove.map((e) => ({ enrollment: e, session: e.sessionId })),
+    enrollment.classId,
+    org
+  );
 
   return toApprove;
 }
@@ -710,45 +908,27 @@ async function addPayment(enrollmentId, paymentData) {
  * (Mercado Pago) y la confirmación la dispara el webhook. Si el pago no se
  * completa, `releaseEnrollmentHold` libera el cupo.
  *
- * Devuelve { created, totalPriceSum, groupId, classDoc, session, org }.
+ * Acepta varias sesiones de la misma clase (`sessionIds`): un solo grupo y un
+ * solo depósito por la suma.
+ *
+ * Devuelve { created, totalPriceSum, groupId, classDoc, sessions, org }.
  */
-async function holdEnrollmentsForPayment({ organizationId, sessionId, attendee, companion, notes }) {
+async function holdEnrollmentsForPayment({ organizationId, sessionId, sessionIds, attendee, companion, notes }) {
   const numPeople = companion ? 2 : 1;
 
   await assertClassesModule(organizationId);
 
-  const session = await ClassSession.findById(sessionId).populate("classId");
-  if (!session) throw new Error("Sesión no encontrada");
-  if (session.status === "cancelled") throw new Error("Esta sesión fue cancelada");
-  if (session.status === "completed") throw new Error("Esta sesión ya finalizó");
-  if (session.organizationId.toString() !== organizationId.toString()) {
-    throw new Error("La sesión no pertenece a esta organización");
-  }
+  const ids = normalizeSessionIds({ sessionId, sessionIds });
+  const org = await Organization.findById(organizationId);
+  const tz = org?.timezone || "America/Bogota";
+  const { sessions, classDoc } = await loadBookableSessions(organizationId, ids, tz);
 
-  const classDoc = session.classId;
-
-  // Reservar cupos atómicamente (hold)
-  const updatedSession = await ClassSession.findOneAndUpdate(
-    {
-      _id: sessionId,
-      status: { $in: ["open"] },
-      $expr: { $lte: [{ $add: ["$enrolledCount", numPeople] }, "$capacity"] },
-    },
-    { $inc: { enrolledCount: numPeople } },
-    { new: true }
-  );
-  if (!updatedSession) {
-    throw new Error("No hay cupos suficientes disponibles para esta sesión");
-  }
-  if (updatedSession.enrolledCount >= updatedSession.capacity) {
-    updatedSession.status = "full";
-    await updatedSession.save();
-  }
+  // Reservar cupos atómicamente en cada sesión (hold, todo o nada)
+  const reservedSessions = await reserveSeats(sessions, numPeople, tz);
 
   const discountPercent = computeDiscountPercent(classDoc.groupDiscount, numPeople);
   const totalPricePerPerson = computeTotalPrice(classDoc.pricePerPerson, discountPercent);
 
-  const org = await Organization.findById(organizationId);
   const approvalMode = org?.classReservationPolicy === "auto_if_available" ? "auto" : "manual";
 
   // groupId SIEMPRE (referenciamos el grupo desde el Order, aunque sea 1 persona)
@@ -756,42 +936,49 @@ async function holdEnrollmentsForPayment({ organizationId, sessionId, attendee, 
 
   const attendeesData = [attendee];
   if (companion) attendeesData.push(companion);
+  const clients = [];
+  for (const attendeeData of attendeesData) {
+    clients.push(await findOrCreateClient(organizationId, attendeeData, org));
+  }
 
   const created = [];
-  for (const attendeeData of attendeesData) {
-    const client = await findOrCreateClient(organizationId, attendeeData, org);
-    const { token, hash } = generateToken();
-    const normalized = normalizePhoneNumber(attendeeData.phone, attendeeData.phone_country || "CO");
+  for (const session of reservedSessions) {
+    for (let i = 0; i < attendeesData.length; i++) {
+      const attendeeData = attendeesData[i];
+      const client = clients[i];
+      const { token, hash } = generateToken();
+      const normalized = normalizePhoneNumber(attendeeData.phone, attendeeData.phone_country || "CO");
 
-    const enrollment = new Enrollment({
-      sessionId,
-      classId: classDoc._id,
-      organizationId,
-      groupId,
-      clientId: client?._id || null,
-      attendee: {
-        name: attendeeData.name,
-        phone: attendeeData.phone,
-        phone_e164: normalized?.phone_e164 || attendeeData.phone,
-        phone_country: attendeeData.phone_country || null,
-        email: attendeeData.email || null,
-      },
-      pricePerPerson: classDoc.pricePerPerson,
-      discountPercent,
-      totalPrice: totalPricePerPerson,
-      status: "pending_payment",
-      approvalMode,
-      cancelTokenHash: hash,
-      cancellationLink: generateClassCancellationLink(token, org),
-      notes: notes || "",
-    });
-    await enrollment.save();
-    created.push(enrollment);
+      const enrollment = new Enrollment({
+        sessionId: session._id,
+        classId: classDoc._id,
+        organizationId,
+        groupId,
+        clientId: client?._id || null,
+        attendee: {
+          name: attendeeData.name,
+          phone: attendeeData.phone,
+          phone_e164: normalized?.phone_e164 || attendeeData.phone,
+          phone_country: attendeeData.phone_country || null,
+          email: attendeeData.email || null,
+        },
+        pricePerPerson: classDoc.pricePerPerson,
+        discountPercent,
+        totalPrice: totalPricePerPerson,
+        status: "pending_payment",
+        approvalMode,
+        cancelTokenHash: hash,
+        cancellationLink: generateClassCancellationLink(token, org),
+        notes: notes || "",
+      });
+      await enrollment.save();
+      created.push(enrollment);
+    }
   }
 
   const totalPriceSum = created.reduce((sum, e) => sum + (e.totalPrice || 0), 0);
 
-  return { created, totalPriceSum, groupId, classDoc, session: updatedSession, org };
+  return { created, totalPriceSum, groupId, classDoc, sessions: reservedSessions, org };
 }
 
 /**
@@ -818,17 +1005,27 @@ async function confirmPaidEnrollmentGroup(groupId, { depositAmount = 0 } = {}) {
       e.payments.push({ amount: share, method: "card", note: "Depósito (Mercado Pago)" });
     }
     await e.save(); // pre-save recalcula paymentStatus
-
-    const ackTemplate = e.status === "confirmed" ? "classEnrollmentConfirmed" : "classEnrollmentPending";
-    await sendEnrollmentWhatsApp(ackTemplate, e.organizationId, e, e.sessionId, e.classId, org);
     confirmed.push(e);
   }
 
+  // Acuse por WhatsApp (un resumen por asistente si son varias sesiones).
+  // Todo el grupo comparte approvalMode → mismo estado.
+  const first = enrollments[0];
+  await notifyEnrollmentGroup(
+    first.status,
+    first.organizationId,
+    enrollments.map((e) => ({ enrollment: e, session: e.sessionId })),
+    first.classId,
+    org
+  );
+
   // Notificar al admin (silencioso)
   try {
-    const first = enrollments[0];
     const attendeeName = first.attendee?.name || "Un cliente";
-    const className = first.classId?.name || "una clase";
+    const sessionCount = new Set(enrollments.map((e) => String(e.sessionId?._id || e.sessionId))).size;
+    const className = sessionCount > 1
+      ? `${sessionCount} sesiones de ${first.classId?.name || "una clase"}`
+      : first.classId?.name || "una clase";
     const isAuto = first.approvalMode === "auto";
     const title = isAuto ? "Nueva inscripción a clase" : "Nueva inscripción pendiente";
     const message = isAuto

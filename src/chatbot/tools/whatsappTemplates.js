@@ -76,6 +76,10 @@ const TEMPLATE_TYPES = {
     label: "Confirmación de inscripción a clase grupal",
     variables: ["{{names}}", "{{organization}}"],
   },
+  classEnrollmentSeries: {
+    label: "Resumen al reservar varias sesiones de una clase grupal",
+    variables: ["{{names}}", "{{statusMessage}}", "{{className}}", "{{organization}}", "{{address}}", "{{sessionsList}}", "{{price}}", "{{cancelBlock}}"],
+  },
   classEnrollmentCancelled: {
     label: "Cancelación de inscripción a clase grupal",
     variables: ["{{names}}", "{{organization}}"],

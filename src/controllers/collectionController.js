@@ -233,9 +233,9 @@ export const createReservationCheckout = async (req, res) => {
 // en pending_payment, calcula el depósito (config propia de clases), crea la
 // preference de MP y devuelve el checkout. La confirmación la da el webhook.
 export const createClassCheckout = async (req, res) => {
-  const { sessionId, attendee, companion, notes, organizationId } = req.body;
+  const { sessionId, sessionIds, attendee, companion, notes, organizationId } = req.body;
 
-  if (!sessionId || !attendee?.name || !organizationId) {
+  if ((!sessionId && !sessionIds?.length) || !attendee?.name || !organizationId) {
     return sendResponse(res, 400, null, "Datos incompletos para el checkout de clase.");
   }
 
@@ -246,10 +246,11 @@ export const createClassCheckout = async (req, res) => {
       return sendResponse(res, 400, null, "La organización no tiene Mercado Pago conectado.");
     }
 
-    // Retener cupo + crear inscripciones en pending_payment.
+    // Retener cupo (en cada sesión) + crear inscripciones en pending_payment.
     const hold = await enrollmentService.holdEnrollmentsForPayment({
       organizationId,
       sessionId,
+      sessionIds,
       attendee,
       companion,
       notes,
@@ -276,7 +277,10 @@ export const createClassCheckout = async (req, res) => {
     const pref = await buildAndAttachCheckout({
       org,
       order,
-      title: `Depósito de clase — ${hold.classDoc?.name || org.name}`,
+      title:
+        hold.sessions.length > 1
+          ? `Depósito de ${hold.sessions.length} clases — ${hold.classDoc?.name || org.name}`
+          : `Depósito de clase — ${hold.classDoc?.name || org.name}`,
       expiresAt,
     });
 
