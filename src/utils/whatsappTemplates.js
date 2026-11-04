@@ -193,7 +193,9 @@ Has completado tu meta de servicios en *{{organization}}*.
 
 🏅 Tu recompensa: *{{reward}}*
 
-Preséntate en tu próxima visita y reclama tu beneficio. ¡Gracias por tu fidelidad!`,
+Preséntate en tu próxima visita y reclama tu beneficio. ¡Gracias por tu fidelidad!
+
+💳 Tu tarjeta de fidelidad: {{cardUrl}}`,
 
       // 🎁 Premio por completar meta de referidos
       loyaltyReferralReward: `🎉 ¡Felicitaciones, {{names}}!
@@ -202,7 +204,9 @@ Has alcanzado tu meta de referidos en *{{organization}}*.
 
 🎁 Tu recompensa: *{{reward}}*
 
-Preséntate en tu próxima visita y reclama tu beneficio. ¡Gracias por recomendar nuestros servicios!`,
+Preséntate en tu próxima visita y reclama tu beneficio. ¡Gracias por recomendar nuestros servicios!
+
+💳 Tu tarjeta de fidelidad: {{cardUrl}}`,
 
       // 📊 Progreso de servicios (registro sin completar meta aún)
       loyaltyServiceProgress: `✅ ¡Hola, {{names}}!
@@ -210,6 +214,8 @@ Preséntate en tu próxima visita y reclama tu beneficio. ¡Gracias por recomend
 Se registró tu servicio en *{{organization}}*.
 
 📊 Llevas *{{currentCount}}* — te faltan *{{remaining}}* para tu próximo premio: *{{nextReward}}*.
+
+💳 Mira tu tarjeta: {{cardUrl}}
 
 ¡Gracias por tu preferencia! 💖`,
 
@@ -219,6 +225,8 @@ Se registró tu servicio en *{{organization}}*.
 Se registró tu referido en *{{organization}}*.
 
 📊 Llevas *{{currentCount}}* — te faltan *{{remaining}}* para tu próximo premio: *{{nextReward}}*.
+
+💳 Mira tu tarjeta: {{cardUrl}}
 
 ¡Gracias por recomendarnos! 🎁`,
 

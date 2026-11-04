@@ -1,5 +1,6 @@
 import express from "express";
 import clientController from "../controllers/clientController.js";
+import loyaltyCardController from "../controllers/loyaltyCardController.js";
 import { verifyToken } from "../middleware/authMiddleware.js";
 import { organizationResolver } from "../middleware/organizationResolver.js";
 
@@ -31,6 +32,9 @@ router.get(
 );
 // Antes de "/:id" para que "follow-ups" no se interprete como un id de cliente
 router.get("/follow-ups", organizationResolver, verifyToken, clientController.getOrgFollowUps);
+// 💳 Tarjeta de fidelidad: cliente por token del QR / enlace de su tarjeta
+router.get("/loyalty-card/by-token/:token", organizationResolver, verifyToken, loyaltyCardController.getClientByCardToken);
+router.get("/:id/loyalty-card", organizationResolver, verifyToken, loyaltyCardController.getClientCardLink);
 router.get("/:id", organizationResolver, verifyToken, clientController.getClientById);
 router.get("/:id/follow-up-status", organizationResolver, verifyToken, clientController.getFollowUpStatus);
 router.delete("/:id", organizationResolver, verifyToken, clientController.deleteClient);

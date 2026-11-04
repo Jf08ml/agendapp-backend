@@ -394,6 +394,23 @@ const organizationSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  // 💳 Diseño de la tarjeta virtual de fidelidad (/mi-tarjeta/:token). Una
+  // plantilla base + personalización; el fondo de cada tarjeta (servicios /
+  // referidos) puede ser una imagen propia. Sin doc = plantilla "classic".
+  loyaltyCard: {
+    template: {
+      type: String,
+      enum: ["classic", "gradient", "dark", "pastel", "minimal", "image"],
+      default: "classic",
+    },
+    primaryColor: { type: String, default: null }, // null = color de branding
+    textColor: { type: String, enum: ["light", "dark"], default: "light" },
+    title: { type: String, default: "", maxlength: 40 },
+    message: { type: String, default: "", maxlength: 140 },
+    showLogo: { type: Boolean, default: true },
+    serviceBackgroundUrl: { type: String, default: null },
+    referralBackgroundUrl: { type: String, default: null },
+  },
   enableOnlineBooking: {
     type: Boolean,
     default: true,

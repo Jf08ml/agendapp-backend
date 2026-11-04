@@ -7,6 +7,7 @@ import Reservation from "../models/reservationModel.js";
 import { normalizePhoneNumber } from "../utils/phoneUtils.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
 import whatsappService from "./sendWhatsappService.js";
+import { getLoyaltyCardUrl } from "./loyaltyCardService.js";
 
 const clientService = {
   // Crear un nuevo cliente
@@ -272,6 +273,11 @@ const clientService = {
           : []);
 
     const { rewardEarned, earnedRewards } = await client.incrementServices(serviceTiers);
+    // Enlace a la tarjeta virtual ({{cardUrl}} en los mensajes de fidelidad); se
+    // crea solo si de verdad se va a enviar un mensaje.
+    let cardUrlCache;
+    const cardUrlFor = async () =>
+      cardUrlCache !== undefined ? cardUrlCache : (cardUrlCache = (await getLoyaltyCardUrl(client, organization)) || "");
 
     if (rewardEarned && client.phone_e164 && organization) {
       for (const earned of earnedRewards) {
@@ -283,7 +289,7 @@ const clientService = {
               organization._id.toString(),
               client.phone_e164,
               'loyaltyServiceReward',
-              { names: client.name, reward: earned.reward, organization: organization.name }
+              { names: client.name, reward: earned.reward, organization: organization.name, cardUrl: await cardUrlFor() }
             );
             console.log(`[registerService] WA de recompensa enviado a ${client.name}: ${earned.reward}`);
           }
@@ -306,6 +312,7 @@ const clientService = {
               'loyaltyServiceProgress',
               {
                 names: client.name,
+                cardUrl: await cardUrlFor(),
                 organization: organization.name,
                 currentCount: client.servicesTaken,
                 remaining: nextTier.threshold - client.servicesTaken,
@@ -338,6 +345,11 @@ const clientService = {
           : []);
 
     const { rewardEarned, earnedRewards } = await client.incrementReferrals(referralTiers);
+    // Enlace a la tarjeta virtual ({{cardUrl}} en los mensajes de fidelidad); se
+    // crea solo si de verdad se va a enviar un mensaje.
+    let cardUrlCache;
+    const cardUrlFor = async () =>
+      cardUrlCache !== undefined ? cardUrlCache : (cardUrlCache = (await getLoyaltyCardUrl(client, organization)) || "");
 
     if (rewardEarned && client.phone_e164 && organization) {
       for (const earned of earnedRewards) {
@@ -349,7 +361,7 @@ const clientService = {
               organization._id.toString(),
               client.phone_e164,
               'loyaltyReferralReward',
-              { names: client.name, reward: earned.reward, organization: organization.name }
+              { names: client.name, reward: earned.reward, organization: organization.name, cardUrl: await cardUrlFor() }
             );
             console.log(`[registerReferral] WA de recompensa enviado a ${client.name}: ${earned.reward}`);
           }
@@ -372,6 +384,7 @@ const clientService = {
               'loyaltyReferralProgress',
               {
                 names: client.name,
+                cardUrl: await cardUrlFor(),
                 organization: organization.name,
                 currentCount: client.referralsMade,
                 remaining: nextTier.threshold - client.referralsMade,

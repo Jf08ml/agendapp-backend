@@ -86,6 +86,13 @@ const clientSchema = new mongoose.Schema(
       type: Date,
       required: false,
     },
+    // 💳 Token del enlace personal a la tarjeta de fidelidad (/mi-tarjeta/:token).
+    // Se genera la primera vez que se pide el enlace (loyaltyCardService).
+    loyaltyCardToken: {
+      type: String,
+      required: false,
+      index: { unique: true, sparse: true },
+    },
     // 🎂 Última vez que se envió el saludo de cumpleaños (idempotencia anual)
     lastBirthdayGreetingAt: {
       type: Date,

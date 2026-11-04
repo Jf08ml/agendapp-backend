@@ -143,6 +143,7 @@ const organizationService = {
       serviceReward,
       serviceTiers,
       referralTiers,
+      loyaltyCard,
       openingHours,
       weeklySchedule,
       plan,
@@ -243,6 +244,27 @@ const organizationService = {
       serviceTiers !== undefined ? serviceTiers : organization.serviceTiers;
     organization.referralTiers =
       referralTiers !== undefined ? referralTiers : organization.referralTiers;
+
+    // 💳 Diseño de la tarjeta virtual de fidelidad. Solo los campos conocidos,
+    // normalizados (el resto del body se ignora, igual que los demás campos).
+    if (loyaltyCard && typeof loyaltyCard === "object") {
+      const str = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+      const url = (v) => (typeof v === "string" && /^https?:\/\//i.test(v.trim()) ? v.trim() : null);
+      const TEMPLATES = ["classic", "gradient", "dark", "pastel", "minimal", "image"];
+      organization.loyaltyCard = {
+        template: TEMPLATES.includes(loyaltyCard.template) ? loyaltyCard.template : "classic",
+        primaryColor:
+          typeof loyaltyCard.primaryColor === "string" && /^#[0-9a-f]{3,8}$/i.test(loyaltyCard.primaryColor.trim())
+            ? loyaltyCard.primaryColor.trim()
+            : null,
+        textColor: loyaltyCard.textColor === "dark" ? "dark" : "light",
+        title: str(loyaltyCard.title, 40),
+        message: str(loyaltyCard.message, 140),
+        showLogo: loyaltyCard.showLogo !== false,
+        serviceBackgroundUrl: url(loyaltyCard.serviceBackgroundUrl),
+        referralBackgroundUrl: url(loyaltyCard.referralBackgroundUrl),
+      };
+    }
     // El panel de horarios guarda por aquí (no por /schedule): sin esta validación un
     // cierre "07:00" en vez de 19:00 se guardaba y el día quedaba sin cupos en línea.
     // El horario base es opcional (las orgs con horarios por día no lo llenan) y el

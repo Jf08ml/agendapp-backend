@@ -100,14 +100,20 @@ router.get("/manifest.webmanifest", organizationResolver, (req, res) => {
   // logo general, usar ese antes de caer al genérico de AgenditApp — evita que
   // instale con un ícono ajeno al negocio solo porque no llenaron ese campo puntual.
   const iconSrc = org.branding?.pwaIcon || org.branding?.logoUrl || "/logo_default.png";
+  // 💳 La página /mi-tarjeta/:token pide ?start=/mi-tarjeta/<token> para que
+  // "Agregar a la pantalla de inicio" abra la tarjeta del cliente y no el inicio
+  // del negocio. Solo se acepta esa ruta exacta (nada de URLs arbitrarias).
+  const start = typeof req.query.start === "string" ? req.query.start : "";
+  const isCard = /^\/mi-tarjeta\/[A-Za-z0-9_-]{10,64}$/.test(start);
   res.setHeader("Content-Type", "application/manifest+json");
   res.send(
     JSON.stringify({
-      name: org.branding?.pwaName || org.name,
-      short_name: org.branding?.pwaShortName || org.name,
+      name: isCard ? `Mi tarjeta · ${org.name}` : org.branding?.pwaName || org.name,
+      short_name: isCard ? "Mi tarjeta" : org.branding?.pwaShortName || org.name,
       description: org.branding?.pwaDescription || "Agenda y tienda Zybizo",
       display: "standalone",
-      start_url: "/",
+      start_url: isCard ? start : "/",
+      ...(isCard && { id: start }),
       background_color: org.branding?.backgroundColor || "#fff",
       theme_color: org.branding?.themeColor || "#fff",
       icons: [
