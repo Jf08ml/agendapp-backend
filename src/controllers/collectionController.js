@@ -18,6 +18,7 @@ import reservationService from "../services/reservationService.js";
 import enrollmentService from "../services/enrollmentService.js";
 import packageService from "../services/packageService.js";
 import { fulfillOrder } from "../services/collection/fulfillmentService.js";
+import { notifyAdminOnlinePayment } from "../services/collection/adminPaymentNotifier.js";
 import Organization from "../models/organizationModel.js";
 import Service from "../models/serviceModel.js";
 import Reservation from "../models/reservationModel.js";
@@ -504,15 +505,27 @@ export const mpWebhook = async (req, res) => {
       return res.sendStatus(200);
     }
 
+    const wasPaid = order.status === "paid";
+
     // Cumplir la orden según su tipo (reserva / clase / paquete).
     await fulfillOrder(order);
 
     // Marcar el Order pagado (idempotente).
-    await orderService.markOrderPaid(order._id, {
+    const { alreadyProcessed } = await orderService.markOrderPaid(order._id, {
       paymentId: dataId,
       eventId: String(dataId),
       raw: payment,
     });
+
+    // Aviso al admin con quién pagó y qué pagó — una sola vez por Order (un
+    // reintento de MP o un segundo evento del mismo pago no lo repiten).
+    if (!wasPaid && !alreadyProcessed) {
+      Organization.findById(order.organizationId)
+        .select("name timezone timeFormat branding")
+        .lean()
+        .then((fullOrg) => notifyAdminOnlinePayment({ org: fullOrg, order }))
+        .catch((err) => console.warn("[mpWebhook] aviso al admin falló:", err?.message || err));
+    }
 
     return res.sendStatus(200);
   } catch (err) {

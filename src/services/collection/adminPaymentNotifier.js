@@ -14,6 +14,7 @@ import subscriptionService from "../subscriptionService.js";
 import WhatsappTemplate from "../../models/whatsappTemplateModel.js";
 import whatsappService from "../sendWhatsappService.js";
 import { sendTextMessage, sendPlatformTemplate } from "../metaApiService.js";
+import { describeOrder, formatOrderAmount } from "./orderSummary.js";
 
 /** Normaliza el teléfono del admin a E.164 (mismo criterio que waAgentChatService). */
 export function normalizeAdminPhone(phone) {
@@ -37,31 +38,8 @@ const TYPE_LABEL = {
  * @param {Object} p.order      Order con el comprobante
  * @param {boolean} p.autoApproved  true si la IA confirmó sola; false si requiere revisión
  */
-export async function notifyAdminReceipt({ org, order, autoApproved, fulfillError }) {
-  const label = TYPE_LABEL[order.type] || "pago";
-  const amount = `${order.amount} ${order.currency || ""}`.trim();
-
-  // fulfillError: el comprobante es válido pero la reserva no se pudo confirmar
-  // (ej. el profesional ya tiene otra cita) — hay que resolverla en Gestionar reservas.
-  const title = autoApproved
-    ? "Pago confirmado ✅"
-    : fulfillError
-    ? "Pago recibido, reserva sin confirmar ⚠️"
-    : "Comprobante por revisar 🧾";
-  const message = autoApproved
-    ? `Se confirmó automáticamente un pago de ${label} por ${amount}.`
-    : fulfillError
-    ? `El comprobante de ${label} por ${amount} es válido, pero no se pudo confirmar la reserva: ${fulfillError}. Cambia el profesional u horario en Gestionar reservas y apruébala junto con el pago.`
-    : `Recibiste un comprobante de ${label} por ${amount} que requiere tu revisión.`;
-
-  // Ruta del panel admin (lista de comprobantes / agenda / reservas).
-  const frontendRoute = autoApproved
-    ? "/gestionar-agenda"
-    : fulfillError && order.type === "reservation"
-    ? "/gestionar-reservas-online"
-    : "/gestionar-pagos";
-
-  // 1) In-app + 2) Push (no se interrumpen entre sí).
+/** In-app + push al admin (no se interrumpen entre sí). */
+async function sendInAppAndPush(org, { title, message, frontendRoute }) {
   await Promise.allSettled([
     notificationService.createNotification({
       title,
@@ -76,6 +54,41 @@ export async function notifyAdminReceipt({ org, order, autoApproved, fulfillErro
       JSON.stringify({ title, message, icon: org?.branding?.pwaIcon })
     ),
   ]);
+}
+
+export async function notifyAdminReceipt({ org, order, autoApproved, fulfillError }) {
+  const label = TYPE_LABEL[order.type] || "pago";
+  const amount = formatOrderAmount(order);
+
+  // Quién pagó y qué pagó (reserva/clase/paquete/pedido vinculado). Si el Order
+  // no tiene cliente resoluble, se usa el titular que la IA leyó del comprobante.
+  const sender = order.receipt?.extracted?.senderName?.trim() || null;
+  const ref = order.receipt?.extracted?.reference;
+  const { customerName, concept } = await describeOrder(order, org);
+  const payer = customerName || sender;
+
+  // fulfillError: el comprobante es válido pero la reserva no se pudo confirmar
+  // (ej. el profesional ya tiene otra cita) — hay que resolverla en Gestionar reservas.
+  const title = autoApproved
+    ? "Pago confirmado ✅"
+    : fulfillError
+    ? "Pago recibido, reserva sin confirmar ⚠️"
+    : "Comprobante por revisar 🧾";
+  const message = autoApproved
+    ? `${payer || "Un cliente"} pagó ${concept} por ${amount}. Validado automáticamente.`
+    : fulfillError
+    ? `El comprobante de ${payer || "un cliente"} por ${concept} (${amount}) es válido, pero no se pudo confirmar la reserva: ${fulfillError}. Cambia el profesional u horario en Gestionar reservas y apruébala junto con el pago.`
+    : `${payer || "Un cliente"} envió un comprobante por ${concept} (${amount}). Requiere tu revisión.`;
+
+  // Ruta del panel admin (lista de comprobantes / agenda / reservas).
+  const frontendRoute = autoApproved
+    ? "/gestionar-agenda"
+    : fulfillError && order.type === "reservation"
+    ? "/gestionar-reservas-online"
+    : "/gestionar-pagos";
+
+  // 1) In-app + 2) Push.
+  await sendInAppAndPush(org, { title, message, frontendRoute });
 
   // 3) WhatsApp al admin — en cascada:
   //    a) Toggle enabledTypes.adminPaymentAlert === false → no se envía nada
@@ -100,9 +113,13 @@ export async function notifyAdminReceipt({ org, order, autoApproved, fulfillErro
       console.warn("[adminPaymentNotifier] No se pudo leer enabledTypes, continuando:", cfgErr?.message || cfgErr);
     }
 
-    const sender = order.receipt?.extracted?.senderName;
-    const ref = order.receipt?.extracted?.reference;
-    const detalle = [sender ? `De: ${sender}` : null, ref ? `Ref: ${ref}` : null]
+    const detalle = [
+      customerName ? `Cliente: ${customerName}` : null,
+      concept,
+      // El titular de la cuenta solo aporta si es otra persona.
+      sender && sender.toLowerCase() !== customerName?.toLowerCase() ? `De: ${sender}` : null,
+      ref ? `Ref: ${ref}` : null,
+    ]
       .filter(Boolean)
       .join(" · ") || "—";
     const estado = autoApproved
@@ -150,7 +167,8 @@ export async function notifyAdminReceipt({ org, order, autoApproved, fulfillErro
           ? `✅ *Pago de ${label} confirmado*`
           : `🧾 *Comprobante de ${label} por revisar*`,
         `Monto: ${amount}`,
-        sender ? `De: ${sender}` : null,
+        payer ? `Cliente: ${payer}` : null,
+        `Concepto: ${concept}`,
         ref ? `Ref: ${ref}` : null,
         autoApproved
           ? "Validado automáticamente con IA."
@@ -165,4 +183,27 @@ export async function notifyAdminReceipt({ org, order, autoApproved, fulfillErro
   }
 }
 
-export default { notifyAdminReceipt };
+// Pantalla del admin donde se ve lo que se acaba de pagar por Mercado Pago.
+const MP_ROUTE_BY_TYPE = {
+  reservation: "/gestionar-agenda",
+  class: "/gestionar-clases",
+  package: "/gestionar-paquetes",
+};
+
+/**
+ * Pago confirmado por Mercado Pago (reserva / clase / paquete). Antes no se
+ * avisaba al admin; los pedidos de tienda ya tienen su propio aviso
+ * (storeNotifier.notifyNewStoreOrder), así que aquí se omiten.
+ * Solo in-app + push.
+ */
+export async function notifyAdminOnlinePayment({ org, order }) {
+  if (!org || !order || order.type === "store") return;
+  const { customerName, concept } = await describeOrder(order, org);
+  await sendInAppAndPush(org, {
+    title: "Pago confirmado ✅",
+    message: `${customerName || "Un cliente"} pagó ${concept} por ${formatOrderAmount(order)} con Mercado Pago.`,
+    frontendRoute: MP_ROUTE_BY_TYPE[order.type] || "/gestionar-agenda",
+  });
+}
+
+export default { notifyAdminReceipt, notifyAdminOnlinePayment };

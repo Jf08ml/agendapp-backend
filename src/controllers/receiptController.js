@@ -522,7 +522,16 @@ export const submitReceipt = async (req, res) => {
     );
     notifyAdminReceipt({
       org,
-      order: { type: order.type, amount: order.amount, currency: order.currency, receipt: receiptDoc },
+      // refId/metadata/store hacen falta para decir quién pagó y qué pagó.
+      order: {
+        type: order.type,
+        amount: order.amount,
+        currency: order.currency,
+        refId: order.refId,
+        metadata: order.metadata,
+        store: order.store,
+        receipt: receiptDoc,
+      },
       autoApproved: false,
     }).catch((err) => console.warn("[submitReceipt] notify falló:", err?.message || err));
     notifyClientReceipt({ org, order, outcome: "in_review" });
