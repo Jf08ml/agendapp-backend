@@ -357,7 +357,10 @@ const organizationSchema = new mongoose.Schema({
   },
   membershipStatus: {
     type: String,
-    enum: ["active", "trial", "suspended", "none"],
+    // Espejo de Membership.status (membershipService lo sincroniza con updateOne,
+    // sin validar): si falta un estado aquí, cualquier organization.save() de una
+    // org en ese estado falla ("Validation failed") y no puede guardar su configuración.
+    enum: ["active", "trial", "pending", "past_due", "suspended", "cancelled", "expired", "none"],
     default: "trial",
   },
   hasAccessBlocked: {
