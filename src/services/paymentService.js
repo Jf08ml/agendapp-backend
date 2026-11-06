@@ -1,6 +1,7 @@
 // services/paymentService.js
 import PaymentSession from "../models/paymentSessionModel.js";
 import { emitSubscriptionPaid } from "./oficinaEventsService.js";
+import { isRepeatedFirstPaypalCharge } from "../utils/paypalFirstCharge.js";
 import PaymentEvent from "../models/paymentEventModel.js";
 import Membership from "../models/membershipModel.js";
 import Organization from "../models/organizationModel.js";
@@ -187,7 +188,18 @@ const paymentService = {
 
     // 4b. Conversión para AgenditApp Oficina IA: solo pagos confirmados y nuevos
     // (el PaymentEvent recién creado es la marca de idempotencia). Nunca lanza.
-    if (status === "succeeded" && orgId) {
+    // El primer cobro de una suscripción de PayPal llega en dos avisos: se envía una vez.
+    const otherEventTypes = status === "succeeded" && providerName === "paypal" && sessionId
+      ? (await PaymentEvent.find(
+        { provider: providerName, sessionId, status: "succeeded", _id: { $ne: event._id } },
+        { type: 1 },
+      ).lean()).map((e) => e.type)
+      : [];
+    const repeatedCharge = isRepeatedFirstPaypalCharge({ provider: providerName, type, otherEventTypes });
+    if (repeatedCharge) {
+      console.log(`[Payment] ${providerName}:${eventId} repite el primer cobro de ${sessionId}; no se envía a la Oficina`);
+    }
+    if (status === "succeeded" && orgId && !repeatedCharge) {
       const previousPaid = await PaymentEvent.countDocuments({
         organizationId: orgId,
         status: "succeeded",
