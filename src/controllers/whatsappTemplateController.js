@@ -43,6 +43,7 @@ const whatsappTemplateController = {
         loyaltyServiceProgress: whatsappTemplates.getDefaultTemplate('loyaltyServiceProgress'),
         loyaltyReferralProgress: whatsappTemplates.getDefaultTemplate('loyaltyReferralProgress'),
         loyaltyCardLink: whatsappTemplates.getDefaultTemplate('loyaltyCardLink'),
+        myBookingsLink: whatsappTemplates.getDefaultTemplate('myBookingsLink'),
         // 📚 Módulo de Clases
         classEnrollmentConfirmed: whatsappTemplates.getDefaultTemplate('classEnrollmentConfirmed'),
         classEnrollmentPending: whatsappTemplates.getDefaultTemplate('classEnrollmentPending'),
@@ -157,6 +158,12 @@ const whatsappTemplateController = {
           isCustom: !!customTemplates.loyaltyCardLink,
           variables: ['{{names}}', '{{organization}}', '{{cardUrl}}'],
         },
+        // 📅 Enlace a "Mis reservas" (a petición del cliente)
+        myBookingsLink: {
+          content: customTemplates.myBookingsLink || defaultTemplates.myBookingsLink,
+          isCustom: !!customTemplates.myBookingsLink,
+          variables: ['{{names}}', '{{organization}}', '{{bookingsUrl}}'],
+        },
         // 📚 Módulo de Clases
         classEnrollmentConfirmed: {
           content: customTemplates.classEnrollmentConfirmed || defaultTemplates.classEnrollmentConfirmed,
@@ -255,6 +262,7 @@ const whatsappTemplateController = {
         'loyaltyServiceProgress',
         'loyaltyReferralProgress',
         'loyaltyCardLink',
+        'myBookingsLink',
         'classEnrollmentConfirmed',
         'classEnrollmentPending',
         'classEnrollmentSeries',
@@ -338,6 +346,7 @@ const whatsappTemplateController = {
         'loyaltyServiceProgress',
         'loyaltyReferralProgress',
         'loyaltyCardLink',
+        'myBookingsLink',
         'classEnrollmentConfirmed',
         'classEnrollmentPending',
         'classEnrollmentSeries',
@@ -418,6 +427,7 @@ const whatsappTemplateController = {
         'loyaltyServiceProgress',
         'loyaltyReferralProgress',
         'loyaltyCardLink',
+        'myBookingsLink',
         'classEnrollmentConfirmed',
         'classEnrollmentPending',
         'classEnrollmentSeries',
@@ -506,6 +516,7 @@ const whatsappTemplateController = {
         remaining: "2",
         nextReward: "1 servicio gratis",
         cardUrl: "https://agenda.example.com/mi-tarjeta/abc123",
+        bookingsUrl: "https://agenda.example.com/mis-reservas/abc123",
         beneficio: "20% de descuento en tu próximo servicio",
         // 🔁 Recordatorio de seguimiento entre servicios relacionados
         originalService: "Montura de pestañas pelo a pelo",

@@ -18,6 +18,42 @@ import serviceModel from '../models/serviceModel.js';
 // (que bcrypt nunca puede validar) cada vez que llega un enlace no encontrado.
 const BCRYPT_HASH = /^\$2[aby]\$/;
 
+/**
+ * Política de cancelación de la org aplicada a una cita (o reserva pendiente)
+ * del cliente. La comparten el enlace de cancelación de WhatsApp y la página
+ * "Mis reservas", para que ambas bloqueen exactamente lo mismo.
+ *
+ * @param {{ startDate: Date, status?: string, clientConfirmed?: boolean }} apt
+ * @param {object} org  — necesita timezone y cancellationPolicy
+ * @param {{ checkConfirmed?: boolean }} opts — las reservas pendientes no aplican "ya confirmada"
+ */
+export function appointmentCancelPolicy(apt, org, { checkConfirmed = true } = {}) {
+  const timezone = org?.timezone || 'America/Bogota';
+  const now = moment.tz(timezone);
+  const policy = org?.cancellationPolicy || {};
+  const minHours = policy.minHoursBeforeAppointment || 0;
+  const preventConfirmed = policy.preventCancellingConfirmed || false;
+
+  const aptStart = moment.tz(apt.startDate, timezone);
+  const hoursUntilAppointment = aptStart.diff(now, 'hours', true);
+  const isCancelled = String(apt.status || '').includes('cancelled');
+  const isPast = aptStart.isBefore(now);
+
+  let policyBlocked = false;
+  let policyBlockedReason = null;
+  if (!isCancelled && !isPast) {
+    if (minHours > 0 && hoursUntilAppointment < minHours) {
+      policyBlocked = true;
+      policyBlockedReason = `No se puede cancelar con menos de ${minHours} horas de anticipación`;
+    }
+    if (!policyBlocked && checkConfirmed && preventConfirmed && apt.clientConfirmed) {
+      policyBlocked = true;
+      policyBlockedReason = 'No se pueden cancelar citas que ya confirmaste';
+    }
+  }
+  return { isCancelled, isPast, policyBlocked, policyBlockedReason };
+}
+
 const cancellationService = {
   /**
    * Genera un token único de cancelación y su hash
@@ -166,28 +202,8 @@ const cancellationService = {
 
         // Procesar cada cita y verificar si puede ser cancelada según la política
         const appointmentsWithPolicy = groupAppointments.map(apt => {
-          const aptStart = moment.tz(apt.startDate, timezone);
-          const hoursUntilAppointment = aptStart.diff(now, 'hours', true);
-          const isCancelled = apt.status.includes('cancelled');
-          const isPast = aptStart.isBefore(now);
-
-          // Determinar si la cancelación está bloqueada por política
-          let policyBlocked = false;
-          let policyBlockedReason = null;
-
-          if (!isCancelled && !isPast) {
-            // Verificar restricción de horas mínimas
-            if (minHours > 0 && hoursUntilAppointment < minHours) {
-              policyBlocked = true;
-              policyBlockedReason = `No se puede cancelar con menos de ${minHours} horas de anticipación`;
-            }
-
-            // Verificar restricción de citas confirmadas por el cliente
-            if (!policyBlocked && preventConfirmed && apt.clientConfirmed) {
-              policyBlocked = true;
-              policyBlockedReason = 'No se pueden cancelar citas que ya confirmaste';
-            }
-          }
+          const { isCancelled, isPast, policyBlocked, policyBlockedReason } =
+            appointmentCancelPolicy(apt, org);
 
           return {
             id: apt._id,

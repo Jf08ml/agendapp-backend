@@ -93,6 +93,15 @@ const clientSchema = new mongoose.Schema(
       required: false,
       index: { unique: true, sparse: true },
     },
+    // 📅 Token del enlace personal a "Mis reservas" (/mis-reservas/:token).
+    // Distinto del de la tarjeta a propósito: la tarjeta puede mostrarse sin
+    // verificar el teléfono (fallback cuando la org no envía WhatsApp) y las
+    // reservas son más sensibles (fechas, profesional) y permiten cancelar.
+    bookingsToken: {
+      type: String,
+      required: false,
+      index: { unique: true, sparse: true },
+    },
     // 🎂 Última vez que se envió el saludo de cumpleaños (idempotencia anual)
     lastBirthdayGreetingAt: {
       type: Date,

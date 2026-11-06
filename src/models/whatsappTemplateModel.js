@@ -238,6 +238,12 @@ const whatsappTemplateSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // 📅 Enlace a "Mis reservas" (igual que la tarjeta: sin interruptor, solo a
+    // petición del cliente)
+    myBookingsLink: {
+      type: String,
+      default: null,
+    },
     // 📚 Módulo de Clases
     classEnrollmentConfirmed: {
       type: String,

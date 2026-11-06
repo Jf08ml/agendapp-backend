@@ -77,6 +77,11 @@ const TEMPLATE_TYPES = {
     variables: ["{{names}}", "{{organization}}", "{{cardUrl}}"],
     noToggle: true,
   },
+  myBookingsLink: {
+    label: "Enlace a 'Mis reservas' (se envía cuando el cliente pide consultar sus citas y clases desde la página pública; no se puede desactivar)",
+    variables: ["{{names}}", "{{organization}}", "{{bookingsUrl}}"],
+    noToggle: true,
+  },
   classEnrollmentConfirmed: {
     label: "Confirmación de inscripción a clase grupal",
     variables: ["{{names}}", "{{organization}}"],

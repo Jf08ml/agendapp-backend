@@ -240,6 +240,15 @@ Esta es tu tarjeta de fidelidad de *{{organization}}*:
 
 Muéstrala cuando vengas para que registren tu servicio o tus referidos. Puedes guardarla en la pantalla de inicio de tu teléfono para tenerla a la mano.`,
 
+      // 📅 Enlace a "Mis reservas" (el cliente lo pide desde /mis-reservas).
+      // Sin interruptor: solo se envía a petición del propio cliente.
+      myBookingsLink: `📅 ¡Hola, {{names}}!
+
+Aquí puedes ver tus citas y clases en *{{organization}}*:
+{{bookingsUrl}}
+
+Desde ese enlace también puedes cancelar si lo necesitas. Guárdalo para consultarlo cuando quieras.`,
+
       // ⏳ Reserva recibida, pendiente de aprobación
       statusReservationPending: `⏳ ¡Hola, {{names}}!
 
