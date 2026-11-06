@@ -83,6 +83,10 @@ router.get("/organization-config", organizationResolver, async (req, res) => {
   // tiene los campos: storeEnabled default false, storeCodEnabled default true).
   orgObj.storeEnabled = !!orgObj.storeEnabled;
   orgObj.storeCodEnabled = orgObj.storeCodEnabled !== false;
+  orgObj.storePickupEnabled = orgObj.storePickupEnabled !== false;
+  orgObj.storeDeliveryEnabled = orgObj.storeDeliveryEnabled !== false;
+  orgObj.storeMpEnabled = orgObj.storeMpEnabled !== false;
+  orgObj.storeTransferEnabled = orgObj.storeTransferEnabled !== false;
 
   try {
     orgObj.planLimits = await membershipService.getPlanLimits(organization._id);

@@ -616,6 +616,26 @@ const organizationSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  // Modalidades de entrega y vías de pago que ofrece la tienda (el negocio
+  // elige una o varias). Default true = comportamiento anterior (todo lo
+  // disponible). Mercado Pago y transferencia además requieren estar
+  // configurados (mpCollect conectado / paymentMethods con cuentas).
+  storePickupEnabled: {
+    type: Boolean,
+    default: true,
+  },
+  storeDeliveryEnabled: {
+    type: Boolean,
+    default: true,
+  },
+  storeMpEnabled: {
+    type: Boolean,
+    default: true,
+  },
+  storeTransferEnabled: {
+    type: Boolean,
+    default: true,
+  },
   welcomeTitle: {
     type: String,
     default: "¡Hola! Bienvenido",

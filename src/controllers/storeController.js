@@ -49,6 +49,18 @@ const DEFAULT_STORE_FORM_FIELDS = [
   { key: "documentId", enabled: false, required: false },
 ];
 
+// Modalidades de entrega / vías de pago habilitadas por el negocio. Docs
+// legacy sin los campos → todo habilitado (comportamiento anterior).
+function storeDeliveryModes(org) {
+  return {
+    pickup: org?.storePickupEnabled !== false,
+    delivery: org?.storeDeliveryEnabled !== false,
+  };
+}
+const storeMpAvailable = (org) => !!org?.mpCollect?.connected && org?.storeMpEnabled !== false;
+const storeTransferAvailable = (org) =>
+  (org?.paymentMethods || []).length > 0 && org?.storeTransferEnabled !== false;
+
 /**
  * Valida y normaliza el snapshot del comprador + la modalidad de entrega,
  * según el `storeFormConfig` de la organización (independiente del
@@ -79,6 +91,13 @@ function validateCustomerAndDelivery(customer, delivery, org, rawCustomFieldValu
   const mode = delivery?.mode;
   if (!["pickup", "delivery"].includes(mode)) {
     throw new Error("Modalidad de entrega inválida (pickup | delivery).");
+  }
+  if (!storeDeliveryModes(org)[mode]) {
+    throw new Error(
+      mode === "pickup"
+        ? "Este negocio no ofrece retiro en el local."
+        : "Este negocio no ofrece entrega a domicilio."
+    );
   }
   if (mode === "delivery" && !String(delivery?.address || "").trim()) {
     throw new Error("La dirección es obligatoria para entregas a domicilio.");
@@ -191,7 +210,9 @@ export const getStoreCatalog = async (req, res) => {
     if (!organizationId) return sendResponse(res, 400, null, "Falta la organización.");
 
     const org = await Organization.findById(organizationId)
-      .select("currency mpCollect paymentMethods storeEnabled storeCodEnabled")
+      .select(
+        "currency mpCollect paymentMethods storeEnabled storeCodEnabled storePickupEnabled storeDeliveryEnabled storeMpEnabled storeTransferEnabled"
+      )
       .lean();
     if (!org) return sendResponse(res, 404, null, "Organización no encontrada.");
     if (!org.storeEnabled) return sendResponse(res, 403, null, "La tienda no está disponible.");
@@ -227,10 +248,13 @@ export const getStoreCatalog = async (req, res) => {
       200,
       {
         currency: String(org.currency || "COP").toUpperCase(),
-        mpConnected: !!org.mpCollect?.connected,
-        paymentMethods: publicPaymentMethods(org),
+        // Vías habilitadas para la TIENDA (MP / transferencia pueden estar
+        // configuradas para abonos pero apagadas aquí).
+        mpConnected: storeMpAvailable(org),
+        paymentMethods: storeTransferAvailable(org) ? publicPaymentMethods(org) : [],
         // Legacy docs sin el campo (lean no aplica defaults) → default true.
         codEnabled: org.storeCodEnabled !== false,
+        deliveryModes: storeDeliveryModes(org),
         products,
       },
       "Catálogo de la tienda."
@@ -291,8 +315,8 @@ export const createStoreCheckout = async (req, res) => {
 
   try {
     const org = await loadStoreOrg(organizationId);
-    if (!org.mpCollect?.connected) {
-      return sendResponse(res, 400, null, "La organización no tiene Mercado Pago conectado.");
+    if (!storeMpAvailable(org)) {
+      return sendResponse(res, 400, null, "La tienda no acepta pagos con Mercado Pago.");
     }
 
     const buyer = validateCustomerAndDelivery(customer, delivery, org, customFieldValues);
@@ -394,8 +418,8 @@ export const createReceiptStoreCheckout = async (req, res) => {
 
   try {
     const org = await loadStoreOrg(organizationId);
-    if (!(org.paymentMethods || []).length) {
-      return sendResponse(res, 400, null, "La organización no tiene métodos de pago configurados.");
+    if (!storeTransferAvailable(org)) {
+      return sendResponse(res, 400, null, "La tienda no acepta pagos por transferencia.");
     }
 
     const buyer = validateCustomerAndDelivery(customer, delivery, org, customFieldValues);

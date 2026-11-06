@@ -198,6 +198,10 @@ const organizationService = {
       aiAssistantName,
       storeEnabled,
       storeCodEnabled,
+      storePickupEnabled,
+      storeDeliveryEnabled,
+      storeMpEnabled,
+      storeTransferEnabled,
       analyticsConfig,
     } = organizationData;
 
@@ -549,6 +553,19 @@ const organizationService = {
     // 🛍️ Tienda pública de productos (flags del toggle en /inventario)
     if (storeEnabled !== undefined) organization.storeEnabled = !!storeEnabled;
     if (storeCodEnabled !== undefined) organization.storeCodEnabled = !!storeCodEnabled;
+    if (storeMpEnabled !== undefined) organization.storeMpEnabled = !!storeMpEnabled;
+    if (storeTransferEnabled !== undefined) organization.storeTransferEnabled = !!storeTransferEnabled;
+    if (storePickupEnabled !== undefined || storeDeliveryEnabled !== undefined) {
+      const pickup = storePickupEnabled !== undefined ? !!storePickupEnabled : organization.storePickupEnabled !== false;
+      const delivery = storeDeliveryEnabled !== undefined ? !!storeDeliveryEnabled : organization.storeDeliveryEnabled !== false;
+      if (!pickup && !delivery) {
+        const err = new Error("La tienda debe ofrecer al menos una modalidad de entrega (retiro en el local o domicilio).");
+        err.statusCode = 400;
+        throw err;
+      }
+      organization.storePickupEnabled = pickup;
+      organization.storeDeliveryEnabled = delivery;
+    }
 
     // 🔗 Conexión híbrida WA (Meta/Baileys)
     if (waConnectionType !== undefined) organization.waConnectionType = waConnectionType;
