@@ -230,6 +230,16 @@ Se registró tu referido en *{{organization}}*.
 
 ¡Gracias por recomendarnos! 🎁`,
 
+      // 💳 Enlace a la tarjeta virtual de fidelidad (el cliente la pide desde
+      // la página pública /search-client). Sin interruptor: solo se envía a
+      // petición del propio cliente.
+      loyaltyCardLink: `💳 ¡Hola, {{names}}!
+
+Esta es tu tarjeta de fidelidad de *{{organization}}*:
+{{cardUrl}}
+
+Muéstrala cuando vengas para que registren tu servicio o tus referidos. Puedes guardarla en la pantalla de inicio de tu teléfono para tenerla a la mano.`,
+
       // ⏳ Reserva recibida, pendiente de aprobación
       statusReservationPending: `⏳ ¡Hola, {{names}}!
 

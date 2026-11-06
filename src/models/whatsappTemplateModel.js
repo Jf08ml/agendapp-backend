@@ -232,6 +232,12 @@ const whatsappTemplateSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // 💳 Enlace a la tarjeta de fidelidad (sin interruptor en enabledTypes:
+    // solo se envía cuando el propio cliente la pide)
+    loyaltyCardLink: {
+      type: String,
+      default: null,
+    },
     // 📚 Módulo de Clases
     classEnrollmentConfirmed: {
       type: String,

@@ -42,6 +42,7 @@ const whatsappTemplateController = {
         loyaltyReferralReward: whatsappTemplates.getDefaultTemplate('loyaltyReferralReward'),
         loyaltyServiceProgress: whatsappTemplates.getDefaultTemplate('loyaltyServiceProgress'),
         loyaltyReferralProgress: whatsappTemplates.getDefaultTemplate('loyaltyReferralProgress'),
+        loyaltyCardLink: whatsappTemplates.getDefaultTemplate('loyaltyCardLink'),
         // 📚 Módulo de Clases
         classEnrollmentConfirmed: whatsappTemplates.getDefaultTemplate('classEnrollmentConfirmed'),
         classEnrollmentPending: whatsappTemplates.getDefaultTemplate('classEnrollmentPending'),
@@ -133,22 +134,28 @@ const whatsappTemplateController = {
         loyaltyServiceReward: {
           content: customTemplates.loyaltyServiceReward || defaultTemplates.loyaltyServiceReward,
           isCustom: !!customTemplates.loyaltyServiceReward,
-          variables: ['{{names}}', '{{reward}}', '{{organization}}'],
+          variables: ['{{names}}', '{{reward}}', '{{organization}}', '{{cardUrl}}'],
         },
         loyaltyReferralReward: {
           content: customTemplates.loyaltyReferralReward || defaultTemplates.loyaltyReferralReward,
           isCustom: !!customTemplates.loyaltyReferralReward,
-          variables: ['{{names}}', '{{reward}}', '{{organization}}'],
+          variables: ['{{names}}', '{{reward}}', '{{organization}}', '{{cardUrl}}'],
         },
         loyaltyServiceProgress: {
           content: customTemplates.loyaltyServiceProgress || defaultTemplates.loyaltyServiceProgress,
           isCustom: !!customTemplates.loyaltyServiceProgress,
-          variables: ['{{names}}', '{{organization}}', '{{currentCount}}', '{{remaining}}', '{{nextReward}}'],
+          variables: ['{{names}}', '{{organization}}', '{{currentCount}}', '{{remaining}}', '{{nextReward}}', '{{cardUrl}}'],
         },
         loyaltyReferralProgress: {
           content: customTemplates.loyaltyReferralProgress || defaultTemplates.loyaltyReferralProgress,
           isCustom: !!customTemplates.loyaltyReferralProgress,
-          variables: ['{{names}}', '{{organization}}', '{{currentCount}}', '{{remaining}}', '{{nextReward}}'],
+          variables: ['{{names}}', '{{organization}}', '{{currentCount}}', '{{remaining}}', '{{nextReward}}', '{{cardUrl}}'],
+        },
+        // 💳 Enlace a la tarjeta de fidelidad (a petición del cliente)
+        loyaltyCardLink: {
+          content: customTemplates.loyaltyCardLink || defaultTemplates.loyaltyCardLink,
+          isCustom: !!customTemplates.loyaltyCardLink,
+          variables: ['{{names}}', '{{organization}}', '{{cardUrl}}'],
         },
         // 📚 Módulo de Clases
         classEnrollmentConfirmed: {
@@ -247,6 +254,7 @@ const whatsappTemplateController = {
         'loyaltyReferralReward',
         'loyaltyServiceProgress',
         'loyaltyReferralProgress',
+        'loyaltyCardLink',
         'classEnrollmentConfirmed',
         'classEnrollmentPending',
         'classEnrollmentSeries',
@@ -329,6 +337,7 @@ const whatsappTemplateController = {
         'loyaltyReferralReward',
         'loyaltyServiceProgress',
         'loyaltyReferralProgress',
+        'loyaltyCardLink',
         'classEnrollmentConfirmed',
         'classEnrollmentPending',
         'classEnrollmentSeries',
@@ -408,6 +417,7 @@ const whatsappTemplateController = {
         'loyaltyReferralReward',
         'loyaltyServiceProgress',
         'loyaltyReferralProgress',
+        'loyaltyCardLink',
         'classEnrollmentConfirmed',
         'classEnrollmentPending',
         'classEnrollmentSeries',
@@ -491,6 +501,11 @@ const whatsappTemplateController = {
         manage_block: "https://agenda.example.com/manage/abc123",
         recommendations: `\n\n📝 *Recomendaciones:*\n• Llegar 10 minutos antes\n• Traer el cabello limpio y seco`,
         reward: "1 servicio gratis en tu próxima visita",
+        // 💳 Fidelidad: progreso y enlace a la tarjeta virtual
+        currentCount: "3",
+        remaining: "2",
+        nextReward: "1 servicio gratis",
+        cardUrl: "https://agenda.example.com/mi-tarjeta/abc123",
         beneficio: "20% de descuento en tu próximo servicio",
         // 🔁 Recordatorio de seguimiento entre servicios relacionados
         originalService: "Montura de pestañas pelo a pelo",

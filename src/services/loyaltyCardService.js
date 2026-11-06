@@ -15,6 +15,7 @@ import Client from "../models/clientModel.js";
 import Organization from "../models/organizationModel.js";
 import clientService from "./clientService.js";
 import whatsappService from "./sendWhatsappService.js";
+import whatsappTemplates from "../utils/whatsappTemplates.js";
 import { resolveBaseUrl } from "../utils/cancellationUtils.js";
 
 function newToken() {
@@ -143,14 +144,22 @@ export async function requestCardByPhone(org, phone) {
 
   if (destination) {
     lastRequestAt.set(key, Date.now());
-    const url = buildLoyaltyCardUrl(org, token);
-    const message =
-      `💳 ¡Hola, ${client.name || ""}!`.replace(/, !$/, "!") +
-      `\n\nEsta es tu tarjeta de fidelidad de *${org.name}*:\n${url}` +
-      `\n\nMuéstrala cuando vengas para que registren tu servicio o tus referidos. ` +
-      `Puedes guardarla en la pantalla de inicio de tu teléfono para tenerla a la mano.`;
+    const orgId = String(org._id);
+    const data = {
+      names: client.name || "",
+      organization: org.name || "",
+      cardUrl: buildLoyaltyCardUrl(org, token),
+    };
     try {
-      const result = await whatsappService.sendMessage(String(org._id), destination, message);
+      // Plantilla "loyaltyCardLink": Baileys la renderiza como texto (editable
+      // en Mensajes de WhatsApp); Meta usa la plantilla aprobada
+      // "tarjeta_fidelidad" — el cliente pide la tarjeta desde la web, casi
+      // nunca hay ventana de 24 h abierta, así que el texto libre no llegaba.
+      // El texto renderizado queda como respaldo (coexistencia / ventana abierta).
+      const fallbackMessage = await whatsappTemplates.getRenderedTemplate(orgId, "loyaltyCardLink", data);
+      const result = await whatsappService.sendNotification(orgId, destination, "loyaltyCardLink", data, {
+        fallbackMessage,
+      });
       if (result && !result.blocked) return { status: "sent" };
     } catch (err) {
       console.warn(`[loyaltyCard] No se pudo enviar el enlace por WhatsApp (org ${org._id}):`, err?.message || err);

@@ -19,6 +19,7 @@
  *   currentCount    → cantidad_actual
  *   remaining       → faltantes
  *   nextReward      → proximo_premio
+ *   cardUrl         → enlace_tarjeta
  *   count           → cantidad_citas
  *   cita_pal        → cita_o_citas
  *   agendada_pal    → agendada_o_agendadas
@@ -50,6 +51,7 @@ const META_TEMPLATE_NAMES = {
   loyaltyReferralReward:     "premio_referidos",
   loyaltyServiceProgress:    "progreso_fidelidad",
   loyaltyReferralProgress:   "progreso_referidos",
+  loyaltyCardLink:           "tarjeta_fidelidad",
   statusReservationApproved: "reserva_aprobada",
   statusReservationRejected: "reserva_no_disponible",
   // 📚 Módulo de Clases
@@ -108,6 +110,7 @@ const VARIABLE_ORDER = {
   premio_referidos:        ["nombre_cliente", "nombre_negocio", "premio"],
   progreso_fidelidad:      ["nombre_cliente", "nombre_negocio", "cantidad_actual", "faltantes", "proximo_premio"],
   progreso_referidos:      ["nombre_cliente", "nombre_negocio", "cantidad_actual", "faltantes", "proximo_premio"],
+  tarjeta_fidelidad:       ["nombre_cliente", "nombre_negocio", "enlace_tarjeta"],
   reserva_aprobada:        ["nombre_cliente", "fecha_cita", "nombre_negocio", "direccion", "servicio", "enlace_cancelacion"],
   reserva_no_disponible:   ["nombre_cliente", "fecha_cita", "nombre_negocio"],
   // 📚 Módulo de Clases
@@ -146,6 +149,7 @@ function buildMetaVarMap(data) {
     cantidad_actual:      String(data.currentCount ?? ""),
     faltantes:            String(data.remaining    ?? ""),
     proximo_premio:       data.nextReward          ?? "",
+    enlace_tarjeta:       data.cardUrl             ?? "",
     cantidad_citas:       String(data.count       ?? ""),
     cita_o_citas:         data.cita_pal           ?? "",
     agendada_o_agendadas: data.agendada_pal       ?? "",

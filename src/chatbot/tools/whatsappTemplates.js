@@ -72,6 +72,11 @@ const TEMPLATE_TYPES = {
     label: "Aviso de progreso al registrar un referido (sin completar meta aún)",
     variables: ["{{names}}", "{{organization}}", "{{currentCount}}", "{{remaining}}", "{{nextReward}}", "{{cardUrl}}"],
   },
+  loyaltyCardLink: {
+    label: "Enlace a la tarjeta de fidelidad (se envía cuando el cliente la pide desde la página pública; no se puede desactivar)",
+    variables: ["{{names}}", "{{organization}}", "{{cardUrl}}"],
+    noToggle: true,
+  },
   classEnrollmentConfirmed: {
     label: "Confirmación de inscripción a clase grupal",
     variables: ["{{names}}", "{{organization}}"],
@@ -180,6 +185,9 @@ Las variables se escriben como {{variable}} (consulta las disponibles con get_wh
       }
       if (content === undefined && enabled === undefined && !reset) {
         return { success: false, error: "Indica al menos una acción: content, enabled o reset." };
+      }
+      if (enabled !== undefined && TEMPLATE_TYPES[templateType].noToggle) {
+        return { success: false, error: `"${templateType}" no se puede activar ni desactivar: solo se envía cuando el cliente lo pide. Sí se puede editar su contenido.` };
       }
 
       // Advertir sobre variables desconocidas en el contenido (no bloquea)
