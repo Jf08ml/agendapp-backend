@@ -142,6 +142,34 @@ router.get("/manifest.webmanifest", organizationResolver, (req, res) => {
   );
 });
 
+// 🔗 Vista previa al compartir el enlace del negocio (WhatsApp, Facebook,
+// Telegram…). Esos bots no ejecutan JS, así que la SPA solo les mostraba
+// "Mi agenda" sin imagen. El middleware de Vercel (agendapp-frontend/
+// middleware.ts) llama a este endpoint solo para bots y les arma las etiquetas
+// Open Graph con el nombre y el logo del negocio.
+router.get("/og-meta", organizationResolver, (req, res) => {
+  const org = req.organization;
+  if (!org) return res.status(404).json({ error: "Organización no encontrada" });
+  const rawImage = org.branding?.logoUrl || org.branding?.pwaIcon || null;
+  // ImageKit: tamaño y formato que todas las apps muestran (WebP y archivos
+  // pesados a veces no salen en la vista previa de WhatsApp).
+  const image =
+    rawImage && /^https:\/\/ik\.imagekit\.io\//.test(rawImage)
+      ? `${rawImage.split("?")[0]}?tr=w-600,h-600,c-at_max,f-png`
+      : rawImage;
+  const description =
+    org.branding?.pwaDescription ||
+    org.welcomeDescription ||
+    (org.enableOnlineBooking !== false ? `Reserva tu cita en ${org.name}` : org.name);
+  res.setHeader("Cache-Control", "public, max-age=300");
+  res.json({
+    title: org.branding?.pwaName || org.name,
+    siteName: org.name,
+    description,
+    image,
+  });
+});
+
 router.get("/favicon.ico", organizationResolver, (req, res) => {
   const org = req.organization;
   res.redirect(org.branding?.faviconUrl || "/logo_default.png");
