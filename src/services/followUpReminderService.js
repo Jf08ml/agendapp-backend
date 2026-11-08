@@ -38,7 +38,13 @@ const SUPERSEDED_PREVIEW = {
 // Resultados finales de "no enviado" con motivo conocido. Los procesados SIN outcome son
 // anteriores a que se guardara el motivo: no se sabe si salieron, así que no se listan como
 // "no enviados" (en LZ NAILS, por ejemplo, son cientos y la mayoría probablemente sí se enviaron).
-const NOT_SENT_OUTCOMES = ["skipped_already_returned", "skipped_no_phone", "skipped_superseded", "failed_max_retries"];
+const NOT_SENT_OUTCOMES = [
+  "skipped_already_returned",
+  "skipped_no_phone",
+  "skipped_superseded",
+  "skipped_no_whatsapp",
+  "failed_max_retries",
+];
 
 /** Reglas activas de seguimiento de la organización (servicio destino ya resuelto). */
 export async function getActiveRules(organizationId) {
@@ -172,6 +178,7 @@ function buildProcessedItem(appt) {
       : null,
     startDate: new Date(appt.startDate).toISOString(),
     outcome: appt.followUpReminderOutcome || null,
+    deliveryStatus: appt.followUpReminderDeliveryStatus || null,
     processedAt: appt.followUpReminderProcessedAt ? new Date(appt.followUpReminderProcessedAt).toISOString() : null,
   };
 }

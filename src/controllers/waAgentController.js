@@ -373,6 +373,11 @@ const REF_KIND_FIELDS = {
   reschedule: CONFIRMATION_FIELDS,
   reminder: { statusField: "reminderDeliveryStatus", updatedAtField: "reminderDeliveryUpdatedAt" },
   reminder2: { statusField: "secondReminderDeliveryStatus", updatedAtField: "secondReminderDeliveryUpdatedAt" },
+  followup: {
+    statusField: "followUpReminderDeliveryStatus",
+    updatedAtField: "followUpReminderDeliveryUpdatedAt",
+    errorField: "followUpReminderDeliveryError",
+  },
 };
 
 /**

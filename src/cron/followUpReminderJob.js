@@ -6,7 +6,7 @@ import Appointment from "../models/appointmentModel.js";
 import WhatsappTemplate from "../models/whatsappTemplateModel.js";
 import whatsappService from "../services/sendWhatsappService.js";
 import whatsappTemplates from "../utils/whatsappTemplates.js";
-import { waBulkSend, waBulkOptIn, waGetStatus, waBulkGet } from "../services/waHttpService.js";
+import { waBulkSend, waBulkOptIn, waGetStatus } from "../services/waHttpService.js";
 import { isWaReady } from "../services/waIntegrationService.js";
 import { getActiveRules, computeDueBatchForOrg } from "../services/followUpReminderService.js";
 
@@ -25,26 +25,43 @@ import { getActiveRules, computeDueBatchForOrg } from "../services/followUpRemin
  * posterior a esa fecha, se envía un WhatsApp automático.
  *
  * Un cliente recibe COMO MÁXIMO un mensaje por corrida, aunque matchee varias
- * reglas distintas (ej. varios estilos de pestañas, cada uno con su propio
- * seguimiento) — se elige la cita gatillo más reciente entre todas las reglas.
+ * reglas distintas — se elige la cita gatillo más reciente entre todas las reglas.
  *
- * Envío: igual que sendDailyReminders (appointmentService.js) — Meta manda
- * uno por uno con una pausa fija; Baileys arma un solo paquete y el
- * microservicio externo distribuye el envío con delays aleatorios, evitando
- * ráfagas de decenas/cientos de mensajes en el mismo minuto.
+ * Envío: Meta manda uno por uno con una pausa fija; Baileys arma un solo
+ * paquete y el microservicio distribuye el envío con delays aleatorios.
  *
- * Idempotencia: Meta marca `followUpReminderSent` ANTES de enviar (evita
- * reenvíos si el proceso se interrumpe a mitad de una tanda, igual que
- * `reminderSent`). Baileys marca DESPUÉS, solo para los teléfonos que
- * `waBulkGet` confirma como realmente entregados — aceptar el lote
- * (`waBulkSend`) no es garantía de entrega, y sin esta confirmación un
- * cliente puede quedar "sent" sin haber recibido nada.
+ * Idempotencia (reescrita 2026-11-08, Oriana centro de estética): la cita se
+ * marca como enviada ANTES de enviar, en los dos canales. Antes, con Baileys,
+ * el job esperaba como máximo 60 s a que terminara el paquete, pero el
+ * microservicio deja 6–15 s entre mensajes: todo paquete de más de ~4 mensajes
+ * quedaba "sin confirmar", se contaba como fallido y se le reenviaba al
+ * cliente al día siguiente — 3 días seguidos el mismo mensaje.
+ *
+ * Confirmación de entrega: cada mensaje lleva externalRef "followup:<citaId>",
+ * así que el ack real de WhatsApp (Baileys) o el status de Meta queda en
+ * `followUpReminderDeliveryStatus` (waAgentController.applyDeliveryStatus).
+ * Solo se reintenta lo que tiene una señal clara de que no salió: un error al
+ * enviar, o un ack "failed" (que se revisa al inicio de la corrida siguiente).
+ * Sin ack se da por enviado: reenviar a ciegas es lo que molestaba al cliente,
+ * y perder un seguimiento cuesta poco.
  */
 
 const ACTIVE_STATUSES = ["active", "trial"];
 
 // Pausa entre envíos individuales (solo canal Meta, uno por uno vía Graph API).
 const SEND_DELAY_MS = 200;
+
+// Tope de intentos fallidos antes de dejar de reintentarle a un cliente.
+// WhatsApp puede tratar cada intento a un contacto restringido como un nuevo
+// "reach out" que empeora la restricción (ver error 463 de Baileys). Al llegar
+// al tope, el candidato pasa a "failed_max_retries" (visible en Seguimientos).
+const MAX_FOLLOWUP_RETRY_ATTEMPTS = 3;
+
+const DELIVERY_FIELDS_UNSET = {
+  followUpReminderDeliveryStatus: "",
+  followUpReminderDeliveryUpdatedAt: "",
+  followUpReminderDeliveryError: "",
+};
 
 function orgCanSendWhatsapp(org) {
   if (!org) return false;
@@ -56,101 +73,12 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Sondeo post-envío del paquete Baileys (mismo patrón que campaignService.js
-// usa para sincronizar el detalle de una campaña "running"). Necesario porque
-// waBulkSend solo confirma que el microservicio ACEPTÓ el lote, no que se haya
-// entregado nada — caso real detectado en luciazaratenails: la sesión se cayó
-// segundos después de aceptar el lote (se reconectó ~16 min más tarde) y los
-// 12 mensajes nunca salieron, pese al bulkId devuelto.
-const BULK_POLL_INTERVAL_MS = 5000;
-const BULK_POLL_MAX_ATTEMPTS = 12; // ~60s de espera máxima por organización
-
-async function pollBulkUntilDone(bulkId, orgName) {
-  for (let attempt = 0; attempt < BULK_POLL_MAX_ATTEMPTS; attempt++) {
-    await sleep(BULK_POLL_INTERVAL_MS);
-    try {
-      const bulkData = await waBulkGet(bulkId);
-      if (bulkData?.status && bulkData.status !== "running") return bulkData;
-    } catch (err) {
-      console.warn(`🔁 [followUpReminderJob] [${orgName}] No se pudo consultar bulk ${bulkId}: ${err?.message || err}`);
-      return null;
-    }
-  }
-  console.warn(`🔁 [followUpReminderJob] [${orgName}] Bulk ${bulkId} no terminó dentro del tiempo de espera.`);
-  return null;
-}
-
-// Determina, de forma conservadora, qué teléfonos del lote quedaron
-// realmente confirmados como enviados. Sin confirmación clara (lote
-// inconcluso, sin detalle por item y sin que el conteo total cuadre), NINGÚN
-// candidato se da por enviado — se prefiere un reenvío de más mañana a
-// perder silenciosamente un cliente real.
-function resolveConfirmedPhones(bulkData, toSend) {
-  const confirmed = new Set();
-  if (!bulkData || bulkData.status !== "done") return confirmed;
-
-  if (Array.isArray(bulkData.items) && bulkData.items.length) {
-    for (const item of bulkData.items) {
-      if (!item.skip) confirmed.add(item.phone);
-    }
-    return confirmed;
-  }
-
-  const sentCount = bulkData.stats?.sent ?? 0;
-  if (sentCount >= toSend.length) {
-    for (const s of toSend) confirmed.add(s.phone);
-  }
-  return confirmed;
-}
-
-// Tope de intentos reales de envío (no confirmados como entregados) antes de
-// dejar de reintentarle a un cliente. WhatsApp puede tratar cada intento a un
-// contacto restringido como un nuevo "reach out" que empeora la restricción
-// (ver error 463 de Baileys) — reintentar indefinidamente cada día no es
-// gratis. Al llegar al tope, el candidato pasa a "failed_max_retries" (visible
-// en la pestaña Seguimientos del cliente) en vez de seguir reintentando solo.
-const MAX_FOLLOWUP_RETRY_ATTEMPTS = 3;
-
-/**
- * Registra un intento fallido (real, no confirmado como entregado) por
- * candidato. Al alcanzar MAX_FOLLOWUP_RETRY_ATTEMPTS, el candidato se marca
- * como procesado con outcome "failed_max_retries" (deja de reintentarse);
- * antes de eso, solo se incrementa el contador y se deja para la próxima
- * corrida (followUpReminderSent sigue en false).
- */
-async function registerFailedAttempts(candidates) {
-  if (!candidates.length) return;
-
-  const apptIds = candidates.map((c) => c.appt._id);
-  const current = await Appointment.find({ _id: { $in: apptIds } })
-    .select("followUpReminderFailCount")
-    .lean();
-  const countById = new Map(current.map((a) => [String(a._id), a.followUpReminderFailCount || 0]));
-
-  const gaveUp = [];
-  const stillRetryingIds = [];
-  for (const c of candidates) {
-    const newCount = (countById.get(String(c.appt._id)) || 0) + 1;
-    if (newCount >= MAX_FOLLOWUP_RETRY_ATTEMPTS) {
-      gaveUp.push(c);
-    } else {
-      stillRetryingIds.push(c.appt._id);
-    }
-  }
-
-  if (stillRetryingIds.length) {
-    await Appointment.updateMany({ _id: { $in: stillRetryingIds } }, { $inc: { followUpReminderFailCount: 1 } });
-  }
-  if (gaveUp.length) {
-    await markProcessed(gaveUp, "failed_max_retries");
-  }
-}
+const followUpRef = (apptId) => `followup:${apptId}`;
 
 /**
  * Marca un lote de candidatos como procesados, grabando el outcome + el
  * snapshot de la regla vigente (target service/days) — agrupado por regla
- * porque cada una puede tener un servicio/días de seguimiento distinto y un
- * único updateMany compartido les pisaría el snapshot entre sí.
+ * porque cada una puede tener un servicio/días de seguimiento distinto.
  */
 async function markProcessed(candidates, outcome) {
   if (!candidates.length) return;
@@ -174,8 +102,141 @@ async function markProcessed(candidates, outcome) {
           followUpReminderTargetServiceId: rule.followUpServiceId,
           followUpReminderTargetDays: rule.followUpDays,
         },
+        // Un reenvío no debe heredar el ack del intento anterior.
+        $unset: DELIVERY_FIELDS_UNSET,
       }
     );
+  }
+}
+
+/** Deshace la marca previa al envío, sin contar un intento (el mensaje no salió por una causa ajena al cliente). */
+async function unmark(apptIds) {
+  if (!apptIds.length) return;
+  await Appointment.updateMany(
+    { _id: { $in: apptIds } },
+    {
+      $set: { followUpReminderSent: false },
+      $unset: {
+        followUpReminderOutcome: "",
+        followUpReminderProcessedAt: "",
+        ...DELIVERY_FIELDS_UNSET,
+      },
+    }
+  );
+}
+
+/**
+ * Registra un intento fallido por cita. Bajo el tope, la cita vuelve a ser
+ * candidata en la próxima corrida (followUpReminderSent = false); al llegar
+ * al tope queda como "failed_max_retries" y no se reintenta más.
+ */
+async function registerFailedAttempts(apptIds) {
+  if (!apptIds.length) return;
+
+  const current = await Appointment.find({ _id: { $in: apptIds } })
+    .select("followUpReminderFailCount")
+    .lean();
+
+  const gaveUp = [];
+  const retry = [];
+  for (const a of current) {
+    if ((a.followUpReminderFailCount || 0) + 1 >= MAX_FOLLOWUP_RETRY_ATTEMPTS) gaveUp.push(a._id);
+    else retry.push(a._id);
+  }
+
+  if (retry.length) {
+    await unmark(retry);
+  }
+  if (gaveUp.length) {
+    // Se conserva el ack/error del último intento para poder diagnosticarlo.
+    await Appointment.updateMany(
+      { _id: { $in: gaveUp } },
+      { $set: { followUpReminderSent: true, followUpReminderOutcome: "failed_max_retries", followUpReminderProcessedAt: new Date() } }
+    );
+  }
+  await Appointment.updateMany({ _id: { $in: apptIds } }, { $inc: { followUpReminderFailCount: 1 } });
+}
+
+/**
+ * Seguimientos que WhatsApp/Meta reportaron como no entregados ("failed")
+ * después del envío: cuentan como intento fallido y, bajo el tope, vuelven a
+ * ser candidatos en esta misma corrida (si siguen dentro de la ventana).
+ */
+async function requeueFailedDeliveries() {
+  const failed = await Appointment.find({
+    followUpReminderSent: true,
+    followUpReminderOutcome: "sent",
+    followUpReminderDeliveryStatus: "failed",
+  })
+    .select("_id")
+    .lean();
+
+  if (!failed.length) return 0;
+  await registerFailedAttempts(failed.map((a) => a._id));
+  console.log(`🔁 [followUpReminderJob] ${failed.length} seguimiento(s) con entrega fallida vuelven a la cola de reintento.`);
+  return failed.length;
+}
+
+async function sendViaMeta({ org, dueToSend, toSend }) {
+  let sent = 0;
+  for (let i = 0; i < toSend.length; i++) {
+    const item = toSend[i];
+    const candidate = dueToSend[i];
+
+    // Marca antes de enviar: si el proceso se corta a mitad de la tanda, al
+    // reiniciar no se reenvía a quien ya recibió el mensaje.
+    await markProcessed([candidate], "sent");
+    try {
+      const result = await whatsappService.sendNotification(org._id.toString(), item.phone, "followUpReminder", item.vars, {
+        externalRef: followUpRef(item.apptId),
+      });
+      if (result?.blocked) {
+        await unmark([item.apptId]);
+      } else {
+        sent += 1;
+      }
+    } catch (err) {
+      console.error(`🔁 [followUpReminderJob] Error enviando a ${item.phone} (${org._id}):`, err?.message || err);
+      if (err?.recipientIssue) {
+        // El número no tiene WhatsApp: reintentar no sirve.
+        await markProcessed([candidate], "skipped_no_whatsapp");
+      } else {
+        await registerFailedAttempts([item.apptId]);
+      }
+    }
+    await sleep(SEND_DELAY_MS);
+  }
+  return sent;
+}
+
+async function sendViaBaileys({ org, templateDoc, tz, dueToSend, toSend }) {
+  try {
+    await waBulkOptIn(toSend.map((s) => s.phone));
+  } catch (e) {
+    console.warn(`🔁 [followUpReminderJob] [${org.name}] OptIn falló: ${e?.message || e}`);
+  }
+
+  // Marca antes de enviar: el microservicio reparte el paquete en varios
+  // minutos y confirma cada mensaje por ack (externalRef), no al aceptar el lote.
+  await markProcessed(dueToSend, "sent");
+
+  try {
+    const messageTpl = templateDoc?.followUpReminder || whatsappTemplates.getDefaultTemplate("followUpReminder");
+    const result = await waBulkSend({
+      clientId: org.clientIdWhatsapp,
+      title: `Seguimiento ${moment.tz(tz).format("YYYY-MM-DD")} (${org.name})`,
+      items: toSend.map((s) => ({ phone: s.phone, vars: s.vars, externalRef: followUpRef(s.apptId) })),
+      messageTpl,
+      dryRun: false,
+    });
+    console.log(
+      `🔁 [followUpReminderJob] [${org.name}] Paquete aceptado: ${toSend.length} mensaje(s) (bulkId: ${result?.bulkId}); entrega por ack.`
+    );
+    return toSend.length;
+  } catch (err) {
+    console.error(`🔁 [followUpReminderJob] Error enviando paquete (${org._id}):`, err?.message || err);
+    await registerFailedAttempts(toSend.map((s) => s.apptId));
+    return 0;
   }
 }
 
@@ -186,6 +247,8 @@ export async function runFollowUpReminders() {
   let totalOrgs = 0;
 
   try {
+    await requeueFailedDeliveries();
+
     const memberships = await Membership.find({ status: { $in: ACTIVE_STATUSES } })
       .populate("organizationId")
       .lean();
@@ -208,10 +271,6 @@ export async function runFollowUpReminders() {
       const { toSend: dueToSend, skippedNoPhone, skippedAlreadyReturned, superseded } =
         await computeDueBatchForOrg({ organizationId: org._id, rules, tz, referenceDate: new Date() });
 
-      if (!dueToSend.length && !skippedNoPhone.length && !skippedAlreadyReturned.length && !superseded.length) {
-        continue;
-      }
-
       // Resueltos sin enviar (perdió contra otra regla el mismo día / sin
       // teléfono / cliente ya volvió) — se marcan igual, para no volver a
       // evaluarlos mañana, cada uno con su motivo.
@@ -223,11 +282,9 @@ export async function runFollowUpReminders() {
 
       const isMeta = org.waConnectionType === "meta";
 
-      // Baileys: el microservicio externo acepta el lote (200 ok) aunque la
-      // sesión esté caída — sin este chequeo el cron marcaba "sent" sin haber
-      // entregado nada, y al ser idempotente nunca lo reintentaba (bug real
-      // detectado en luciazaratenails: sesión desconectada con reason 401,
-      // 14 citas marcadas "sent" sin ningún mensaje enviado).
+      // Baileys: el microservicio acepta el lote aunque la sesión esté caída —
+      // sin este chequeo el mensaje se perdía y la cita quedaba "sent" (caso
+      // luciazaratenails: sesión desconectada con reason 401).
       if (!isMeta) {
         let waReady = false;
         try {
@@ -258,90 +315,9 @@ export async function runFollowUpReminders() {
         };
       });
 
-      let orgSent = 0;
-
-      if (isMeta) {
-        // Se marca DESPUÉS de cada intento (no antes) — necesario para poder
-        // distinguir quién realmente falló y aplicarle el tope de reintentos.
-        const succeeded = [];
-        const failed = [];
-        for (let i = 0; i < toSend.length; i++) {
-          const item = toSend[i];
-          try {
-            // sendNotification devuelve null (sin lanzar) cuando fallan la
-            // plantilla Meta y los fallbacks — no es un envío exitoso.
-            const result = await whatsappService.sendNotification(org._id.toString(), item.phone, "followUpReminder", item.vars);
-            if (result && !result.blocked) {
-              succeeded.push(dueToSend[i]);
-            } else {
-              console.warn(`🔁 [followUpReminderJob] [${org.name}] No enviado a ${item.phone} (sin plantilla Meta/fallback disponible)`);
-              failed.push(dueToSend[i]);
-            }
-          } catch (err) {
-            console.error(
-              `🔁 [followUpReminderJob] Error enviando a ${item.phone} (${org._id}):`,
-              err?.message || err
-            );
-            failed.push(dueToSend[i]);
-          }
-          await sleep(SEND_DELAY_MS);
-        }
-        if (succeeded.length) {
-          await markProcessed(succeeded, "sent");
-          orgSent = succeeded.length;
-        }
-        if (failed.length) {
-          await registerFailedAttempts(failed);
-        }
-      } else {
-        // Baileys: un solo paquete — el microservicio externo distribuye el
-        // envío con delays aleatorios (mismo mecanismo que sendDailyReminders).
-        // A diferencia de Meta, aquí NO se marca "sent" hasta confirmar la
-        // entrega real vía waBulkGet — waBulkSend solo confirma que el lote
-        // fue aceptado, no que haya salido nada.
-        try {
-          await waBulkOptIn(toSend.map((s) => s.phone));
-        } catch (e) {
-          console.warn(`🔁 [followUpReminderJob] [${org.name}] OptIn falló: ${e?.message || e}`);
-        }
-
-        try {
-          const messageTpl = templateDoc?.followUpReminder || whatsappTemplates.getDefaultTemplate("followUpReminder");
-          const result = await waBulkSend({
-            clientId: org.clientIdWhatsapp,
-            title: `Seguimiento ${moment.tz(tz).format("YYYY-MM-DD")} (${org.name})`,
-            items: toSend.map((s) => ({ phone: s.phone, vars: s.vars })),
-            messageTpl,
-            dryRun: false,
-          });
-
-          const bulkData = await pollBulkUntilDone(result.bulkId, org.name);
-          const confirmedPhones = resolveConfirmedPhones(bulkData, toSend);
-          const confirmed = dueToSend.filter((c) => confirmedPhones.has(c.appt.client.phone_e164));
-          const unconfirmed = dueToSend.filter((c) => !confirmedPhones.has(c.appt.client.phone_e164));
-
-          if (confirmed.length) {
-            await markProcessed(confirmed, "sent");
-            orgSent = confirmed.length;
-          }
-          if (unconfirmed.length) {
-            await registerFailedAttempts(unconfirmed);
-          }
-
-          if (unconfirmed.length > 0) {
-            console.warn(
-              `🔁 [followUpReminderJob] [${org.name}] ${unconfirmed.length} de ${toSend.length} mensaje(s) sin confirmación real de entrega (bulkId: ${result.bulkId}) — intento registrado, tope ${MAX_FOLLOWUP_RETRY_ATTEMPTS}.`
-            );
-          } else {
-            console.log(
-              `🔁 [followUpReminderJob] [${org.name}] Paquete confirmado: ${confirmed.length} mensajes entregados (bulkId: ${result.bulkId})`
-            );
-          }
-        } catch (err) {
-          console.error(`🔁 [followUpReminderJob] Error enviando paquete (${org._id}):`, err?.message || err);
-          await registerFailedAttempts(dueToSend);
-        }
-      }
+      const orgSent = isMeta
+        ? await sendViaMeta({ org, dueToSend, toSend })
+        : await sendViaBaileys({ org, templateDoc, tz, dueToSend, toSend });
 
       totalSent += orgSent;
       if (orgSent > 0) totalOrgs += 1;

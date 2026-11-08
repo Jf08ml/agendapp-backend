@@ -117,6 +117,7 @@ const appointmentModelSchema = new mongoose.Schema(
         "skipped_already_returned",
         "skipped_no_phone",
         "skipped_superseded",
+        "skipped_no_whatsapp",
         "failed_max_retries",
       ],
       required: false,
@@ -138,6 +139,13 @@ const appointmentModelSchema = new mongoose.Schema(
       required: false,
     },
     followUpReminderTargetDays: { type: Number, required: false },
+    // Entrega real del seguimiento, por el ack de WhatsApp (Baileys) o el status
+    // de Meta, correlacionado con externalRef "followup:<id>" (ver
+    // waAgentController.applyDeliveryStatus). Solo "failed" hace que el job lo
+    // reintente; sin ack se da por enviado (reenviar sin saber molestaba al cliente).
+    followUpReminderDeliveryStatus: { type: String, enum: ["sent", "delivered", "failed"] },
+    followUpReminderDeliveryUpdatedAt: { type: Date },
+    followUpReminderDeliveryError: { type: String },
     // 📨 Resultado del intento de envío de la confirmación de agendamiento por
     // WhatsApp (scheduleAppointment/scheduleAppointmentBatch). Permite diagnosticar
     // reclamos de "no llegó la confirmación" sin depender de logs de servidor.
