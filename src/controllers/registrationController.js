@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { emitSignupCompleted, sanitizeAttribution } from "../services/oficinaEventsService.js";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
+import moment from "moment-timezone";
 import Organization from "../models/organizationModel.js";
 import Role from "../models/roleModel.js";
 import ExchangeCode from "../models/exchangeCodeModel.js";
@@ -107,7 +108,8 @@ const registrationController = {
         membershipStatus: "trial",
         // Configuración regional (opcionales, con defaults en el modelo)
         ...(default_country && { default_country: default_country.trim().toUpperCase().slice(0, 2) }),
-        ...(timezone && { timezone: timezone.trim() }),
+        // La zona viene del navegador: solo se guarda si es una IANA válida
+        ...(typeof timezone === "string" && moment.tz.zone(timezone.trim()) && { timezone: timezone.trim() }),
         ...(currency && { currency: currency.trim().toUpperCase().slice(0, 3) }),
         // Rubro del negocio (opcional) — pre-carga el catálogo de ejemplo
         ...(businessVertical && { businessVertical }),
