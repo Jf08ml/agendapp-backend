@@ -1,13 +1,10 @@
 import Service from "../../models/serviceModel.js";
 import Organization from "../../models/organizationModel.js";
 import serviceService from "../../services/serviceService.js";
-import { getVerticalCatalog } from "../../utils/verticalCatalogs.js";
+import { getVerticalCatalog, LARGE_DENOMINATION_CURRENCIES } from "../../utils/verticalCatalogs.js";
 
 // Monedas sin decimales (denominación grande): sus precios típicos van ×1000
 // respecto a la base del catálogo (ej: $40 USD ≈ $40.000 COP).
-const LARGE_DENOMINATION_CURRENCIES = new Set([
-  "COP", "CLP", "CRC", "PYG", "ARS", "HUF", "KRW", "IDR", "VND", "UYU", "NIO",
-]);
 
 const escapeRegex = (str) => String(str || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 

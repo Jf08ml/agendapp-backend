@@ -6,14 +6,11 @@ import Service from "../models/serviceModel.js";
 import Employee from "../models/employeeModel.js";
 import { sendTemplateMessage } from "./metaApiService.js";
 import { normalizePhone } from "./waAgentService.js";
-import { getVerticalCatalog } from "../utils/verticalCatalogs.js";
+import { getVerticalCatalog, LARGE_DENOMINATION_CURRENCIES } from "../utils/verticalCatalogs.js";
 import { validateTimeRange, validateWeeklyScheduleDays } from "../utils/scheduleValidation.js";
 
 // Monedas de denominación grande (sin centavos en la práctica): los precios
 // de ejemplo se multiplican ×1000 para que se vean realistas (ej: $40.000 COP vs $40 USD)
-const LARGE_DENOMINATION_CURRENCIES = new Set([
-  "COP", "CLP", "CRC", "PYG", "ARS", "HUF", "KRW", "IDR", "VND", "UYU", "NIO",
-]);
 
 const organizationService = {
   // Crear una nueva organización

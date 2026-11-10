@@ -1,4 +1,4 @@
-import { processChat } from "./chatService.js";
+import { processChat, buildOnboardingWidgets } from "./chatService.js";
 import { MAX_ACTION_LOG } from "../booking-chatbot/actionLog.js";
 import sendResponse from "../utils/sendResponse.js";
 import ChatLog from "../models/chatLogModel.js";
@@ -97,7 +97,12 @@ export const chat = async (req, res) => {
     ).catch(() => {});
   }
 
-  return sendResponse(res, 200, { reply, invalidates });
+  // Solo en onboarding (en soporte no se hace ninguna consulta extra)
+  const widgets = req.organization.setupCompleted
+    ? []
+    : await buildOnboardingWidgets(req.organization._id).catch(() => []);
+
+  return sendResponse(res, 200, { reply, invalidates, widgets });
 };
 
 export const submitFeedback = async (req, res) => {

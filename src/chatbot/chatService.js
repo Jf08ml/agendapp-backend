@@ -8,6 +8,7 @@ import Organization from "../models/organizationModel.js";
 import { markOnboardingMilestone } from "../utils/onboardingMilestones.js";
 import { describeAdminToolAction, actionLogPrompt } from "../booking-chatbot/actionLog.js";
 import { withMessageCacheBreakpoint } from "../utils/claudeCache.js";
+import { getServiceSuggestions, LARGE_DENOMINATION_CURRENCIES } from "../utils/verticalCatalogs.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -26,6 +27,7 @@ const buildContext = async (organization, user) => {
     Employee.countDocuments({ organizationId: organization._id, isActive: true }),
   ]);
 
+  const setupCompleted = organization.setupCompleted || false;
   return {
     organizationId: organization._id,
     organization,
@@ -34,9 +36,35 @@ const buildContext = async (organization, user) => {
     setupStatus: {
       servicesCount,
       employeesCount,
-      setupCompleted: organization.setupCompleted || false,
+      setupCompleted,
+      // Mismo criterio que buildOnboardingWidgets: el usuario ve la lista de
+      // servicios sugeridos debajo de la respuesta, y el prompt lo menciona.
+      servicePickerShown:
+        !setupCompleted &&
+        servicesCount === 0 &&
+        getServiceSuggestions(organization.businessVertical, organization.currency).length > 0,
     },
   };
+};
+
+/**
+ * Tarjetas interactivas que el chat muestra debajo de la respuesta durante el
+ * onboarding. Las decide el servidor según el estado REAL de la org después del
+ * turno (no el texto del modelo), así no dependen de que el modelo "se acuerde".
+ *  - service_picker: onboarding sin servicios activos y rubro con sugerencias →
+ *    lista para marcar servicios y ponerles precio (el frontend la envía como
+ *    mensaje y el modelo los crea con bulk_create_services).
+ */
+export const buildOnboardingWidgets = async (organizationId) => {
+  const org = await Organization.findById(organizationId)
+    .select("setupCompleted businessVertical currency")
+    .lean();
+  if (!org || org.setupCompleted) return [];
+  const suggestions = getServiceSuggestions(org.businessVertical, org.currency);
+  if (!suggestions.length) return [];
+  const servicesCount = await Service.countDocuments({ organizationId, isActive: true });
+  if (servicesCount > 0) return [];
+  return [{ type: "service_picker", currency: org.currency || "COP", suggestions }];
 };
 
 const extractText = (content) => {
@@ -203,8 +231,49 @@ const autoCompleteSetupIfReady = async (organizationId) => {
   }
 };
 
+// Mensaje que envía el frontend al abrir el onboarding con IA (useChatbot.ts,
+// ONBOARDING_TRIGGER). Si cambia allá, cambiarlo aquí.
+export const ONBOARDING_TRIGGER = "Hola, quiero comenzar la configuración inicial de mi negocio.";
+
+/**
+ * Primer mensaje del onboarding cuando no hay NADA creado: fijo, sin modelo.
+ * Antes lo escribía el modelo (~600 caracteres con los 8 pasos) y 23 de 34 orgs
+ * que abandonaban sin crear nada se iban justo después de leerlo; con el prompt
+ * más corto el modelo seguía ignorando la lista de sugerencias 1 de cada 3 veces.
+ * Con progreso parcial (reanudar) sí responde el modelo.
+ */
+const onboardingOpening = (context) => {
+  const { organization, setupStatus } = context;
+  const name = organization?.name?.trim() || "tu negocio";
+  const intro = `¡Hola! 👋 En unos minutos dejamos lista la agenda de **${name}**.`;
+  if (setupStatus.servicePickerShown) {
+    return `${intro}\n\nEmpecemos por tus servicios: **marca abajo los que ofreces y ponles tu precio** 👇\n\nSi ofreces otros, agrégalos en la misma lista o escríbemelos aquí.`;
+  }
+  const mult = LARGE_DENOMINATION_CURRENCIES.has(String(organization?.currency || "").toUpperCase()) ? 1000 : 1;
+  return `${intro}\n\nEmpecemos por tus servicios: escríbeme los que ofreces con su duración y precio, por ejemplo: *Corte 30 min $${(25 * mult).toLocaleString("es-CO")}*. Puedes pegarlos todos de una vez.`;
+};
+
 export const processChat = async (organization, user, messages, { actionLog = [] } = {}) => {
   const context = await buildContext(organization, user);
+
+  const userTurns = messages.filter((m) => m.role === "user");
+  if (
+    !context.setupStatus.setupCompleted &&
+    context.setupStatus.servicesCount === 0 &&
+    context.setupStatus.employeesCount === 0 &&
+    userTurns.length === 1 &&
+    String(userTurns[0].content).trim() === ONBOARDING_TRIGGER
+  ) {
+    return {
+      reply: onboardingOpening(context),
+      invalidates: [],
+      _meta: {
+        rounds: 0, toolsUsed: [], inputTokens: 0, outputTokens: 0,
+        cacheReadTokens: 0, cacheWriteTokens: 0, hitRoundLimit: false, toolErrors: [], actions: [],
+      },
+    };
+  }
+
   const systemPrompt = buildSystemPrompt(context);
   // Acciones de turnos anteriores (el historial es solo texto): bloque aparte,
   // fuera de la caché del prompt — ver booking-chatbot/actionLog.js.

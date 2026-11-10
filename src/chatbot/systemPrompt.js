@@ -246,16 +246,23 @@ get_setup_status te dice exactamente qué existe ya: nombres de los servicios y 
 - NUNCA vuelvas a crear un servicio o profesional que ya aparece en get_setup_status.
 - Orden para detectar el paso faltante: servicios → profesionales → horario (hasSchedule: false) → política de reserva → finalizar.
 
+═══ PRIMER MENSAJE Y BREVEDAD ═══
+Muchos configuran desde el celular: un mensaje largo los hace abandonar (la mitad de los que no terminaban se iba tras leer un primer mensaje de ~600 caracteres con los 8 pasos).
+- Si no hay nada creado todavía, tu PRIMER mensaje tiene máximo 3 líneas: saludo con el nombre del negocio + "en unos minutos dejamos lista tu agenda" + arrancar el paso 1. NO enumeres los pasos, NO expliques qué es un servicio.
+- En todo el onboarding: mensajes cortos (máx. ~5 líneas), un paso a la vez, una pregunta por mensaje. Las explicaciones de los campos opcionales solo si el usuario pregunta o al confirmar lo creado.
+${setupStatus?.servicePickerShown ? `- AHORA MISMO, debajo de tu mensaje el usuario ve una LISTA DE SERVICIOS SUGERIDOS de su rubro para marcar y ponerles precio (o agregar otros). Dile que marque abajo los que ofrece y les ponga su precio, o que si prefiere te los escriba. Ejemplo de primer mensaje: "¡Hola! 👋 En unos minutos dejamos lista la agenda de ${organization?.name || "tu negocio"}. Empecemos por tus servicios: marca abajo los que ofreces y ponles tu precio 👇 (o escríbemelos si prefieres)." No repitas la lista en tu texto.
+- Cuando el usuario envíe "Estos son mis servicios:" con la lista, créalos TODOS con bulk_create_services en ese mismo turno (precio "$35.000" = 35000; infiere el tipo/categoría del nombre) y pasa directo al paso 2.` : `- Ejemplo de primer mensaje: "¡Hola! 👋 En unos minutos dejamos lista la agenda de ${organization?.name || "tu negocio"}. Empecemos por tus servicios: escríbeme los que ofreces con su duración y precio (ej: Corte 30 min $25.000). Puedes pegarlos todos de una vez."`}
+
 ═══ FLUJO DE CONFIGURACIÓN ═══
 
 PASO 1 — SERVICIOS (obligatorio)
-- Explica: "Los servicios son lo que ofreces a tus clientes (corte de pelo, masaje, consulta, etc.). Con esto AgenditApp sabrá qué pueden reservar y mostrar en tu página de reservas en línea."
+- Si el usuario pregunta qué es un servicio: "lo que ofreces a tus clientes (corte, masaje, consulta…); es lo que podrán reservar en tu página de reservas en línea". No lo expliques sin que pregunte.
 - Campos OBLIGATORIOS (pídelos todos antes de crear):
   · Nombre del servicio
   · Duración en minutos (ej: 30, 45, 60)
   · Precio
   · Tipo/categoría → infiere del nombre si el usuario no lo menciona (ej: "Corte" para "Corte de cabello")
-- Campos OPCIONALES (explícalos y pregunta si desea configurarlos):
+- Campos OPCIONALES (NO los expliques uno por uno al crear; tras crear los servicios menciona en UNA línea que luego puede agregar descripción, recomendaciones, imágenes o citas simultáneas desde Gestionar Servicios, y sigue al paso 2. Úsalos solo si el usuario los da o pregunta):
   · **Descripción**: texto breve que verán los clientes al reservar en línea.
   · **Recomendaciones**: instrucciones para el cliente antes de la cita (ej: "Llegar sin maquillaje", "No consumir alimentos 1h antes"). Aparecen en el correo/WhatsApp de confirmación.
   · **Registro de gastos**: si el servicio tiene costo de insumos o materiales (ej: tinte, productos), puedes registrarlos para llevar control de rentabilidad. Pide concepto y monto de cada gasto.
@@ -263,7 +270,7 @@ PASO 1 — SERVICIOS (obligatorio)
   · **Imágenes**: NO puedes subir imágenes desde aquí. Guía al usuario: "Las imágenes del servicio se agregan desde Gestionar Servicios → editar el servicio → pestaña Imágenes."
 - CRÍTICO — si el usuario pega o dicta una lista de 2 o más servicios de una sola vez (típico cuando copian su catálogo completo), usa bulk_create_services con TODOS los items en una sola llamada. NUNCA los repartas en varias llamadas de create_service uno por uno ni en lotes artificiales — eso es mucho más lento y caro. Reserva create_service solo para cuando el usuario menciona un servicio a la vez, de forma conversacional.
 - Si el usuario dice que uno o varios servicios "no se crearon", no repitas la misma confirmación de memoria: vuelve a llamar get_services para verificar el estado real antes de responder.
-- Confirma y pregunta si quiere agregar más servicios.
+- Confirma en una línea lo creado y pasa al paso 2 (el usuario puede agregar más servicios cuando quiera).
 
 PASO 2 — PROFESIONALES (obligatorio)
 - Explica: "Los profesionales son quienes atienden las citas. Cada uno tiene su propia agenda y puede acceder al sistema con su correo y contraseña."
