@@ -12,6 +12,7 @@ import { computeDepositForServices } from "../../services/collection/orderServic
 import { dateLabel } from "./availability.js";
 import { isPriceHidden } from "./services.js";
 import { resolveServiceId } from "./employees.js";
+import { transferDetailsText } from "./organization.js";
 import { ONLINE_BOOKABLE_EMPLOYEE, ONLINE_SELECTABLE_EMPLOYEE } from "../../utils/onlineBooking.js";
 
 const ACTIVE_APPOINTMENT_FILTER = { $nin: ["cancelled_by_customer", "cancelled_by_admin"] };
@@ -389,7 +390,10 @@ export const prepareReservation = {
     for (const s of services) {
       const svcDoc = await resolveService(s.serviceId, organizationId);
       if (!svcDoc) {
-        return { success: false, error: `No se encontró el servicio: ${s.serviceId}. Usa el campo 'id' exacto que devolvió get_services.` };
+        return {
+          success: false,
+          error: `No se encontró el servicio: ${s.serviceId}. Reintenta pasando el NOMBRE exacto del servicio (como lo devolvió get_services) en lugar del id.`,
+        };
       }
       const employeeId = await resolveEmployeeId(s.employeeId, organizationId, svcDoc._id);
       resolved.push({
@@ -606,6 +610,9 @@ async function startDepositCheckout(payload, depositPlan, context) {
     : `${resolveBaseUrl(context.organization)}/pago/comprobante?ref=${data.externalReference}`;
   const holdMinutes = Math.max(1, Math.round((new Date(data.expiresAt).getTime() - Date.now()) / 60000));
   const amountLabel = formatMoney(data.amount, data.currency);
+  // Transferencia: los datos van en el mismo chat (no solo dentro del enlace) y el
+  // enlace queda para subir el comprobante.
+  const transferDetails = isMp ? null : transferDetailsText(context.organization);
 
   context.session.pendingPayload = null;
   context.session.pendingSummary = null;
@@ -614,6 +621,7 @@ async function startDepositCheckout(payload, depositPlan, context) {
     amountLabel,
     expiresAt: data.expiresAt,
     method: depositPlan.method,
+    transferDetails,
     // Para consultar el estado real del pago en cada turno (waBookingAgentService)
     // y no volver a apartar el mismo horario (guard en prepare_reservation).
     externalReference: data.externalReference,
@@ -627,12 +635,14 @@ async function startDepositCheckout(payload, depositPlan, context) {
     paymentUrl,
     depositAmount: amountLabel,
     holdMinutes,
+    transferDetails,
     _instruction:
       `La reserva quedó APARTADA, todavía NO confirmada: se confirma cuando el cliente pague el abono de ${amountLabel}. ` +
-      `Dile que tiene ${holdMinutes} minutos para pagarlo en el enlace paymentUrl (cópialo completo, tal cual) — ` +
       (isMp
-        ? "puede pagar con Mercado Pago. "
-        : "ahí verá los datos para transferir y sube la foto del comprobante. ") +
+        ? `Dile que tiene ${holdMinutes} minutos para pagarlo con Mercado Pago en el enlace paymentUrl (cópialo completo, tal cual). `
+        : transferDetails
+          ? `Dile que tiene ${holdMinutes} minutos para transferirlo a los datos de transferDetails (cópialos tal cual) y que luego suba la foto del comprobante en el enlace paymentUrl (cópialo completo, tal cual). `
+          : `Dile que tiene ${holdMinutes} minutos para pagarlo en el enlace paymentUrl (cópialo completo, tal cual): ahí verá los datos para transferir y sube la foto del comprobante. `) +
       "Si no lo paga a tiempo el horario se libera. Cuando el pago se valide recibirá la confirmación por WhatsApp. NO digas que la reserva ya está confirmada.",
   };
 }

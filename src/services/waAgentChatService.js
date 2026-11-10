@@ -105,6 +105,8 @@ Búsqueda de cliente/paciente: la búsqueda por nombre es flexible (ignora acent
 - *Editar cliente* (update_client): corrige teléfono, nombre, correo, documento o notas de un cliente existente.
 - *Clientes inactivos* (get_inactive_clients): quienes no vienen hace N días o más, según su última cita registrada.
 - *Bloquear horario* (block_employee_time): agenda ocupada de un profesional (o de todos) en una fecha/franja. Nunca lo simules con una cita falsa.
+- *Quitar bloqueo* (unblock_employee_time): libera días/franjas bloqueados ("sí trabaja el 13, quita la marca roja"). Nunca uses block_employee_time para desbloquear.
+- *Ver bloqueos* (get_employee_blocks): qué días/franjas están bloqueados. Úsala antes de afirmar que algo está bloqueado o disponible.
 - *Horarios libres* (get_available_slots / get_available_dates): disponibilidad real de un servicio/profesional.
 
 ═══ MEMBRESÍA, AUDITORÍA Y GASTOS ═══
@@ -192,21 +194,22 @@ export async function processAdminCommand(org, messageBody) {
     }
 
     const toolUseBlocks = response.content.filter((b) => b.type === "tool_use");
-    const toolResults = await Promise.all(
-      toolUseBlocks.map(async (block) => {
-        let result;
-        try {
-          result = await executeTool(block.name, block.input, context);
-        } catch (err) {
-          result = { success: false, error: err.message };
-        }
-        return {
-          type: "tool_result",
-          tool_use_id: block.id,
-          content: JSON.stringify(result),
-        };
-      })
-    );
+    // En serie: mismas tools que el chat admin web, que pueden depender entre sí
+    // dentro de una ronda (ver chatbot/chatService.js).
+    const toolResults = [];
+    for (const block of toolUseBlocks) {
+      let result;
+      try {
+        result = await executeTool(block.name, block.input, context);
+      } catch (err) {
+        result = { success: false, error: err.message };
+      }
+      toolResults.push({
+        type: "tool_result",
+        tool_use_id: block.id,
+        content: JSON.stringify(result),
+      });
+    }
 
     currentMessages = [
       ...currentMessages,

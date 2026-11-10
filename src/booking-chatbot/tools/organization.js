@@ -10,8 +10,7 @@ const formatWeeklySchedule = (weeklySchedule) => {
     .map((d) => (d.isOpen ? `${DAY_NAMES[d.day]}: ${d.start}–${d.end}` : `${DAY_NAMES[d.day]}: cerrado`));
 };
 
-// Etiquetas legibles de Organization.paymentMethods[].type (solo el medio, sin
-// números de cuenta — esos se ven en la página de pago del abono).
+// Etiquetas legibles de Organization.paymentMethods[].type.
 const PAYMENT_METHOD_LABELS = {
   nequi: "Nequi",
   bancolombia: "Bancolombia",
@@ -22,6 +21,26 @@ const PAYMENT_METHOD_LABELS = {
   sinpe: "SINPE",
   transferencia_bancaria: "Transferencia bancaria",
   efectivo: "Efectivo",
+  otros: "Otro medio",
+};
+
+// Datos para transferir (cuentas de Organization.paymentMethods, los mismos que
+// muestra la página pública /pago/comprobante) en formato WhatsApp, o null si el
+// negocio no tiene cuentas registradas. Caso real (Diana Vargas, nov-2026): 6 de
+// 10 abonos vencieron sin pagar y varias clientas pedían "el número de cuenta" por
+// el chat — el bot solo les repetía el enlace.
+export const transferDetailsText = (organization) => {
+  const blocks = (organization.paymentMethods || [])
+    .filter((m) => m.type !== "efectivo" && (m.accountNumber || m.phoneNumber))
+    .map((m) => {
+      const lines = [`*${PAYMENT_METHOD_LABELS[m.type] || "Cuenta"}*`];
+      if (m.accountNumber) lines.push(`Cuenta: ${m.accountNumber}`);
+      if (m.phoneNumber) lines.push(`Número: ${m.phoneNumber}`);
+      if (m.accountName) lines.push(`Titular: ${m.accountName}`);
+      if (m.notes) lines.push(m.notes);
+      return lines.join("\n");
+    });
+  return blocks.length ? blocks.join("\n\n") : null;
 };
 
 export const getOrganizationInfo = {
@@ -60,6 +79,8 @@ export const getOrganizationInfo = {
             .filter(Boolean)
         ),
       ],
+      // Cuentas para transferir: si el cliente pregunta a dónde/cómo transferir, dáselas tal cual.
+      transferDetails: transferDetailsText(organization),
       _instruction:
         !organization.address && !hours
           ? "Este negocio no tiene dirección ni horario configurados en el sistema. Dile al cliente que no tienes esa información disponible por ahora — NUNCA inventes una dirección u horario."

@@ -150,6 +150,55 @@ function exceptionAppliesToDate(exception, dateStr) {
 }
 
 /**
+ * Quita UN día de un bloqueo del empleado (muta el documento; el que llama hace save()).
+ * - Bloqueo de un solo día (no recurrente): se elimina completo.
+ * - Recurrente: se excluye esa ocurrencia (la regla sigue vigente).
+ * - Multi-día: recorta el rango si el día es un extremo o lo parte en dos si está en medio.
+ * Compartido por DELETE /schedule/employee/:id/exceptions/:exceptionId?date= y la tool
+ * unblock_employee_time del asistente.
+ * @returns {{ ok: boolean, removedWhole?: boolean, error?: string }}
+ */
+function removeExceptionDay(employee, exception, dateStr) {
+  if (!exception.recurrence && exception.startDate === exception.endDate) {
+    employee.scheduleExceptions.pull(exception._id);
+    return { ok: true, removedWhole: true };
+  }
+  if (exception.recurrence) {
+    if (!exceptionAppliesToDate(exception, dateStr)) {
+      return { ok: false, error: "La fecha indicada no es una ocurrencia de este bloqueo" };
+    }
+    exception.excludedDates = [...(exception.excludedDates || []), dateStr];
+    return { ok: true, removedWhole: false };
+  }
+  if (dateStr < exception.startDate || dateStr > exception.endDate) {
+    return { ok: false, error: "La fecha indicada no está dentro del bloqueo" };
+  }
+
+  // Aritmética de días sobre strings "YYYY-MM-DD" en UTC (sin corrimientos por zona horaria)
+  const shiftDay = (d, days) => moment.utc(d, "YYYY-MM-DD").add(days, "days").format("YYYY-MM-DD");
+  const originalEndDate = exception.endDate;
+
+  if (dateStr === exception.startDate) {
+    exception.startDate = shiftDay(dateStr, 1);
+  } else if (dateStr === originalEndDate) {
+    exception.endDate = shiftDay(dateStr, -1);
+  } else {
+    // Día en medio: el bloqueo original conserva el tramo anterior y se crea otro con el posterior
+    exception.endDate = shiftDay(dateStr, -1);
+    employee.scheduleExceptions.push({
+      startDate: shiftDay(dateStr, 1),
+      endDate: originalEndDate,
+      allDay: exception.allDay,
+      ...(exception.startTime ? { startTime: exception.startTime } : {}),
+      ...(exception.endTime ? { endTime: exception.endTime } : {}),
+      ...(exception.reason ? { reason: exception.reason } : {}),
+      createdAt: exception.createdAt,
+    });
+  }
+  return { ok: true, removedWhole: false };
+}
+
+/**
  * Obtiene las excepciones de horario de un empleado para una fecha específica
  * @param {Object} employee - Documento de empleado
  * @param {string} dateStr - Fecha en formato "YYYY-MM-DD"
@@ -1122,6 +1171,7 @@ export default {
   isSlotInBreak,
   isBlockedHoliday,
   exceptionAppliesToDate,
+  removeExceptionDay,
   getOrganizationDaySchedule,
   getEmployeeDaySchedule,
   validateDateTime,

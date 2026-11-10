@@ -38,10 +38,27 @@ const HANDOFF_NOTIFY_COOLDOWN_MS = 30 * 60 * 1000;
 const PAYMENT_CLAIM_PATTERN =
   /\b(pagu[eé]|pag[oó]|envi[eé]|mand[eé]|sub[ií]|transfer[ií]|consign[eé]|deposit[eé])\b|comprobante/i;
 
+// Pide los datos para pagar ("mande el número de cuenta", "a qué cuenta
+// transfiero", "no tengo los datos"). Va ANTES que PAYMENT_CLAIM_PATTERN: "Mande
+// el número de cuenta" matcheaba "mandé" y la clienta recibió "Aún no nos llega tu
+// comprobante" (Diana Vargas, 2026-11-03 — el abono venció sin pagar).
+const ASKS_PAYMENT_DETAILS_PATTERN =
+  /\b(n[uú]mero|n[°º]|datos)\s+(de\s+(la\s+)?)?(cuenta|transferencia|pago)|\bcuenta\s+(bancaria|para|de\s+ahorros|corriente)|\b(a\s+)?(qu[eé]|cu[aá]l)\s+cuenta\b|\bd[oó]nde\s+(transfiero|pago|deposito|consigno)|\bc[oó]mo\s+(pago|transfiero|hago\s+el\s+(pago|abono))/i;
+
+// Para transferencia: datos en el chat + enlace para subir el comprobante.
+const depositPayText = (deposit) =>
+  deposit.method !== "mercadopago" && deposit.transferDetails
+    ? `Puedes transferir el abono de *${deposit.amountLabel}* a:\n\n${deposit.transferDetails}\n\n` +
+      `📎 Después sube la foto del comprobante aquí:\n${deposit.paymentUrl}`
+    : `${deposit.method === "mercadopago" ? "Págalo" : "Ahí ves los datos para transferir y subes el comprobante"} en este enlace:\n${deposit.paymentUrl}`;
+
 const notPaidYetReply = (deposit) =>
   `Aún no nos llega tu ${deposit.method === "mercadopago" ? "pago" : "comprobante"} 🙏 ` +
-  `${deposit.method === "mercadopago" ? "Solo se registra si pagas" : "Solo nos llega si lo subes"} en este enlace:\n` +
-  `${deposit.paymentUrl}\n\nApenas lo hagas se valida y te confirmamos por aquí.`;
+  (deposit.method !== "mercadopago" && deposit.transferDetails
+    ? `Solo nos llega si subes la foto en este enlace:\n${deposit.paymentUrl}\n\n` +
+      `Si aún no has transferido, estos son los datos:\n\n${deposit.transferDetails}`
+    : `${deposit.method === "mercadopago" ? "Solo se registra si pagas" : "Solo nos llega si lo subes"} en este enlace:\n${deposit.paymentUrl}`) +
+  `\n\nApenas lo hagas se valida y te confirmamos por aquí.`;
 
 const handoffReply = (org) =>
   `Le paso tu mensaje al equipo de *${org.name.trim()}* para que te responda personalmente 🙌`;
@@ -349,7 +366,10 @@ export async function processClientBookingMessage(org, clientPhone, body) {
       }
     }
     const deposit = session.pendingDeposit;
-    if (deposit && ["created", "pending"].includes(deposit.status) && PAYMENT_CLAIM_PATTERN.test(body)) {
+    const depositOpen = deposit && ["created", "pending"].includes(deposit.status);
+    if (depositOpen && ASKS_PAYMENT_DETAILS_PATTERN.test(body)) {
+      reply = depositPayText(deposit);
+    } else if (depositOpen && PAYMENT_CLAIM_PATTERN.test(body)) {
       // Dice que ya pagó pero el sistema no tiene nada: respuesta fija. El modelo
       // inventaba "se está procesando, en unos minutos te llega la confirmación"
       // y el cliente se quedaba esperando algo que nunca iba a llegar.

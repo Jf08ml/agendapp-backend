@@ -73,6 +73,18 @@ export function describeToolAction(name, input, result, organization) {
 export function describeAdminToolAction(name, input, result) {
   if (/^(get|query|find)_/.test(name)) return null;
   if (!result || result.success === false || result.error) return null;
+  // Resultados parciales: registrar lo que SÍ pasó, no lo que se pidió — con el
+  // input completo el modelo creía en turnos siguientes que se asignaron/crearon
+  // todos (Studio nails Heidy, nov-2026).
+  if (name === "assign_services_to_employee") {
+    const miss = result.notFound?.length ? ` NO asignados (no existen): ${result.notFound.join(", ")}.` : "";
+    return compact(`Asignaste a ${result.employee}: ${(result.assigned || []).join(", ")}.${miss}`, 400);
+  }
+  if (name === "bulk_create_services") {
+    const names = (result.created || []).map((s) => s.name).join(", ");
+    const skipped = (result.skippedDuplicates || []).map((s) => s.name).join(", ");
+    return compact(`Creaste ${result.createdCount ?? 0} servicio(s): ${names}.${skipped ? ` Sin crear (posible duplicado): ${skipped}.` : ""}`, 400);
+  }
   return `Ejecutaste ${name} con éxito (${compact(JSON.stringify(input || {}), 250)}).`;
 }
 

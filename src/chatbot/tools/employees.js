@@ -2,9 +2,46 @@ import Employee from "../../models/employeeModel.js";
 import Service from "../../models/serviceModel.js";
 import employeeService from "../../services/employeeService.js";
 import bcrypt from "bcryptjs";
-import { findEmployeesByName } from "./appointments.js";
+import moment from "moment-timezone";
+import scheduleService from "../../services/scheduleService.js";
+import { findEmployeesByName, findServiceByName } from "./appointments.js";
 
 const generateTempPassword = () => Math.random().toString(36).slice(-8) + "A1!";
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const UNBLOCK_REASON_PATTERN = /desbloq|quitar|liberar|disponible|s[ií] trabaja|elimina/i;
+const DAY_NAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+const MONTH_NAMES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+// "2026-11-07" → "sábado 7 de noviembre" (calculado en UTC sobre la fecha calendario)
+const dayLabel = (dateStr) => {
+  const d = moment.utc(dateStr, "YYYY-MM-DD");
+  return `${DAY_NAMES[d.day()]} ${d.date()} de ${MONTH_NAMES[d.month()]}`;
+};
+
+// Profesional por nombre (o todos los activos). Devuelve { employees } o { error: <resultado de tool> }.
+const resolveTargetEmployees = async (params, organizationId) => {
+  if (params.allEmployees) {
+    return { employees: await Employee.find({ organizationId, isActive: true }) };
+  }
+  if (!params.employeeName) {
+    return { error: { success: false, error: "Indica el profesional o usa allEmployees: true." } };
+  }
+  const employees = await findEmployeesByName(organizationId, params.employeeName);
+  if (employees.length === 0) {
+    return { error: { success: false, error: `No encontré un profesional activo llamado "${params.employeeName}".` } };
+  }
+  if (employees.length > 1) {
+    return {
+      error: {
+        success: false,
+        multipleFound: true,
+        candidates: employees.map((e) => e.names),
+        _instruction: "Pregunta al usuario a cuál de estos profesionales se refiere y vuelve a llamar con el nombre completo.",
+      },
+    };
+  }
+  return { employees };
+};
 
 export default [
   {
@@ -79,25 +116,60 @@ export default [
         employee = await Employee.findOne({ _id: params.employeeId, organizationId: context.organizationId, isActive: true });
       }
       if (!employee) {
-        employee = await Employee.findOne({
-          organizationId: context.organizationId,
-          names: { $regex: params.employeeId, $options: "i" },
-          isActive: true,
-        });
+        // Tolera tildes y orden de palabras ("Jesus Blazquez" vs "Jesús Blázquez")
+        const found = await findEmployeesByName(context.organizationId, params.employeeId);
+        if (found.length > 1) {
+          return {
+            success: false,
+            error: `Hay ${found.length} profesionales que coinciden con "${params.employeeId}".`,
+            profesionales: found.map((e) => ({ id: e._id, name: e.names })),
+          };
+        }
+        employee = found[0] || null;
       }
       if (!employee) {
         return { success: false, error: `No se encontró el profesional "${params.employeeId}". Verifica el nombre.` };
       }
 
-      const services = await Service.find({
-        organizationId: context.organizationId,
-        name: { $in: params.serviceNames },
-        isActive: true,
-      }).select("_id name");
+      // Cada nombre se resuelve por separado: primero igualdad exacta (sin
+      // mayúsculas/tildes — "Soft gel" no debe caer en "Retoque soft gel"), luego
+      // coincidencia difusa. Antes era un $in exacto y sensible a mayúsculas que
+      // ignoraba en silencio los nombres sin match y respondía success: true.
+      const catalog = await Service.find({ organizationId: context.organizationId, isActive: true }).select("_id name");
+      const norm = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+      const matched = new Map();
+      const notFound = [];
+      for (const name of params.serviceNames || []) {
+        const svc =
+          catalog.find((s) => norm(s.name) === norm(name)) ||
+          (await findServiceByName(context.organizationId, name));
+        if (svc) matched.set(String(svc._id), svc);
+        else notFound.push(name);
+      }
 
-      await Employee.findByIdAndUpdate(employee._id, { $addToSet: { services: { $each: services.map((s) => s._id) } } });
+      if (matched.size === 0) {
+        return {
+          success: false,
+          error: `No se encontró ninguno de los servicios indicados: ${notFound.join(", ")}.`,
+          availableServices: catalog.map((s) => s.name),
+        };
+      }
 
-      return { success: true, employee: employee.names, assigned: services.map((s) => s.name) };
+      await Employee.findByIdAndUpdate(employee._id, {
+        $addToSet: { services: { $each: [...matched.values()].map((s) => s._id) } },
+      });
+
+      return {
+        success: true,
+        employee: employee.names,
+        assigned: [...matched.values()].map((s) => s.name),
+        ...(notFound.length > 0 && {
+          notFound,
+          availableServices: catalog.map((s) => s.name),
+          _instruction:
+            "Algunos servicios NO se asignaron porque no existen con ese nombre (ver notFound). Díselo al usuario; no digas que se asignaron todos.",
+        }),
+      };
     },
   },
   {
@@ -187,26 +259,19 @@ export default [
         }
       }
 
-      let employees;
-      if (params.allEmployees) {
-        employees = await Employee.find({ organizationId, isActive: true });
-      } else {
-        if (!params.employeeName) {
-          return { success: false, error: "Indica el profesional o usa allEmployees: true." };
-        }
-        employees = await findEmployeesByName(organizationId, params.employeeName);
-        if (employees.length === 0) {
-          return { success: false, error: `No encontré un profesional activo llamado "${params.employeeName}".` };
-        }
-        if (employees.length > 1) {
-          return {
-            success: false,
-            multipleFound: true,
-            candidates: employees.map((e) => e.names),
-            _instruction: "Pregunta al usuario a cuál de estos profesionales se refiere y vuelve a llamar con el nombre completo.",
-          };
-        }
+      // Caso real (Diana Vargas, 2026-11-09): sin tool para quitar bloqueos, el modelo
+      // "desbloqueó" llamando esta tool con reason "Desbloqueo" — agregó dos bloqueos
+      // más y le dijo a la dueña que ya estaba disponible.
+      if (UNBLOCK_REASON_PATTERN.test(params.reason || "")) {
+        return {
+          success: false,
+          error: "Esta herramienta solo AGREGA bloqueos. Para quitar un bloqueo usa unblock_employee_time.",
+        };
       }
+
+      const target = await resolveTargetEmployees(params, organizationId);
+      if (target.error) return target.error;
+      const { employees } = target;
 
       const exception = {
         startDate,
@@ -226,8 +291,114 @@ export default [
         blocked: employees.map((e) => e.names),
         startDate,
         endDate,
+        // Con día de la semana calculado aquí: el modelo dijo "jueves 7 de noviembre" (era sábado)
+        fechas: startDate === endDate ? dayLabel(startDate) : `del ${dayLabel(startDate)} al ${dayLabel(endDate)}`,
         franja: allDay ? "día completo" : `${params.startTime}–${params.endTime}`,
         note: "El bloqueo impide nuevas reservas en línea en ese tiempo. Las citas que ya existían en esa franja NO se cancelan; se quitan desde Gestionar agenda.",
+        _instruction: "Al confirmar, usa el texto de 'fechas' tal cual (trae el día de la semana correcto).",
+      };
+    },
+  },
+
+  {
+    name: "get_employee_blocks",
+    description:
+      "Lista los bloqueos de agenda (días o franjas en rojo) de un profesional o de todos en un rango de fechas. Úsala cuando pregunten qué días/horas están bloqueados, cuando digan que un bloqueo 'no se refleja', y antes de afirmar que algo está o no está bloqueado.",
+    parameters: {
+      employeeName: { type: "string", description: "Nombre del profesional. Omítelo para ver los de todos.", required: false },
+      startDate: { type: "string", description: "Desde (YYYY-MM-DD). Por defecto hoy.", required: false },
+      endDate: { type: "string", description: "Hasta (YYYY-MM-DD). Por defecto 60 días después.", required: false },
+    },
+    handler: async (params, context) => {
+      const { organizationId, organization } = context;
+      const today = moment().tz(organization?.timezone || "America/Bogota").format("YYYY-MM-DD");
+      const from = DATE_RE.test(params.startDate || "") ? params.startDate : today;
+      const to = DATE_RE.test(params.endDate || "")
+        ? params.endDate
+        : moment.utc(from, "YYYY-MM-DD").add(60, "days").format("YYYY-MM-DD");
+
+      const target = await resolveTargetEmployees({ ...params, allEmployees: !params.employeeName }, organizationId);
+      if (target.error) return target.error;
+
+      const blocks = [];
+      for (const emp of target.employees) {
+        for (const ex of emp.scheduleExceptions || []) {
+          if (ex.endDate < from || ex.startDate > to) continue;
+          blocks.push({
+            profesional: emp.names,
+            fechas: ex.startDate === ex.endDate ? dayLabel(ex.startDate) : `del ${dayLabel(ex.startDate)} al ${dayLabel(ex.endDate)}`,
+            franja: ex.allDay ? "día completo" : `${ex.startTime}–${ex.endTime}`,
+            ...(ex.recurrence ? { repite: ex.recurrence === "weekly" ? "semanal" : "mensual" } : {}),
+            ...(ex.reason ? { motivo: ex.reason } : {}),
+          });
+        }
+      }
+      return {
+        success: true,
+        rango: `del ${dayLabel(from)} al ${dayLabel(to)}`,
+        bloqueos: blocks,
+        ...(blocks.length === 0 && { mensaje: "No hay bloqueos en ese rango." }),
+      };
+    },
+  },
+
+  {
+    name: "unblock_employee_time",
+    description:
+      "QUITA bloqueos de agenda (días o franjas en rojo) de un profesional o de todos en una fecha o rango: 'quita la marca roja del 13', 'Diana sí trabaja el viernes, desbloquéalo'. Quita TODOS los bloqueos que caen en esas fechas (día completo o por horas); en un bloqueo de varios días solo libera las fechas pedidas. NUNCA uses block_employee_time para desbloquear.",
+    parameters: {
+      employeeName: { type: "string", description: "Nombre del profesional. Omítelo si allEmployees es true.", required: false },
+      allEmployees: { type: "boolean", description: "true para quitar los bloqueos de todos los profesionales en esas fechas.", required: false },
+      startDate: { type: "string", description: "Fecha de inicio YYYY-MM-DD", required: true },
+      endDate: { type: "string", description: "Fecha de fin YYYY-MM-DD (igual a startDate si es un solo día)", required: false },
+    },
+    handler: async (params, context) => {
+      const { organizationId } = context;
+      const startDate = params.startDate;
+      const endDate = params.endDate || params.startDate;
+      if (!DATE_RE.test(startDate || "") || !DATE_RE.test(endDate)) {
+        return { success: false, error: "Las fechas deben tener formato YYYY-MM-DD." };
+      }
+      if (startDate > endDate) {
+        return { success: false, error: "La fecha de inicio debe ser anterior o igual a la de fin." };
+      }
+      const dates = [];
+      for (let d = moment.utc(startDate, "YYYY-MM-DD"); d.format("YYYY-MM-DD") <= endDate; d.add(1, "day")) {
+        dates.push(d.format("YYYY-MM-DD"));
+        if (dates.length > 92) return { success: false, error: "El rango máximo es de 3 meses." };
+      }
+
+      const target = await resolveTargetEmployees(params, organizationId);
+      if (target.error) return target.error;
+
+      const removed = [];
+      for (const emp of target.employees) {
+        let changed = false;
+        for (const date of dates) {
+          const applying = (emp.scheduleExceptions || []).filter((ex) => scheduleService.exceptionAppliesToDate(ex, date));
+          for (const ex of applying) {
+            const franja = ex.allDay ? "día completo" : `${ex.startTime}–${ex.endTime}`;
+            const r = scheduleService.removeExceptionDay(emp, ex, date);
+            if (r.ok) {
+              changed = true;
+              removed.push(`${emp.names}: ${dayLabel(date)} (${franja})`);
+            }
+          }
+        }
+        if (changed) await emp.save();
+      }
+
+      if (removed.length === 0) {
+        return {
+          success: false,
+          error: `No hay bloqueos ${dates.length === 1 ? `el ${dayLabel(startDate)}` : `entre el ${dayLabel(startDate)} y el ${dayLabel(endDate)}`} para ${target.employees.map((e) => e.names).join(", ")}.`,
+          _instruction: "Díselo al usuario tal cual: no había nada que quitar en esas fechas. Si cree que sí hay una marca roja, usa get_employee_blocks para ver qué bloqueos existen.",
+        };
+      }
+      return {
+        success: true,
+        quitados: removed,
+        note: "Esos tiempos vuelven a ofrecerse en la reserva en línea (según el horario del profesional).",
       };
     },
   },

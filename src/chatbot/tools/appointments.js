@@ -14,11 +14,11 @@ const DAY_NAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "vierne
 // sin él el modelo lo deducía y se equivocaba ("Martes 8 de octubre", sep-2026).
 const withWeekday = (m, fmt) => `${DAY_NAMES[m.day()]} ${m.format(fmt)}`;
 
-const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapeRegex = (str) => String(str ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // Quita acentos, pasa a minúsculas y deja solo letras/números/espacios — para comparar nombres de forma flexible
 const normalizeForSearch = (str) =>
-  str
+  String(str ?? "")
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
     .toLowerCase()
@@ -29,6 +29,7 @@ const normalizeForSearch = (str) =>
 // Busca un servicio por nombre: primero coincidencia directa (regex), si no encuentra
 // intenta coincidencia difusa por palabras (ignora acentos, paréntesis, orden de palabras, etc.)
 export const findServiceByName = async (organizationId, searchTerm) => {
+  if (!String(searchTerm ?? "").trim()) return null;
   const direct = await Service.findOne({
     organizationId,
     name: { $regex: escapeRegex(searchTerm), $options: "i" },
@@ -54,6 +55,7 @@ export const findServiceByName = async (organizationId, searchTerm) => {
 // Busca clientes por nombre: coincidencia directa primero, luego difusa por solapamiento de palabras
 // (tolera nombres incompletos, acentos distintos u orden de palabras diferente). Devuelve los mejores candidatos.
 export const findClientsByName = async (organizationId, searchTerm) => {
+  if (!String(searchTerm ?? "").trim()) return [];
   const direct = await Client.find({
     organizationId,
     name: { $regex: escapeRegex(searchTerm), $options: "i" },
@@ -83,6 +85,7 @@ export const findClientsByName = async (organizationId, searchTerm) => {
 // profesional usaban un regex crudo sin normalizar tildes, por lo que un nombre
 // con acento (muy común al escribir desde WhatsApp) nunca matcheaba el registro.
 export const findEmployeesByName = async (organizationId, searchTerm) => {
+  if (!String(searchTerm ?? "").trim()) return [];
   const direct = await Employee.find({
     organizationId,
     names: { $regex: escapeRegex(searchTerm), $options: "i" },
@@ -525,6 +528,11 @@ Si el cliente no existe y se proporciona clientPhone, se crea automáticamente. 
         description: "Crear las citas aunque haya conflicto de horario con otra cita existente del profesional. Úsalo SOLO tras confirmación explícita del usuario sobre un overlapConflict previo.",
         required: false,
       },
+      useExistingClient: {
+        type: "boolean",
+        description: "Agendar al cliente ya registrado con ese teléfono aunque tenga otro nombre. Úsalo SOLO si el usuario confirmó que es la misma persona tras un phoneBelongsToOtherClient previo.",
+        required: false,
+      },
     },
     handler: async (params, context) => {
       const { organizationId, organization } = context;
@@ -536,6 +544,23 @@ Si el cliente no existe y se proporciona clientPhone, se crea automáticamente. 
       if (params.clientPhone) {
         const found = await findClientsByPhone(organizationId, params.clientPhone);
         clientDoc = found[0] || null;
+        // El teléfono ya es de otro cliente con otro nombre: no agendar en silencio a
+        // nombre del otro. Caso real (Diana Vargas, 2026-11-04): el número de "Ruth
+        // Parra" estaba guardado como "Valeria Cordero" (contactos importados).
+        const shareWord = (a, b) => {
+          const wa = normalizeForSearch(a).split(" ").filter((w) => w.length > 2);
+          const wb = normalizeForSearch(b).split(" ");
+          return wa.some((w) => wb.includes(w));
+        };
+        if (clientDoc && params.clientName?.trim() && !params.useExistingClient && !shareWord(params.clientName, clientDoc.name)) {
+          return {
+            success: false,
+            phoneBelongsToOtherClient: true,
+            error: `El teléfono ${params.clientPhone} ya está registrado a nombre de "${clientDoc.name}", no de "${params.clientName}".`,
+            _instruction:
+              "No se creó nada. Explícale al usuario que ese número ya está guardado con otro nombre y pregúntale si es la misma persona (entonces reintenta con useExistingClient: true; puede corregir el nombre con update_client) o si es otro cliente (pide otro teléfono).",
+          };
+        }
       }
       if (!clientDoc && params.clientName) {
         const found = await findClientsByName(organizationId, params.clientName);
@@ -581,6 +606,26 @@ Si el cliente no existe y se proporciona clientPhone, se crea automáticamente. 
             _instruction:
               "No existe un servicio con ese nombre exacto en el catálogo. Revisa 'availableServices': si hay una coincidencia clara, reintenta create_appointments con ese nombre exacto. Si hay varias opciones razonables o ninguna coincide, pregúntale al usuario cuál de los servicios del catálogo es — nunca inventes ni asumas uno.",
           };
+        }
+
+        // Sin profesional indicado: si un solo profesional activo atiende el servicio,
+        // es ese; si hay varios, preguntar. Antes findEmployeesByName(undefined)
+        // reventaba con "Cannot read properties of undefined (reading 'replace')"
+        // (Diana Vargas Studio, 2026-11-04: la cita de Ruth Parra no se creó).
+        if (!appt.employeeName?.trim()) {
+          const offering = await Employee.find({ organizationId, isActive: true, services: svc._id }).select("_id names");
+          if (offering.length !== 1) {
+            return {
+              success: false,
+              needsEmployee: true,
+              error: `Falta indicar el profesional para "${svc.name}".`,
+              profesionales: offering.map((e) => e.names),
+              _instruction: offering.length
+                ? "Pregúntale al usuario con cuál de estos profesionales agendar y reintenta con employeeName."
+                : "Ningún profesional activo tiene asignado este servicio. Pregúntale al usuario quién lo atiende (y ofrécele asignárselo con assign_services_to_employee).",
+            };
+          }
+          appt.employeeName = offering[0].names;
         }
 
         const emps = await findEmployeesByName(organizationId, appt.employeeName);

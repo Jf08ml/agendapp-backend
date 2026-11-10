@@ -51,11 +51,17 @@ export const getEmployeesForService = {
   handler: async ({ serviceId }, { organizationId, organization }) => {
     const resolvedId = await resolveServiceId(serviceId, organizationId);
     if (!resolvedId) {
+      // El modelo a veces copia mal los 24 caracteres del id (truncado o con un
+      // dígito cambiado) y reintentaba el mismo id roto hasta 6 veces (Estudio Rosa
+      // Jardín, MIMOS PARA TI, Diana Vargas — oct/nov-2026). Con el catálogo a la
+      // vista puede reintentar con el nombre exacto.
+      const catalog = await Service.find({ organizationId, isActive: true }).select("_id name").lean();
       return {
         success: false,
         error: `No se encontró el servicio "${serviceId}".`,
+        availableServices: catalog.map((s) => ({ id: s._id, name: s.name })),
         _instruction:
-          "Vuelve a llamar get_employees_for_service con el campo 'id' exacto que devolvió get_services. NO inventes nombres de profesionales.",
+          "Ese id no existe. Busca el servicio en 'availableServices' y vuelve a llamar get_employees_for_service pasando su NOMBRE exacto (no el id). NO inventes nombres de profesionales.",
       };
     }
 

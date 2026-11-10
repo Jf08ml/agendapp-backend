@@ -1156,44 +1156,13 @@ const scheduleController = {
         return sendResponse(res, 404, null, "Excepción no encontrada");
       }
 
-      const removeWholeException =
-        !date || (!exception.recurrence && exception.startDate === exception.endDate);
-
+      let removeWholeException = !date;
       if (removeWholeException) {
         employee.scheduleExceptions.pull(exceptionId);
-      } else if (exception.recurrence) {
-        // Bloqueo recurrente: quitar UNA ocurrencia = excluir esa fecha (la regla sigue vigente)
-        if (!scheduleService.exceptionAppliesToDate(exception, date)) {
-          return sendResponse(res, 400, null, "La fecha indicada no es una ocurrencia de este bloqueo");
-        }
-        exception.excludedDates = [...(exception.excludedDates || []), date];
       } else {
-        if (date < exception.startDate || date > exception.endDate) {
-          return sendResponse(res, 400, null, "La fecha indicada no está dentro del bloqueo");
-        }
-
-        // Aritmética de días sobre strings "YYYY-MM-DD" en UTC (sin corrimientos por zona horaria)
-        const shiftDay = (dateStr, days) =>
-          moment.utc(dateStr, "YYYY-MM-DD").add(days, "days").format("YYYY-MM-DD");
-        const originalEndDate = exception.endDate;
-
-        if (date === exception.startDate) {
-          exception.startDate = shiftDay(date, 1);
-        } else if (date === originalEndDate) {
-          exception.endDate = shiftDay(date, -1);
-        } else {
-          // Día en medio: el bloqueo original conserva el tramo anterior y se crea otro con el posterior
-          exception.endDate = shiftDay(date, -1);
-          employee.scheduleExceptions.push({
-            startDate: shiftDay(date, 1),
-            endDate: originalEndDate,
-            allDay: exception.allDay,
-            ...(exception.startTime ? { startTime: exception.startTime } : {}),
-            ...(exception.endTime ? { endTime: exception.endTime } : {}),
-            ...(exception.reason ? { reason: exception.reason } : {}),
-            createdAt: exception.createdAt,
-          });
-        }
+        const result = scheduleService.removeExceptionDay(employee, exception, date);
+        if (!result.ok) return sendResponse(res, 400, null, result.error);
+        removeWholeException = result.removedWhole;
       }
 
       await employee.save();

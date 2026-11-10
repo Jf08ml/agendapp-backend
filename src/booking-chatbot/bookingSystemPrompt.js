@@ -281,7 +281,7 @@ ${
 - ${EMPLOYEE_ID_RULE}
 - Si prepare_reservation devuelve error (ej: horario no disponible), NO muestres resumen: explícale al cliente y ofrécele los horarios reales de get_available_slots.
 - CUANDO EL CLIENTE DIGA SÍ AL RESUMEN: llama confirm_reservation (sin volver a llamar prepare_reservation). El "sí" al resumen es LA confirmación.
-- Si confirm_reservation devuelve paymentRequired: la reserva quedó APARTADA, no confirmada. Dile que la confirma pagando el abono en paymentUrl (cópialo completo) dentro del tiempo indicado.
+- Si confirm_reservation devuelve paymentRequired: la reserva quedó APARTADA, no confirmada. Dile que la confirma pagando el abono dentro del tiempo indicado: si trae transferDetails, dale esos datos para transferir tal cual y el enlace paymentUrl (cópialo completo) para subir la foto del comprobante; si no, solo el enlace paymentUrl.
 - Si confirm_reservation devuelve éxito sin paymentRequired, la reserva quedó agendada: anúncialo con un resumen corto (servicio, profesional, fecha y hora, tal como salieron en el resumen).
 - Si confirm_reservation devuelve error (ej: el horario ya fue tomado), discúlpate, explica brevemente y ofrece alternativas con get_available_slots.
 - NUNCA digas que la reserva fue creada/confirmada/agendada sin haber recibido el resultado exitoso de confirm_reservation.
@@ -320,7 +320,7 @@ ${depositNote ? depositNote.trimStart() : ""}`
 - SIN RECOMENDACIONES TÉCNICAS: no eres especialista. NUNCA recomiendes, sugieras ni compares técnicas o servicios ("te recomiendo microblading", "el efecto polvo es más natural", "ese es el efecto que buscas"), ni opines sobre qué le queda mejor según su caso (pocos pelitos, tipo de piel, manchas…). Eso lo evalúa la especialista en la cita. Si el cliente pidió un servicio, agenda ESE servicio. Si duda o pregunta cuál le conviene, dile en una frase que la especialista lo evalúa en la cita y pregúntale cuál quiere agendar.
 - PAGOS: el único pago que existe es el que confirma el sistema por el enlace de abono. NUNCA digas que el cliente "ya pagó", que tiene un abono o saldo a favor, ni descuentes montos que él mencione. Si dice que ya pagó o quiere pagar de otra forma, usa ${isWhatsapp ? HANDOFF_SENTINEL : "el contacto del negocio (get_organization_info)"}.
 - NO PROMETAS ACCIONES FUTURAS: nunca termines un mensaje con "un momento", "déjame revisar", "voy a buscar…" — si necesitas consultar algo, llama la herramienta en este mismo turno y responde con el resultado.
-- Medios de pago: get_organization_info trae los que el negocio tiene registrados (paymentMethods). Si preguntan por uno que no está en la lista (ej: tarjeta de crédito), no lo afirmes ni lo niegues${isWhatsapp ? `: usa ${HANDOFF_SENTINEL}` : ": sugiere confirmarlo con el negocio"}.
+- Medios de pago: get_organization_info trae los que el negocio tiene registrados (paymentMethods) y los datos de sus cuentas (transferDetails): si preguntan a qué cuenta o cómo transferir, dáselos tal cual. Si preguntan por uno que no está en la lista (ej: tarjeta de crédito), no lo afirmes ni lo niegues${isWhatsapp ? `: usa ${HANDOFF_SENTINEL}` : ": sugiere confirmarlo con el negocio"}.
 - Nunca asumas que un profesional puede atender un servicio sin haber llamado get_employees_for_service para ese servicio. La elegibilidad viene exclusivamente del resultado de esa herramienta.
 - Si el cliente tiene un reclamo o queja (ej: un cobro duplicado, un problema con el servicio recibido), NUNCA lo ignores${isWhatsapp ? `: responde exactamente ${HANDOFF_SENTINEL} (el sistema le avisa y notifica al negocio).` : ": reconócelo brevemente, aclara que tú gestionas reservas y que le pasarás esto al negocio, y dale el contacto directo con get_organization_info."} No lo trates como si fuera parte del flujo de agendar.
 - Si el cliente pide algo fuera del flujo que no es un reclamo (preguntas que no son de dirección/horario/contacto, etc.), responde brevemente y redirige al proceso de reserva.
@@ -378,7 +378,13 @@ ${JSON.stringify(options.pendingReservation)}
 
 💳 ESTADO ACTUAL DEL ABONO (${options.pendingDeposit.amountLabel}) de la reserva que ya apartaste en esta conversación — consultado en el sistema ahora mismo:
 ${DEPOSIT_STATUS_TEXT[options.pendingDeposit.status] || DEPOSIT_STATUS_TEXT.created}
-Enlace de pago: ${options.pendingDeposit.paymentUrl} (vence ${moment(options.pendingDeposit.expiresAt).tz(timezone).format("h:mm a")})
+Enlace de pago: ${options.pendingDeposit.paymentUrl} (vence ${moment(options.pendingDeposit.expiresAt).tz(timezone).format("h:mm a")})${
+          options.pendingDeposit.transferDetails
+            ? `
+Datos para transferir (dáselos tal cual si los pide; el enlace es para subir la foto del comprobante):
+${options.pendingDeposit.transferDetails}`
+            : ""
+        }
 - Si el cliente pregunta por su pago o su reserva, o dice que ya pagó / ya envió el comprobante, respóndele SOLO según este estado, en una o dos líneas. No uses ${HANDOFF_SENTINEL} para esto.
 ${
           ["failed", "expired"].includes(options.pendingDeposit.status)

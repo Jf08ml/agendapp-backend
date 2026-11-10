@@ -69,7 +69,14 @@ const AVAILABILITY_CLAIM_PATTERN =
 const TIME_MENTION_PATTERN = /\b\d{1,2}(:\d{2})?\s*(a\.?\s?m\.?|p\.?\s?m\.?|h\b|horas\b)/i;
 
 const depositLinkText = (checkout) =>
-  `👉 Paga el abono de *${checkout.depositAmount}* aquí para confirmar tu reserva (tienes ${checkout.holdMinutes} minutos):\n${checkout.paymentUrl}`;
+  checkout.transferDetails
+    ? `👉 Para confirmar tu reserva transfiere el abono de *${checkout.depositAmount}* (tienes ${checkout.holdMinutes} minutos) a:\n\n` +
+      `${checkout.transferDetails}\n\n📎 Luego sube la foto del comprobante aquí:\n${checkout.paymentUrl}`
+    : `👉 Paga el abono de *${checkout.depositAmount}* aquí para confirmar tu reserva (tienes ${checkout.holdMinutes} minutos):\n${checkout.paymentUrl}`;
+
+// Primera línea de datos de la cuenta ("Cuenta: 123…") — para saber si la
+// respuesta del modelo ya los incluyó.
+const firstAccountLine = (details) => (details || "").split("\n").find((l) => /^(Cuenta|Número):/.test(l)) || "";
 
 // Texto al cliente tras un confirm_reservation exitoso: con abono, la reserva
 // queda apartada hasta que pague; sin abono, ya quedó agendada.
@@ -463,8 +470,14 @@ export const processBookingChat = async (organization, messages, options = {}) =
 
       // El enlace de pago del abono tiene que llegar sí o sí: el modelo puede
       // resumirlo, recortarlo u olvidarlo.
-      if (depositCheckout && !reply.includes(depositCheckout.paymentUrl)) {
-        reply = reply ? `${reply}\n\n${depositLinkText(depositCheckout)}` : confirmedReply(depositCheckout);
+      // Con transferencia, también los datos de la cuenta (las clientas los pedían por el chat).
+      const accountLine = firstAccountLine(depositCheckout?.transferDetails);
+      const accountNumber = accountLine.split(":")[1]?.trim();
+      if (
+        depositCheckout &&
+        (!reply.includes(depositCheckout.paymentUrl) || (accountNumber && !reply.includes(accountNumber)))
+      ) {
+        reply = confirmedReply(depositCheckout);
       }
 
       // Canal WhatsApp: el modelo puede optar por no responder (mensaje sin

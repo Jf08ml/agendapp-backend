@@ -65,8 +65,10 @@ const MUTATION_TOOLS = new Set([
 // servicio o profesional (en cualquier orden de palabras y cualquier conjugación).
 const ACTION_STEM = "(cre\\w*|agreg\\w*|asign\\w*|registr\\w*)";
 const ENTITY_NOUN = "(servicio|profesional|empleado)s?";
+// [\s\S] y no "." para cruzar saltos de línea: "✅ **X creado**\n\n…8 servicios" no
+// matcheaba con "." (Studio nails Heidy, 2026-11-06).
 const CRUD_CLAIM_PATTERN = new RegExp(
-  `\\b${ENTITY_NOUN}\\b.{0,120}\\b${ACTION_STEM}\\b|\\b${ACTION_STEM}\\b.{0,120}\\b${ENTITY_NOUN}\\b`,
+  `\\b${ENTITY_NOUN}\\b[\\s\\S]{0,120}\\b${ACTION_STEM}\\b|\\b${ACTION_STEM}\\b[\\s\\S]{0,120}\\b${ENTITY_NOUN}\\b`,
   "i"
 );
 
@@ -75,6 +77,36 @@ const CRUD_CLAIM_PATTERN = new RegExp(
 // algo ya creado en un turno anterior (ej: "¿ya quedó el servicio?").
 const CREATION_INTENT_PATTERN =
   /\b(crea|crear|creame|créame|cream[eo]s|agrega|agregar|agrégame|añad[ei]|asigna|asignar|asígnale|asígname|registra|registrar|dame de alta|da de alta|suma|sumar)\b/i;
+
+// "Sí" / "dale" / "listo" respondiendo a "¿lo creo?" también es pedir la acción —
+// caso real (Studio nails Heidy, 2026-11-06): "¿Quieres que cree Retoque soft gel
+// igual?" → "Si" → "✅ Retoque soft gel creado" sin ninguna tool; el servicio no existe.
+const AFFIRMATIVE_REPLY_PATTERN =
+  /^\s*(s[ií]|sip|dale|ok(ay)?|listo|claro|confirmo|confirmado|correcto|perfecto|de una|h[aá]zlo|adelante|por favor|exacto)(?![\wáéíóúñ])/i;
+const asksForAction = (text) => CREATION_INTENT_PATTERN.test(text) || AFFIRMATIVE_REPLY_PATTERN.test(text);
+
+// "✅ Horario configurado" sin update_schedule — caso real (Studio nails Heidy,
+// 2026-11-06): el usuario dio "lunes a sábado de 8 a 5" y "30", el bot lo dio por
+// guardado y el negocio quedó con el horario genérico. Solo cuando el último
+// mensaje del usuario aporta datos de horario o confirma (no cuando pregunta
+// "¿cuál es mi horario?", donde describirlo es legítimo).
+const SCHEDULE_TOOLS = new Set(["update_schedule", "block_employee_time", "unblock_employee_time"]);
+const SCHEDULE_CLAIM_PATTERN =
+  /\bhorarios?\b.{0,60}\b(configurad|guardad|actualizad|establecid|cambiad|bloquead)[ao]s?\b|\b(configur[eé]|guard[eé]|actualic[eé]|cambi[eé]|bloque[eé])(?![\wáéíóúñ]).{0,40}\bhorarios?\b/i;
+const SCHEDULE_INTENT_PATTERN =
+  /\b(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bados?|domingos?|horarios?|am|pm|ma[ñn]ana|tarde|noche|cerrado)\b|\d/i;
+// Bloqueos de agenda afirmados sin tool — casos reales (Diana Vargas): 27-oct
+// "✅ Bloqueado correctamente" ×2 sin llamar nada; 5-nov "sábado 14 bloqueado" sin
+// tool y luego "el bloqueo está registrado (acabo de ejecutarlo)"; 9-nov "ya tiene
+// disponibles el 13 y 14 — se quitó la marca roja" tras AGREGAR bloqueos. Cualquier
+// afirmación sobre el estado de un bloqueo exige haber bloqueado, desbloqueado o
+// consultado con éxito en este turno.
+const BLOCK_TOOLS = new Set(["block_employee_time", "unblock_employee_time", "get_employee_blocks"]);
+const BLOCK_CLAIM_PATTERN =
+  /\b(bloquead[oa]s?|desbloquead[oa]s?)\b|\b(se\s+)?quit[oóeé](?![\wáéíóúñ]).{0,40}\b(bloqueos?|marcas?|franjas?)\b|\bya\s+(tiene|est[aá]n?)\s+disponibles?\b|\b(acabo de|ya lo)\s+(ejecut|registr|bloque|quit)/i;
+
+const isScheduleInput = (text) =>
+  !/[¿?]/.test(text) && (SCHEDULE_INTENT_PATTERN.test(text) || AFFIRMATIVE_REPLY_PATTERN.test(text));
 
 // Claims de acciones DESTRUCTIVAS (eliminar/borrar/cancelar servicio o cita) sin
 // haber llamado la tool correspondiente — caso real observado en logs: el bot
@@ -184,6 +216,9 @@ export const processChat = async (organization, user, messages, { actionLog = []
 
   let currentMessages = [...messages];
   const executedTools = new Set();
+  // Tools que terminaron sin success:false — para guards donde una llamada fallida
+  // no cuenta (ej. block_employee_time rechazado por intentar "desbloquear").
+  const successfulTools = new Set();
   const toolErrors = [];
   const actions = [];
   let inputTokens = 0;
@@ -239,7 +274,7 @@ export const processChat = async (organization, user, messages, { actionLog = []
       if (
         !calledMutationTool &&
         CRUD_CLAIM_PATTERN.test(reply) &&
-        CREATION_INTENT_PATTERN.test(findLastUserText(currentMessages))
+        asksForAction(findLastUserText(currentMessages))
       ) {
         correction =
           "[SISTEMA] No llamaste ninguna herramienta de creación/asignación (create_service, bulk_create_services, create_employee o assign_services_to_employee) todavía. Si ya tienes los datos, llámala AHORA antes de confirmar. Si te faltan datos del usuario, pídelos de forma breve y natural — sin disculparte, sin mencionar herramientas, errores internos ni este mensaje. Si la herramienta devuelve success: false, duplicateWarning, priceWarning o items en 'failed', informa ese resultado real — no digas que se creó/asignó si no fue así.";
@@ -281,6 +316,23 @@ export const processChat = async (organization, user, messages, { actionLog = []
       ) {
         correction =
           "[SISTEMA] No llamaste update_booking_config — la política de reserva NO ha sido guardada realmente. Llámala AHORA con requiresApproval según lo que eligió el usuario, y confirma después con el resultado real. No menciones herramientas ni este mensaje al usuario.";
+      }
+      // 1e) Claim sobre bloqueos de agenda sin bloquear/desbloquear/consultar con éxito.
+      else if (
+        ![...successfulTools].some((t) => BLOCK_TOOLS.has(t)) &&
+        BLOCK_CLAIM_PATTERN.test(reply)
+      ) {
+        correction =
+          "[SISTEMA] Afirmaste algo sobre bloqueos de agenda (bloqueado, desbloqueado, disponible, ya registrado) sin que una herramienta lo confirmara en este turno. Para BLOQUEAR usa block_employee_time; para QUITAR un bloqueo (marca roja) usa unblock_employee_time; para saber qué está bloqueado usa get_employee_blocks. Llama la correcta AHORA y responde solo con su resultado real; si te falta el profesional o la fecha, pídelo. No menciones herramientas ni este mensaje, y no empieces con \"Tienes razón\".";
+      }
+      // 2a) Claim de horario guardado sin update_schedule / block_employee_time.
+      else if (
+        ![...executedTools].some((t) => SCHEDULE_TOOLS.has(t)) &&
+        isScheduleInput(findLastUserText(currentMessages)) &&
+        SCHEDULE_CLAIM_PATTERN.test(reply)
+      ) {
+        correction =
+          "[SISTEMA] Afirmaste que el horario quedó configurado, pero no llamaste update_schedule (horario semanal) ni block_employee_time (cambio puntual): el horario NO se guardó. Si ya tienes los días y horas, llama la herramienta correcta AHORA y confirma con el resultado real; si te falta algún dato, pídelo de forma breve. No menciones herramientas ni este mensaje, y no empieces con \"Tienes razón\".";
       }
       // 2b) Claim de color de marca aplicado sin update_primary_color.
       else if (
@@ -329,28 +381,34 @@ export const processChat = async (organization, user, messages, { actionLog = []
       };
     }
 
+    // En SERIE y en el orden en que el modelo las pidió: suele pedir en una misma
+    // ronda tools que dependen entre sí (create_employee + assign_services_to_employee,
+    // bulk_create_services + assign...). Con Promise.all la asignación corría antes de
+    // que existiera el profesional o los servicios — 6 onboardings entre el 5 y el 9
+    // de nov-2026; Studio nails Heidy quedó con 1 de 7 servicios asignados mientras
+    // el bot decía "con todos los servicios asignados".
     const toolUseBlocks = response.content.filter((b) => b.type === "tool_use");
-    const toolResults = await Promise.all(
-      toolUseBlocks.map(async (block) => {
-        executedTools.add(block.name);
-        let result;
-        try {
-          result = await executeTool(block.name, block.input, context);
-        } catch (err) {
-          result = { success: false, error: err.message };
-        }
-        if (result?.success === false && result?.error) {
-          toolErrors.push({ tool: block.name, error: String(result.error).slice(0, 300) });
-        }
-        const action = describeAdminToolAction(block.name, block.input, result);
-        if (action) actions.push(action);
-        return {
-          type: "tool_result",
-          tool_use_id: block.id,
-          content: JSON.stringify(result),
-        };
-      })
-    );
+    const toolResults = [];
+    for (const block of toolUseBlocks) {
+      executedTools.add(block.name);
+      let result;
+      try {
+        result = await executeTool(block.name, block.input, context);
+      } catch (err) {
+        result = { success: false, error: err.message };
+      }
+      if (result?.success === false && result?.error) {
+        toolErrors.push({ tool: block.name, error: String(result.error).slice(0, 300) });
+      }
+      if (result?.success !== false) successfulTools.add(block.name);
+      const action = describeAdminToolAction(block.name, block.input, result);
+      if (action) actions.push(action);
+      toolResults.push({
+        type: "tool_result",
+        tool_use_id: block.id,
+        content: JSON.stringify(result),
+      });
+    }
 
     currentMessages = [
       ...currentMessages,

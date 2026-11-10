@@ -222,6 +222,16 @@ NO la uses para cambios de una fecha puntual o "solo esta semana" (ej: "mañana 
       if (servicesCount === 0 || employeesCount === 0) {
         return { success: false, error: "Aún faltan configurar servicios o profesionales antes de finalizar." };
       }
+      // Mismo criterio que autoCompleteSetupIfReady: sin horario semanal habilitado
+      // las reservas usan el horario genérico antiguo, no el que dio el usuario
+      // (Studio nails Heidy, 2026-11-06: se cerró el setup sin llamar update_schedule).
+      const org = await Organization.findById(context.organizationId).select("weeklySchedule").lean();
+      if (!(org?.weeklySchedule?.enabled && org.weeklySchedule.schedule?.length)) {
+        return {
+          success: false,
+          error: "Falta configurar el horario de atención. Pídele al usuario sus días y horas y llama update_schedule antes de finalizar.",
+        };
+      }
 
       await Organization.findByIdAndUpdate(context.organizationId, { setupCompleted: true });
       // Marcar el hito del funnel de activación (la org se completó vía chatbot,
