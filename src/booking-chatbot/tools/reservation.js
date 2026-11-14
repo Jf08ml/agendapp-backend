@@ -654,8 +654,12 @@ async function startDepositCheckout(payload, depositPlan, context) {
 const AFFIRMATIVE_PATTERN =
   /^\s*(s[ií]+|dale|ok(ay|i)?|listo|confirm[oa]?|claro|perfecto|h[aá]gale|de una|correcto|est[aá] bien|de acuerdo|por ?favor|ag[eé]nd[ae]me|ag[eé]nd[ae]la|reserv[ae]la|va|vale|bueno,? s[ií])(?![\wáéíóúñ])/i;
 
+// Las notas de voz llegan transcritas con este prefijo (waBookingAgentService):
+// un "Sí, confírmamela" dicho por audio cuenta igual que escrito.
+const VOICE_NOTE_PREFIX = /^\s*🎤\s*\(nota de voz\)\s*/;
+
 export function isExplicitConfirmation(text) {
-  return AFFIRMATIVE_PATTERN.test(String(text || ""));
+  return AFFIRMATIVE_PATTERN.test(String(text || "").replace(VOICE_NOTE_PREFIX, ""));
 }
 
 export const confirmReservation = {

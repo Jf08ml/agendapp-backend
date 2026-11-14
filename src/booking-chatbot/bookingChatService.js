@@ -122,6 +122,9 @@ const extractText = (content) => {
  * @param {string} [options.clientPhone] - teléfono del cliente (WhatsApp) para prellenar
  * @param {string[]} [options.actionLog] - acciones verificadas de turnos anteriores (ver actionLog.js);
  *                                        las de este turno vuelven en _meta.actions
+ * @param {{mediaType: string, data: string}[]} [options.images] - fotos (base64) que el cliente
+ *                                        mandó en este mensaje (WhatsApp); se adjuntan solo a
+ *                                        este turno — el historial guarda "📷 (imagen)" como texto
  */
 export const processBookingChat = async (organization, messages, options = {}) => {
   const channel = options.channel || "web";
@@ -156,6 +159,24 @@ export const processBookingChat = async (organization, messages, options = {}) =
   );
 
   let currentMessages = [...messages];
+  // Fotos del cliente en este turno: van como bloques image antes del texto del
+  // último mensaje de usuario (el resto del historial sigue siendo texto).
+  if (options.images?.length) {
+    const lastUserIdx = currentMessages.map((m) => m.role).lastIndexOf("user");
+    if (lastUserIdx !== -1 && typeof currentMessages[lastUserIdx].content === "string") {
+      const last = currentMessages[lastUserIdx];
+      currentMessages[lastUserIdx] = {
+        ...last,
+        content: [
+          ...options.images.map((img) => ({
+            type: "image",
+            source: { type: "base64", media_type: img.mediaType, data: img.data },
+          })),
+          { type: "text", text: last.content },
+        ],
+      };
+    }
+  }
   let bookingPayload = null;
   const executedTools = new Set();
   // Tools que devolvieron success: true en este turno (para no aceptar "cita

@@ -19,6 +19,8 @@ import WaBotPause from "../models/waBotPauseModel.js";
 import Order from "../models/orderModel.js";
 import notificationService from "./notificationService.js";
 import subscriptionService from "./subscriptionService.js";
+import { downloadMedia } from "./metaTemplateService.js";
+import { transcribeAudio, MAX_AUDIO_BYTES } from "./audioTranscriptionService.js";
 
 // Sesión expira tras 6 h de inactividad. Con 30 min (antes) los clientes que
 // contestaban más tarde ("en la mañana", "ok") caían en una sesión nueva: el bot
@@ -169,7 +171,10 @@ setInterval(() => {
 // llega como webhook smb_message_echoes (waAgentController). Si una persona ya
 // está atendiendo a ese cliente, el bot se calla para no pisarle la conversación.
 // Se extiende con cada respuesta manual; el cliente puede reactivarlo con AGENDAR.
-const HUMAN_TAKEOVER_TTL_MS = 12 * 60 * 60 * 1000;
+// La duración la elige cada negocio (Organization.waHumanTakeoverHours, 2 h por
+// defecto). Eran 12 h fijas: si el negocio contestaba algo en la mañana, el bot
+// ignoraba al cliente el resto del día ("a veces contesta y a veces no").
+const DEFAULT_HUMAN_TAKEOVER_HOURS = 2;
 
 // Ids de los mensajes que envió el propio bot (Cloud API) — por si Meta llegara
 // a reportarlos como eco, nunca se confunden con una respuesta del negocio.
@@ -192,9 +197,26 @@ function rememberBotMessage(id) {
  * Business): pausa el bot para ese cliente. Devuelve false si el eco era de un
  * mensaje del propio bot.
  */
-export async function pauseForHumanTakeover(orgId, clientPhone, echoMessageId) {
+export async function pauseForHumanTakeover(orgId, clientPhone, echoMessageId, hours) {
   if (echoMessageId && botMessageIds.has(echoMessageId)) return false;
-  await setPause(orgId, clientPhone, Date.now() + HUMAN_TAKEOVER_TTL_MS, "human");
+  const h = Number(hours) > 0 ? Number(hours) : DEFAULT_HUMAN_TAKEOVER_HOURS;
+  const untilMs = Date.now() + h * 60 * 60 * 1000;
+  try {
+    // Un PAUSAR del cliente más largo se respeta. Una pausa "human" anterior se
+    // reemplaza (no $max): si el negocio acortó la duración, no debe seguir la vieja.
+    const existing = await WaBotPause.findOne({ organizationId: orgId, clientPhone })
+      .select("until reason")
+      .lean();
+    if (existing?.reason === "client" && existing.until?.getTime() > untilMs) return true;
+    pausedClients.set(`${orgId}:${clientPhone}`, untilMs);
+    await WaBotPause.updateOne(
+      { organizationId: orgId, clientPhone },
+      { $set: { until: new Date(untilMs), reason: "human" } },
+      { upsert: true }
+    );
+  } catch (err) {
+    console.error("[WaBookingAgent] Error guardando pausa:", err.message);
+  }
   return true;
 }
 
@@ -296,6 +318,46 @@ async function getOrCreateSession(orgId, clientPhone) {
   return session;
 }
 
+// ── Fotos y notas de voz ─────────────────────────────────────────────────────
+// Claude ve las fotos directamente; las notas de voz se transcriben con OpenAI
+// (Claude no acepta audio). En el historial quedan como texto marcado
+// ("🎤 (nota de voz) …", "📷 (imagen) …") — ver la sección del prompt.
+const VOICE_FAIL_REPLY = "No pude escuchar tu nota de voz 🙏 ¿Me lo escribes por aquí?";
+// Límite de Claude por imagen: 5 MB.
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const CLAUDE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+
+async function resolveIncomingMedia(org, media, caption) {
+  const text = String(caption || "").trim();
+  if (!media?.id) return { body: text, historyText: text };
+
+  if (media.type === "audio") {
+    try {
+      const { buffer, mimeType } = await downloadMedia(org, media.id, MAX_AUDIO_BYTES);
+      const transcript = await transcribeAudio(buffer, mimeType || media.mimeType);
+      if (transcript) return { body: transcript, historyText: `🎤 (nota de voz) ${transcript}` };
+    } catch (err) {
+      console.error("[WaBookingAgent] Error descargando nota de voz:", err.message);
+    }
+    return { body: "", historyText: "🎤 (nota de voz — no se pudo transcribir)", failReply: VOICE_FAIL_REPLY };
+  }
+
+  // Imagen
+  const label = `📷 (imagen)${text ? ` ${text}` : ""}`;
+  try {
+    const { buffer, mimeType } = await downloadMedia(org, media.id, MAX_IMAGE_BYTES);
+    const type = mimeType || media.mimeType;
+    if (CLAUDE_IMAGE_TYPES.has(type)) {
+      return { body: text, historyText: label, images: [{ mediaType: type, data: buffer.toString("base64") }] };
+    }
+    console.warn(`[WaBookingAgent] Formato de imagen no soportado: ${type}`);
+  } catch (err) {
+    console.error("[WaBookingAgent] Error descargando imagen:", err.message);
+  }
+  // Sin la imagen el modelo solo sabe que llegó una foto (y su pie, si tiene).
+  return { body: text, historyText: `📷 (imagen — no se pudo ver)${text ? ` ${text}` : ""}` };
+}
+
 // Limpieza periódica de sesiones muertas para no acumular memoria
 setInterval(() => {
   const now = Date.now();
@@ -310,9 +372,11 @@ setInterval(() => {
  *
  * @param {Object} org         - Organization (lean)
  * @param {string} clientPhone - Teléfono del cliente en E.164 (+57...)
- * @param {string} body        - Texto del mensaje
+ * @param {string} body        - Texto del mensaje (pie de foto si es imagen; vacío si es audio)
+ * @param {Object} [opts]
+ * @param {{type: "image"|"audio", id: string, mimeType?: string}} [opts.media] - foto o nota de voz
  */
-export async function processClientBookingMessage(org, clientPhone, body) {
+export async function processClientBookingMessage(org, clientPhone, body, opts = {}) {
   const orgId = org._id.toString();
   const startedAt = Date.now();
 
@@ -333,13 +397,19 @@ export async function processClientBookingMessage(org, clientPhone, body) {
     await clearPause(orgId, clientPhone);
   }
 
+  // Foto o nota de voz: se resuelve después de la pausa (no se gasta en clientes
+  // que el negocio atiende a mano). historyText es lo que queda en el historial.
+  const media = await resolveIncomingMedia(org, opts.media, body);
+  body = media.body;
+  const historyText = media.historyText;
+
   console.log(
-    `[WaBookingAgent] Mensaje de cliente — org: ${org.name} — ${clientPhone} — "${body.slice(0, 80)}"`
+    `[WaBookingAgent] Mensaje de cliente — org: ${org.name} — ${clientPhone} — "${historyText.slice(0, 80)}"`
   );
 
   const session = await getOrCreateSession(orgId, clientPhone);
   const isFirstMessageInSession = session.messages.length === 0;
-  session.messages.push({ role: "user", content: body });
+  session.messages.push({ role: "user", content: historyText });
 
   let reply;
   let meta = {};
@@ -352,6 +422,9 @@ export async function processClientBookingMessage(org, clientPhone, body) {
     // el texto exacto, y sin invocar al asistente en absoluto.
     reply = PAUSE_ACK_MESSAGE;
     await setPause(orgId, clientPhone, Date.now() + PAUSE_TTL_MS, "client");
+  } else if (media.failReply) {
+    // Nota de voz que no se pudo transcribir: respuesta fija en vez de silencio.
+    reply = media.failReply;
   } else {
     // Estado real del abono pendiente (sin pagar / en revisión / pagado /
     // rechazado / vencido): el bot responde desde aquí en vez de suponerlo.
@@ -381,6 +454,7 @@ export async function processClientBookingMessage(org, clientPhone, body) {
         sessionId: session.sessionId,
         clientPhone,
         actionLog: session.actionLog,
+        images: media.images,
       });
       noReply = result.noReply === true;
       handoff = result.handoff === true;
@@ -453,7 +527,7 @@ export async function processClientBookingMessage(org, clientPhone, body) {
     $push: {
       messages: {
         $each: [
-          { role: "user", content: body },
+          { role: "user", content: historyText },
           { role: "assistant", content: reply },
         ],
       },

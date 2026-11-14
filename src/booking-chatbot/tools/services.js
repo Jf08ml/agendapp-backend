@@ -10,12 +10,12 @@ export const isPriceHidden = (service, currency) =>
 export const getServices = {
   name: "get_services",
   description:
-    "Obtiene los servicios activos disponibles para reservar (nombre, categoría en 'type', duración, precio), con los destacados (featured: true) primero. Llama esto al inicio de la conversación. Cómo presentarlos al cliente lo indica el PASO 1 de tus instrucciones — no muestres el catálogo completo si el cliente no lo pidió.",
+    "Obtiene los servicios activos disponibles para reservar (nombre, categoría en 'type', duración, precio, descripción y recomendaciones para antes de la cita), con los destacados (featured: true) primero. Llama esto al inicio de la conversación. Cómo presentarlos al cliente lo indica el PASO 1 de tus instrucciones — no muestres el catálogo completo si el cliente no lo pidió.",
   parameters: {},
   handler: async (_params, { organizationId, organization }) => {
     const currency = (organization?.currency || "COP").toUpperCase();
     const services = await Service.find({ organizationId, isActive: true })
-      .select("_id name type duration price description featured hidePrice")
+      .select("_id name type duration price description recommendations featured hidePrice")
       .sort({ _id: 1 })
       .lean();
     // Sort estable en JS: en BSON el campo ausente ordena distinto que false explícito
@@ -35,6 +35,8 @@ export const getServices = {
         price: isPriceHidden(s, currency) ? null : s.price,
         priceHidden: isPriceHidden(s, currency),
         description: s.description || "",
+        // Indicaciones del negocio para antes de la cita ("llegar sin maquillaje")
+        recommendations: s.recommendations || "",
         featured: s.featured === true,
       })),
     };

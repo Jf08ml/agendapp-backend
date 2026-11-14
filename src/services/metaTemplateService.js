@@ -213,6 +213,34 @@ export async function getPhoneHealthStatus(org) {
 }
 
 /**
+ * Descarga un archivo recibido (foto, nota de voz) por el número Meta de la org.
+ * Meta entrega solo el id: GET /{media-id} devuelve una URL temporal (5 min) que
+ * también exige el token. Lanza si el archivo pesa más de maxBytes.
+ * @returns {Promise<{ buffer: Buffer, mimeType: string }>}
+ */
+export async function downloadMedia(org, mediaId, maxBytes = 16 * 1024 * 1024) {
+  const { token } = getOrgCredentials(org);
+  const info = await withOwnerTokenFallback(org, token, async (t) => {
+    const res = await makeClient(t).get(`/${mediaId}`, { timeout: 15_000 });
+    return { ...res.data, token: t };
+  });
+  if (!info?.url) throw new Error("Meta no devolvió la URL del archivo.");
+  if (info.file_size && info.file_size > maxBytes) {
+    throw new Error(`Archivo demasiado grande (${info.file_size} bytes).`);
+  }
+  const file = await axios.get(info.url, {
+    headers: { Authorization: `Bearer ${info.token}` },
+    responseType: "arraybuffer",
+    timeout: 30_000,
+    maxContentLength: maxBytes,
+  });
+  return {
+    buffer: Buffer.from(file.data),
+    mimeType: String(info.mime_type || file.headers["content-type"] || "").split(";")[0].trim(),
+  };
+}
+
+/**
  * Envía texto libre (solo dentro de ventana de 24h de conversación activa).
  */
 export async function sendTextMessage(org, toPhone, text) {

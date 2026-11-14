@@ -170,15 +170,15 @@ export async function handleMetaIncoming(req, res) {
       return;
     }
     Organization.findOne({ metaPhoneNumberId: phoneNumberId, waBookingAgentEnabled: true })
-      .select("_id name")
+      .select("_id name waHumanTakeoverHours")
       .lean()
       .then(async (org) => {
         if (!org) return;
         for (const echo of echoes) {
           if (!echo?.to) continue;
           const clientPhone = "+" + String(echo.to).replace(/\D/g, "");
-          if (await pauseForHumanTakeover(String(org._id), clientPhone, echo.id)) {
-            console.log(`[WaAgent] ${org.name} respondió a mano a ${clientPhone} — bot de reservas pausado para ese cliente`);
+          if (await pauseForHumanTakeover(String(org._id), clientPhone, echo.id, org.waHumanTakeoverHours)) {
+            console.log(`[WaAgent] ${org.name} respondió a mano a ${clientPhone} — bot de reservas pausado ${org.waHumanTakeoverHours ?? 2} h para ese cliente`);
           }
         }
       })
@@ -221,22 +221,33 @@ export async function handleMetaIncoming(req, res) {
     return;
   }
 
-  // Solo procesar texto e interactivos (botones de template); ignorar imágenes, etc.
-  if (!message || (message.type !== "text" && message.type !== "interactive"))
+  // Texto, botones (interactive = respuestas a mensajes interactivos; button =
+  // quick replies de plantillas como el recordatorio) y, solo para el bot de
+  // reservas, fotos y notas de voz. Stickers, videos, ubicaciones... se ignoran.
+  if (!message || !["text", "interactive", "button", "image", "audio"].includes(message.type))
     return;
 
   const receivingPhoneNumberId = change?.metadata?.phone_number_id;
   const fromPhone = "+" + message.from.replace(/\D/g, "");
 
-  // Para botones de template (quick_reply / button_reply) el texto está en interactive
   const body =
     message.type === "interactive"
       ? (message.interactive?.button_reply?.title ??
         message.interactive?.list_reply?.title ??
         "")
-      : (message.text?.body ?? "");
+      : message.type === "button"
+        ? (message.button?.text ?? "")
+        : message.type === "image"
+          ? (message.image?.caption ?? "")
+          : (message.text?.body ?? "");
+  // Foto o nota de voz: el bot de reservas la descarga (y transcribe) después de
+  // revisar la pausa, para no gastar en clientes que el negocio atiende a mano.
+  const media =
+    message.type === "image" || message.type === "audio"
+      ? { type: message.type, id: message[message.type]?.id, mimeType: message[message.type]?.mime_type }
+      : null;
 
-  if (!body || !fromPhone) return;
+  if ((!body && !media?.id) || !fromPhone) return;
 
   // Ignorar reintentos de entrega del mismo mensaje
   if (isDuplicateMessage(message.id)) {
@@ -254,6 +265,8 @@ export async function handleMetaIncoming(req, res) {
 
   // ── Routing ──────────────────────────────────────────────────────────────────
   if (receivingPhoneNumberId === process.env.META_PLATFORM_PHONE_NUMBER_ID) {
+    // El agente admin solo entiende texto (como antes).
+    if (media || !body) return;
     // Alguien escribió al número de AgenditApp (dueño de org o respuesta a un
     // mensaje de retargeting). Se persiste SIEMPRE para el inbox de superadmin,
     // sin importar si la org tiene el agente IA activado.
@@ -311,7 +324,7 @@ export async function handleMetaIncoming(req, res) {
     // Ignorar mensajes del propio número del negocio (evita loops en coexistencia)
     if (org.metaPhone && fromPhone === org.metaPhone) return;
 
-    processClientBookingMessage(org, fromPhone, body).catch((err) =>
+    processClientBookingMessage(org, fromPhone, body, { media }).catch((err) =>
       console.error("[WaAgent] Error procesando mensaje de cliente (booking):", err),
     );
   }

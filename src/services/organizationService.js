@@ -187,6 +187,8 @@ const organizationService = {
       waPhone,
       waAgentEnabled,
       waBookingAgentEnabled,
+      waHumanTakeoverHours,
+      aiAssistantInfo,
       waConnectionType,
       metaPhoneNumberId,
       metaPhone,
@@ -542,6 +544,20 @@ const organizationService = {
 
     // 🤖 Agente IA de reservas para clientes (número Meta de la org)
     if (waBookingAgentEnabled !== undefined) organization.waBookingAgentEnabled = !!waBookingAgentEnabled;
+    if (waHumanTakeoverHours !== undefined) {
+      const hours = Number(waHumanTakeoverHours);
+      if (!Number.isFinite(hours) || hours < 0.5 || hours > 48) {
+        throw new Error("La pausa por respuesta manual debe estar entre 0.5 y 48 horas.");
+      }
+      organization.waHumanTakeoverHours = hours;
+    }
+
+    // 🤖 Información del negocio para el asistente de reservas (web + WhatsApp)
+    if (aiAssistantInfo !== undefined) {
+      const info = String(aiAssistantInfo ?? "").trim();
+      if (info.length > 4000) throw new Error("La información para el asistente admite máximo 4000 caracteres.");
+      organization.aiAssistantInfo = info;
+    }
 
     // ✅ Auto-marcar asistencia
     if (autoMarkAttended !== undefined) organization.autoMarkAttended = autoMarkAttended;

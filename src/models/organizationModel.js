@@ -305,6 +305,25 @@ const organizationSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  // Horas que el bot de reservas se calla con un cliente cuando el negocio le
+  // escribe a mano desde la app de WhatsApp Business (smb_message_echoes).
+  // Antes eran 12 h fijas: Diana Vargas tenía ~40 clientes en pausa cada día.
+  waHumanTakeoverHours: {
+    type: Number,
+    default: 2,
+    min: 0.5,
+    max: 48,
+  },
+  // Información libre del negocio que el asistente de reservas (web + WhatsApp)
+  // usa para responder: retoques, contraindicaciones, cuidados, promociones,
+  // zonas... Sin esto el bot pasaba al equipo preguntas que el negocio responde
+  // siempre igual (Diana Vargas, nov-2026).
+  aiAssistantInfo: {
+    type: String,
+    default: "",
+    maxlength: 4000,
+    trim: true,
+  },
   // Última vez que el admin respondió a AgenditApp vía Meta (ventana de 24h a nivel de org)
   agentAdminLastContactAt: { type: Date, default: null },
   // Tipo de conexión WA activa: 'baileys' | 'meta' | null
