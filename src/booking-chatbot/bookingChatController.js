@@ -3,6 +3,48 @@ import { MAX_ACTION_LOG } from "./actionLog.js";
 import sendResponse from "../utils/sendResponse.js";
 import ChatLog from "../models/chatLogModel.js";
 import ChatbotFeedback from "../models/chatbotFeedbackModel.js";
+import {
+  transcribeAudio,
+  VOICE_NOTE_PREFIX,
+  VOICE_NOTE_FAILED,
+  VOICE_FAIL_REPLY,
+} from "../services/audioTranscriptionService.js";
+
+// Adjunto del último mensaje (chat web): foto o nota de voz grabada en el
+// navegador, en base64. El body tiene límite de 5 MB; el frontend comprime las
+// fotos y corta los audios a 2 min, así que estos topes casi nunca se tocan.
+const MAX_WEB_IMAGE_BYTES = 3.5 * 1024 * 1024;
+const MAX_WEB_AUDIO_BYTES = 3 * 1024 * 1024;
+const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+const IMAGE_PREFIX = "📷 (imagen)";
+
+// Valida el adjunto y devuelve { images?, userContent, voiceFailed } o { error }.
+async function resolveAttachment(attachment, lastText) {
+  const type = attachment?.type;
+  const mimeType = String(attachment?.mimeType || "").split(";")[0].trim().toLowerCase();
+  if (!["image", "audio"].includes(type) || typeof attachment?.data !== "string") {
+    return { error: "Adjunto inválido." };
+  }
+  const buffer = Buffer.from(attachment.data, "base64");
+  if (!buffer.length) return { error: "Adjunto vacío." };
+
+  if (type === "image") {
+    if (!IMAGE_TYPES.has(mimeType)) return { error: "Formato de imagen no soportado." };
+    if (buffer.length > MAX_WEB_IMAGE_BYTES) return { error: "La imagen es demasiado grande." };
+    const caption = String(lastText || "").replace(IMAGE_PREFIX, "").trim();
+    return {
+      images: [{ mediaType: mimeType, data: attachment.data }],
+      userContent: `${IMAGE_PREFIX}${caption ? ` ${caption}` : ""}`,
+    };
+  }
+
+  if (!mimeType.startsWith("audio/")) return { error: "Formato de audio no soportado." };
+  if (buffer.length > MAX_WEB_AUDIO_BYTES) return { error: "La nota de voz es demasiado larga." };
+  const transcript = await transcribeAudio(buffer, mimeType);
+  return transcript
+    ? { userContent: `${VOICE_NOTE_PREFIX} ${transcript}` }
+    : { userContent: VOICE_NOTE_FAILED, voiceFailed: true };
+}
 
 function extractTextMessages(messages) {
   return messages
@@ -11,7 +53,8 @@ function extractTextMessages(messages) {
 }
 
 export const bookingChat = async (req, res) => {
-  const { messages, sessionId } = req.body;
+  const { sessionId, attachment } = req.body;
+  let { messages } = req.body;
 
   if (!Array.isArray(messages) || messages.length === 0) {
     return sendResponse(res, 400, null, "Se requiere un arreglo de mensajes.");
@@ -28,6 +71,25 @@ export const bookingChat = async (req, res) => {
   }
 
   const startTime = Date.now();
+
+  // Foto o nota de voz del último mensaje: la foto va a Claude solo en este turno
+  // y la nota de voz se transcribe; en el historial quedan como texto marcado
+  // (igual que en WhatsApp). userContent vuelve al frontend para la burbuja.
+  let images;
+  let userContent = null;
+  let voiceFailed = false;
+  if (attachment) {
+    const last = messages[messages.length - 1];
+    if (last.role !== "user") {
+      return sendResponse(res, 400, null, "El adjunto debe ir en un mensaje del cliente.");
+    }
+    const resolved = await resolveAttachment(attachment, last.content);
+    if (resolved.error) return sendResponse(res, 400, null, resolved.error);
+    ({ images, userContent } = resolved);
+    voiceFailed = !!resolved.voiceFailed;
+    messages = [...messages.slice(0, -1), { role: "user", content: userContent }];
+  }
+
   let result;
 
   // Acciones de turnos anteriores de esta misma conversación (ver actionLog.js)
@@ -41,7 +103,14 @@ export const bookingChat = async (req, res) => {
   }
 
   try {
-    result = await processBookingChat(req.organization, messages, { actionLog });
+    result = voiceFailed
+      ? // Sin transcripción no hay qué mandarle al modelo: respuesta fija.
+        {
+          reply: VOICE_FAIL_REPLY,
+          bookingPayload: null,
+          _meta: { rounds: 0, inputTokens: 0, outputTokens: 0, toolsUsed: [], hitRoundLimit: false },
+        }
+      : await processBookingChat(req.organization, messages, { actionLog, images });
   } catch (err) {
     if (sessionId) {
       ChatLog.findOneAndUpdate(
@@ -96,7 +165,7 @@ export const bookingChat = async (req, res) => {
     ).catch(() => {});
   }
 
-  return sendResponse(res, 200, { reply, bookingPayload });
+  return sendResponse(res, 200, { reply, bookingPayload, userContent });
 };
 
 // POST /booking-chat/converted — público (solo organizationResolver)

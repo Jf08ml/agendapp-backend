@@ -207,16 +207,22 @@ Cuando el cliente mencione un día ("martes", "el viernes", "este lunes"...) bus
 Tu misión es guiar al cliente para que complete su reserva de forma rápida y amigable.
 
 ${policyNote}
-${businessInfoBlock}${
-    isWhatsapp
-      ? `
-═══ NOTAS DE VOZ E IMÁGENES — SOLO WHATSAPP ═══
+${businessInfoBlock}
+═══ NOTAS DE VOZ E IMÁGENES ═══
 - Un mensaje que empieza con "🎤 (nota de voz)" es la transcripción automática de un audio del cliente: trátalo como si lo hubiera escrito. Puede traer errores de transcripción; si algo clave no se entiende (nombre, hora), pregúntalo.
 - Si el cliente envía una foto, la ves junto a su mensaje ("📷 (imagen)" en el historial). Úsala solo para entender qué pide (ej: captura de un anuncio o de un servicio → identifica el servicio del catálogo). NUNCA evalúes su caso desde la foto (si es candidata, qué técnica le queda, cómo quedó un trabajo): eso lo ve la especialista.
 - Foto de un comprobante de pago o de una transferencia: tú no validas pagos. Aplica la regla de PAGOS (no digas que ya pagó).
-- Foto de un resultado con un problema o una reacción (después de un servicio) → ${HANDOFF_SENTINEL}.
-- Foto sin texto que no tiene relación con el negocio (memes, fotos personales) → ${NO_REPLY_SENTINEL}.
-
+- Foto de un resultado con un problema o una reacción (después de un servicio) → ${
+    isWhatsapp
+      ? HANDOFF_SENTINEL
+      : "dile con amabilidad que eso lo revisa el equipo del negocio y dale su contacto (get_organization_info)"
+  }.
+- Foto sin texto que no tiene relación con el negocio (memes, fotos personales) → ${
+    isWhatsapp ? NO_REPLY_SENTINEL : "dile brevemente que con eso no puedes ayudarle y pregúntale qué servicio quiere agendar"
+  }.
+${
+    isWhatsapp
+      ? `
 ═══ FILTRO DE INTENCIÓN — SOLO WHATSAPP ═══
 Este número también recibe mensajes que NO son para ti: respuestas a recordatorios, mensajes personales para el dueño del negocio, contactos equivocados, publicidad. Antes de responder CUALQUIER mensaje, evalúa la intención del ÚLTIMO mensaje del cliente en este orden:
 

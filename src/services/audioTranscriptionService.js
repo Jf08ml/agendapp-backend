@@ -34,6 +34,12 @@ const EXTENSIONS = {
 
 export const isTranscriptionConfigured = () => !!process.env.OPENAI_API_KEY;
 
+// Cómo queda una nota de voz en el historial del asistente de reservas (web y
+// WhatsApp). isExplicitConfirmation (tools/reservation.js) quita este prefijo.
+export const VOICE_NOTE_PREFIX = "🎤 (nota de voz)";
+export const VOICE_NOTE_FAILED = "🎤 (nota de voz — no se pudo transcribir)";
+export const VOICE_FAIL_REPLY = "No pude escuchar tu nota de voz 🙏 ¿Me lo escribes por aquí?";
+
 /**
  * @param {Buffer} buffer
  * @param {string} mimeType
@@ -46,9 +52,11 @@ export async function transcribeAudio(buffer, mimeType) {
   }
   if (!buffer?.length || buffer.length > MAX_AUDIO_BYTES) return null;
 
-  const ext = EXTENSIONS[mimeType] || "ogg";
+  // "audio/webm;codecs=opus" (grabación del navegador) → "audio/webm"
+  const type = String(mimeType || "").split(";")[0].trim().toLowerCase() || "audio/ogg";
+  const ext = EXTENSIONS[type] || "ogg";
   const form = new FormData();
-  form.append("file", new Blob([buffer], { type: mimeType || "audio/ogg" }), `nota.${ext}`);
+  form.append("file", new Blob([buffer], { type }), `nota.${ext}`);
   form.append("model", TRANSCRIBE_MODEL);
   form.append("language", "es");
   form.append("response_format", "json");

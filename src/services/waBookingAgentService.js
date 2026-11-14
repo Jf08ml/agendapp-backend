@@ -20,7 +20,13 @@ import Order from "../models/orderModel.js";
 import notificationService from "./notificationService.js";
 import subscriptionService from "./subscriptionService.js";
 import { downloadMedia } from "./metaTemplateService.js";
-import { transcribeAudio, MAX_AUDIO_BYTES } from "./audioTranscriptionService.js";
+import {
+  transcribeAudio,
+  MAX_AUDIO_BYTES,
+  VOICE_NOTE_PREFIX,
+  VOICE_NOTE_FAILED,
+  VOICE_FAIL_REPLY,
+} from "./audioTranscriptionService.js";
 
 // Sesión expira tras 6 h de inactividad. Con 30 min (antes) los clientes que
 // contestaban más tarde ("en la mañana", "ok") caían en una sesión nueva: el bot
@@ -322,7 +328,6 @@ async function getOrCreateSession(orgId, clientPhone) {
 // Claude ve las fotos directamente; las notas de voz se transcriben con OpenAI
 // (Claude no acepta audio). En el historial quedan como texto marcado
 // ("🎤 (nota de voz) …", "📷 (imagen) …") — ver la sección del prompt.
-const VOICE_FAIL_REPLY = "No pude escuchar tu nota de voz 🙏 ¿Me lo escribes por aquí?";
 // Límite de Claude por imagen: 5 MB.
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const CLAUDE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
@@ -335,11 +340,11 @@ async function resolveIncomingMedia(org, media, caption) {
     try {
       const { buffer, mimeType } = await downloadMedia(org, media.id, MAX_AUDIO_BYTES);
       const transcript = await transcribeAudio(buffer, mimeType || media.mimeType);
-      if (transcript) return { body: transcript, historyText: `🎤 (nota de voz) ${transcript}` };
+      if (transcript) return { body: transcript, historyText: `${VOICE_NOTE_PREFIX} ${transcript}` };
     } catch (err) {
       console.error("[WaBookingAgent] Error descargando nota de voz:", err.message);
     }
-    return { body: "", historyText: "🎤 (nota de voz — no se pudo transcribir)", failReply: VOICE_FAIL_REPLY };
+    return { body: "", historyText: VOICE_NOTE_FAILED, failReply: VOICE_FAIL_REPLY };
   }
 
   // Imagen
