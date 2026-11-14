@@ -414,6 +414,13 @@ const cancellationService = {
         let idsToCancel;
 
         if (info.isGroup && appointmentIds && appointmentIds.length > 0) {
+          // Solo citas que pertenecen al grupo de ESTE token
+          const groupIds = new Set(info.appointments.map(apt => String(apt.id)));
+          appointmentIds = appointmentIds.map(String).filter(id => groupIds.has(id));
+          if (appointmentIds.length === 0) {
+            return { success: false, message: 'No hay citas válidas para cancelar' };
+          }
+
           // Filtrar IDs que están bloqueados por política
           const blockedIds = info.appointments
             .filter(apt => apt.policyBlocked && appointmentIds.includes(String(apt.id)))
@@ -495,9 +502,11 @@ const cancellationService = {
         };
       }
 
+      // Solo citas que pertenecen al grupo de ESTE token
+      const groupIds = info.appointments.map((apt) => String(apt.id));
       const idsToConfirm = info.isGroup && Array.isArray(appointmentIds) && appointmentIds.length
-        ? appointmentIds
-        : info.appointments.map((apt) => apt.id);
+        ? appointmentIds.map(String).filter((id) => groupIds.includes(id))
+        : groupIds;
 
       if (!idsToConfirm.length) {
         return {
