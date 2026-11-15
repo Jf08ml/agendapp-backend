@@ -5,6 +5,7 @@ import Session from "../models/sessionModel.js";
 import Organization from "../models/organizationModel.js";
 import Employee from "../models/employeeModel.js";
 import jwt from "jsonwebtoken";
+import { recordOwnerLogin } from "../utils/loginTracking.js";
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 días, igual que el JWT
 
@@ -32,6 +33,9 @@ const authController = {
         userAgent: req.headers["user-agent"] || "unknown",
         expiresAt: new Date(Date.now() + SESSION_TTL_MS),
       });
+
+      // Último ingreso del dueño (no de empleados). Fire-and-forget, nunca lanza.
+      if (user.userType === "admin") recordOwnerLogin(user.organizationId);
 
       // Generar el token JWT
       const token = jwt.sign(

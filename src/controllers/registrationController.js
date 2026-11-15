@@ -14,6 +14,8 @@ import { notifyNewRegistration } from "../services/metaApiService.js";
 import { sanitizeBrowserEvent, sendMetaCapiEvent } from "../services/metaConversionsService.js";
 import sendResponse from "../utils/sendResponse.js";
 import getClientIp from "../utils/getClientIp.js";
+import { sendWelcomeMessages } from "../services/welcomeService.js";
+import { recordOwnerLogin } from "../utils/loginTracking.js";
 import { isValidSlug, isSlugAvailable, suggestSlugs } from "../utils/reservedSlugs.js";
 
 const TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
@@ -77,7 +79,9 @@ const registrationController = {
       // 4. Verificar email no duplicado
       const existingOrg = await Organization.findOne({ email: email.toLowerCase().trim() }).select("_id").lean();
       if (existingOrg) {
-        return sendResponse(res, 409, null, "Ya existe una organización con ese email");
+        // `reason` le permite al frontend explicar que la cuenta ya existe y
+        // cómo entrar, en vez de dejar al usuario sin salida.
+        return sendResponse(res, 409, { reason: "email_taken" }, "Ya existe una organización con ese email");
       }
 
       // 5. Buscar rol admin existente (reutilizar el mismo para todas las orgs)
@@ -157,6 +161,11 @@ const registrationController = {
         role: "admin",
         expiresAt: new Date(Date.now() + 2 * 60 * 1000), // 2 minutos
       }).save();
+
+      // Bienvenida al dueño por correo y WhatsApp con el enlace de su panel.
+      // No se espera: el usuario no debe tardar más en llegar a su panel, y
+      // sendWelcomeMessages nunca lanza.
+      sendWelcomeMessages(savedOrg).catch((err) => console.error("[register] Bienvenida:", err?.message || err));
 
       // Conversión para AgenditApp Oficina IA (nunca lanza; espera como mucho 2 s).
       await emitSignupCompleted({ organizationId: savedOrg._id, attribution: acquisition, occurredAt: savedOrg.createdAt });
@@ -242,6 +251,7 @@ const registrationController = {
           expiresAt: new Date(Date.now() + jwtExpiresMs),
         });
         sessionId = session._id.toString();
+        recordOwnerLogin(org._id);
       }
 
       // Claims base; agregar claims de impersonación o `sid` según corresponda

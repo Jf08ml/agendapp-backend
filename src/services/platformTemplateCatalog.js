@@ -4,6 +4,10 @@
 // cliente — el envío real lo resuelve Meta con la plantilla ya aprobada, esto no
 // se manda a la API. Si se edita el body en Meta Business Manager, actualizar aquí.
 export const PLATFORM_TEMPLATE_BODIES = {
+  // Bienvenida al registrarse (welcomeService.js). Botón "Ir a mi panel" con URL
+  // dinámica https://app.agenditapp.com/ingresar/{{1}} (= slug); no va en el body.
+  cuenta_creada:
+    "¡Hola, {{1}}! Confirmamos que la cuenta de {{2}} en AgenditApp quedó creada. 🎉\n\nCon el botón de abajo vas a tu panel, donde configuras tus servicios, tu horario y tu agenda. El correo registrado en tu cuenta es {{3}}.\n\nGuarda este mensaje para volver a tu panel cuando lo necesites. Si tienes dudas, responde a este mensaje.",
   activa_tu_cuenta:
     "¡Hola {{1}}! 👋 Vimos que creaste la cuenta de *{{2}}* en AgenditApp pero aún no terminaste de configurarla. Faltan solo un par de minutos para tener tu agenda lista y empezar a recibir reservas. 🗓️\n\nContinúa aquí: {{3}}\n\nSi tuviste algún problema o tienes dudas, escríbenos al +57 350 667 4686 y con gusto te ayudamos.",
   agenda_tu_primera_cita:

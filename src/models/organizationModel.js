@@ -490,6 +490,20 @@ const organizationSchema = new mongoose.Schema({
     whatsappConnectedAt: { type: Date, default: null }, // conectó WhatsApp por primera vez
     firstAutoMessageAt:  { type: Date, default: null }, // se envió el primer mensaje automático
     firstOnlineBookingAt: { type: Date, default: null }, // primera reserva hecha por un cliente final
+    firstLoginAt:        { type: Date, default: null }, // el dueño entró al panel por primera vez (intercambio del registro o login)
+  },
+
+  // Último ingreso del dueño al panel (intercambio del registro o login con
+  // correo y contraseña). Session se borra a los 7 días; esto queda.
+  lastLoginAt: { type: Date, default: null },
+
+  // Resultado de la bienvenida del registro (services/welcomeService.js):
+  // correo y WhatsApp `cuenta_creada` con el enlace del panel.
+  welcomeDelivery: {
+    emailSentAt:    { type: Date, default: null },
+    emailError:     { type: String, default: null },
+    whatsappSentAt: { type: Date, default: null },
+    whatsappError:  { type: String, default: null },
   },
 
   // ── Atribución de adquisición (capturada en el registro) ─────────────────

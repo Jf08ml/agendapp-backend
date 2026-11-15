@@ -20,7 +20,7 @@ const platformWaMessageSchema = new mongoose.Schema(
     direction: { type: String, enum: ["inbound", "outbound"], required: true },
     source: {
       type: String,
-      enum: ["inbound", "retargeting", "ai_agent", "manual", "alert", "oficina"],
+      enum: ["inbound", "retargeting", "ai_agent", "manual", "alert", "oficina", "welcome"],
       required: true,
     },
     // Número de AgenditApp que envió o recibió el mensaje. Los registros
