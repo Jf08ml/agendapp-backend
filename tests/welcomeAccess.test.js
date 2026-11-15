@@ -86,3 +86,18 @@ test("la bienvenida sale del número Oficina, que es donde están aprobadas las 
   assert.equal(WELCOME_WA_TEMPLATE, "cuenta_creada");
   assert.equal(ACCESS_WA_LINE, "oficina");
 });
+
+test("el correo de bienvenida lleva la marca de AgenditApp, el enlace de reservas y la ayuda", () => {
+  const mail = buildWelcomeEmail({
+    ownerName: "Laura",
+    businessName: "Barbería El Estilo",
+    email: "laura@gmail.com",
+    slug: "barberiaelestilo",
+  });
+  assert.ok(mail.html.includes('src="https://agenditapp.com/icono-full-blue.png"'), "falta el logo");
+  assert.ok(mail.html.includes("#1D4ED8"), "falta el azul de la marca");
+  assert.ok(mail.html.includes('href="https://barberiaelestilo.agenditapp.com"'), "falta el enlace de reservas");
+  assert.ok(mail.html.includes("https://wa.me/573506674686"), "falta el WhatsApp de soporte");
+  assert.match(mail.html, /display:none[^>]*>Guarda este correo/, "falta el texto de vista previa");
+  assert.ok(mail.text.includes("https://barberiaelestilo.agenditapp.com\n"), "el texto plano no trae el enlace de reservas");
+});
