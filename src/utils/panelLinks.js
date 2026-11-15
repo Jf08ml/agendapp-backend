@@ -7,6 +7,13 @@
 
 export const MAIN_DOMAIN = "agenditapp.com";
 
+// Plantillas de acceso (cuenta_creada, codigo_acceso) y el número desde el que
+// salen: AgenditApp Oficina IA (+57 350 6674686). Las plantillas viven en la WABA
+// de ese número, no en la del oficial; enviarlas desde "platform" da el error
+// 132001 de Meta ("Template name does not exist in the translation").
+export const WELCOME_WA_TEMPLATE = "cuenta_creada";
+export const ACCESS_WA_LINE = "oficina";
+
 /** https://{slug}.agenditapp.com/login-admin */
 export function panelLoginUrl(slug) {
   return `https://${slug}.${MAIN_DOMAIN}/login-admin`;

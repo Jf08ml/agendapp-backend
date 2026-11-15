@@ -79,3 +79,10 @@ test("fuera de producción, sin lista permitida, no sale nada", () => {
   assert.equal(isRecipientAllowed("yo@agenditapp.com", { nodeEnv: "development", allowlist: "" }), false);
   assert.equal(isRecipientAllowed("+573001234567", { nodeEnv: undefined, allowlist: "" }), false);
 });
+
+test("la bienvenida sale del número Oficina, que es donde están aprobadas las plantillas de acceso", async () => {
+  // Desde el número oficial Meta respondía 132001: cuenta_creada no existe en esa WABA.
+  const { ACCESS_WA_LINE, WELCOME_WA_TEMPLATE } = await import("../src/utils/panelLinks.js");
+  assert.equal(WELCOME_WA_TEMPLATE, "cuenta_creada");
+  assert.equal(ACCESS_WA_LINE, "oficina");
+});

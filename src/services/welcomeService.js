@@ -4,14 +4,14 @@ import { sendTemplateMessage } from "./metaApiService.js";
 import { logOutboundMessage } from "./platformInboxService.js";
 import { renderPlatformTemplate } from "./platformTemplateCatalog.js";
 import { buildWelcomeEmail } from "../utils/emailTemplates/welcomeEmail.js";
-import { cuentaCreadaComponents } from "../utils/panelLinks.js";
+import { cuentaCreadaComponents, WELCOME_WA_TEMPLATE, ACCESS_WA_LINE } from "../utils/panelLinks.js";
 import { isRecipientAllowed } from "../utils/devRecipientGuard.js";
 
-export const WELCOME_WA_TEMPLATE = "cuenta_creada";
+export { WELCOME_WA_TEMPLATE };
 
 /**
  * Bienvenida al dueño recién registrado por los dos canales: correo y WhatsApp
- * (plantilla `cuenta_creada` desde el número de la plataforma). Ambos llevan el
+ * (plantilla `cuenta_creada` desde el número AgenditApp Oficina IA). Ambos llevan el
  * enlace de su panel, que es lo que le falta a quien sale del navegador de
  * Instagram/Facebook y ya no sabe cómo volver a entrar.
  *
@@ -63,7 +63,7 @@ async function sendWelcomeWhatsapp(org, data) {
   }
 
   try {
-    const { messageId } = await sendTemplateMessage(phone, WELCOME_WA_TEMPLATE, "es", cuentaCreadaComponents(data));
+    const { messageId } = await sendTemplateMessage(phone, WELCOME_WA_TEMPLATE, "es", cuentaCreadaComponents(data), ACCESS_WA_LINE);
     const params = [data.ownerName, data.businessName, data.email];
     logOutboundMessage({
       phone,
@@ -72,6 +72,7 @@ async function sendWelcomeWhatsapp(org, data) {
       source: "welcome",
       templateName: WELCOME_WA_TEMPLATE,
       metaMessageId: messageId,
+      line: ACCESS_WA_LINE,
     }).catch((err) => console.error("[welcome] Error guardando el envío en el inbox:", err?.message || err));
     return { ok: true, messageId };
   } catch (err) {
