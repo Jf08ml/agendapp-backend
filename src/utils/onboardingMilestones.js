@@ -20,7 +20,7 @@ const OFICINA_EVENTS = {
  * avisa a la Oficina; por eso conviene awaitear la llamada en serverless.
  *
  * @param {string} organizationId
- * @param {"setupCompletedAt"|"seededDemoAt"|"firstAppointmentAt"|"whatsappConnectedAt"|"firstAutoMessageAt"|"firstOnlineBookingAt"} milestone
+ * @param {"setupCompletedAt"|"seededDemoAt"|"firstAppointmentAt"|"whatsappConnectedAt"|"firstAutoMessageAt"|"firstOnlineBookingAt"|"firstLoginAt"} milestone
  * @returns {Promise<boolean>} true si se marcó ahora por primera vez
  */
 export async function markOnboardingMilestone(organizationId, milestone) {
