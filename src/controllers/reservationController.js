@@ -20,6 +20,7 @@ import { weekdayEs } from "../utils/timeAndPhones.js";
 import appointmentSeriesService from "../services/appointmentSeriesService.js";
 import { markOnboardingMilestone } from "../utils/onboardingMilestones.js";
 import appointmentModel from "../models/appointmentModel.js";
+import packageService from "../services/packageService.js";
 import ChatLog from "../models/chatLogModel.js";
 import { auditLogService } from "../services/auditLogService.js";
 import { getCustomFieldDefinitions, validateAndSplitCustomFieldValues } from "../utils/customFieldUtils.js";
@@ -118,6 +119,25 @@ async function notifyNewBooking(org, customerDetails, { isAuto, multi }) {
       "[notifyNewBooking] Error enviando notificaciones:",
       e?.message || e
     );
+  }
+}
+
+// Respuesta 409 de /reservations/multi cuando el horario se ocupó al confirmar.
+// El frontend lo usa para devolver a la clienta al paso de horarios.
+export const SLOT_TAKEN_CODE = "SLOT_TAKEN";
+
+// Deshace citas ya guardadas de una reserva auto-aprobada que no se pudo completar
+// (devuelve la sesión del paquete si la consumieron). Best-effort: se registra y sigue.
+async function rollbackAppointments(appointments) {
+  for (const appt of appointments) {
+    try {
+      if (appt.clientPackageId) {
+        await packageService.refundSession(appt.clientPackageId, appt.service, appt._id);
+      }
+      await appointmentModel.deleteOne({ _id: appt._id });
+    } catch (e) {
+      console.error(`[rollbackAppointments] No se pudo deshacer la cita ${appt._id}:`, e?.message || e);
+    }
   }
 }
 
@@ -791,6 +811,9 @@ const reservationController = {
           
           const allServiceIds = normalized.map(n => n.serviceId);
           const allAppointments = [];
+          // Citas ya confirmadas en BD (cada batch por empleado es su propia transacción):
+          // si un batch posterior choca, se deshacen para no dejar la reserva a medias.
+          const committedAppointments = [];
           
           // Agrupar por empleado para crear en batches (pero sin enviar mensaje aún)
           const employeeGroups = new Map();
@@ -802,26 +825,35 @@ const reservationController = {
           });
 
           // Crear citas por grupo de empleado, pasando el groupId y token compartido
-          for (const [employeeId, group] of employeeGroups.entries()) {
-            const batch = await appointmentService.createAppointmentsBatch({
-              services: group.map(g => g.serviceId),
-              employee: employeeId,
-              employeeRequestedByClient: true,
-              client: normalizeId(customer),
-              startDate: group[0].startDate,
-              organizationId: normalizeId(organizationId),
-              skipNotification: true, // 🔇 No enviar mensaje aún
-              sharedGroupId, // 🔗 Mismo groupId para todas las citas
-              sharedTokenHash, // 🔗 Mismo token hash para todas las citas
-              sharedCancellationLink: cancellationLink, // 🔗 Persistir el enlace en las citas (para recordatorios)
-              customFieldValues: bookingValues,
-              ...(clientPackageId ? { clientPackageId } : {}), // 📦 Paquete de sesiones
-            });
+          try {
+            for (const [employeeId, group] of employeeGroups.entries()) {
+              const batch = await appointmentService.createAppointmentsBatch({
+                services: group.map(g => g.serviceId),
+                employee: employeeId,
+                employeeRequestedByClient: true,
+                client: normalizeId(customer),
+                startDate: group[0].startDate,
+                organizationId: normalizeId(organizationId),
+                skipNotification: true, // 🔇 No enviar mensaje aún
+                sharedGroupId, // 🔗 Mismo groupId para todas las citas
+                sharedTokenHash, // 🔗 Mismo token hash para todas las citas
+                sharedCancellationLink: cancellationLink, // 🔗 Persistir el enlace en las citas (para recordatorios)
+                customFieldValues: bookingValues,
+                ...(clientPackageId ? { clientPackageId } : {}), // 📦 Paquete de sesiones
+              });
+              committedAppointments.push(...batch);
 
-            // Mapear las citas creadas a sus índices originales
-            group.forEach((item, idx) => {
-              allAppointments[item.originalIndex] = batch[idx];
-            });
+              // Mapear las citas creadas a sus índices originales
+              group.forEach((item, idx) => {
+                allAppointments[item.originalIndex] = batch[idx];
+              });
+            }
+          } catch (batchErr) {
+            if (batchErr.code === 'CONCURRENCY_LIMIT_REACHED') {
+              await rollbackAppointments(committedAppointments);
+              batchErr.slotTaken = true;
+            }
+            throw batchErr;
           }
 
           // 5) Crear Reservations auto-aprobadas y (opcional) enlazar appointmentId
@@ -970,9 +1002,21 @@ const reservationController = {
             "Citas y reservas auto-aprobadas creadas correctamente"
           );
         } catch (err) {
-          // Si algo falla, guardar el error y caer al flujo MANUAL (pending)
+          // El horario se ocupó entre que la clienta lo vio libre y confirmó (otra
+          // persona reservó segundos antes). Antes caía a "pendiente" y quedaba una
+          // reserva imposible de aprobar; ahora se le pide elegir otro horario.
+          if (err.slotTaken) {
+            console.warn('[auto_if_available] Horario ocupado al confirmar:', err.message);
+            return sendResponse(
+              res,
+              409,
+              { code: SLOT_TAKEN_CODE },
+              "Ese horario se acaba de ocupar: otra persona lo reservó hace un momento. Por favor elige otro horario."
+            );
+          }
+          // Cualquier otro fallo: guardar el error y caer al flujo MANUAL (pending)
           console.error('[auto_if_available] Error al crear citas automáticamente:', err.message);
-          
+
           // Guardar el error para mostrarlo en el frontend
           var autoErrorMessage = err.message || 'Error al crear cita automáticamente';
         }
