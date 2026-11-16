@@ -12,6 +12,7 @@ import webPush from "web-push";
 import dbConnection from "./config/db.js";
 import express from "express";
 import morgan from "morgan";
+import compression from "compression";
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
@@ -89,6 +90,9 @@ const loginLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// gzip/deflate de las respuestas: Caddy no comprime y la agenda bajaba JSON de
+// más de 1 MB sin comprimir. Por defecto solo comprime respuestas > 1 KB.
+app.use(compression());
 app.use(morgan("dev"));
 // Evitar caché de respuestas de API: un proxy o CDN intermedio podría cachear
 // respuestas con Access-Control-Allow-Origin de un origen y servirlas a otros.

@@ -116,6 +116,12 @@ export async function sendConfirmationAndRecord(appointmentIds, send) {
   return { status: "sent", messageId };
 }
 
+// Campos populados en las citas por rango (agenda, caja diaria, analíticas).
+// Nunca incluir `password` del profesional.
+const AGENDA_EMPLOYEE_FIELDS = "names color profileImage isActive position";
+const AGENDA_SERVICE_FIELDS =
+  "-description -images -recommendations -pdfUrl -videoUrl -whatsappQuoteMessage";
+
 const appointmentService = {
   // Crear una nueva cita
   createAppointment: async (appointmentData) => {
@@ -1041,10 +1047,15 @@ const appointmentService = {
       // 🔍 NO filtrar por status - incluir TODAS las citas (incluso canceladas)
       // Esto permite que DayModal muestre las citas canceladas en su sección
 
+      // Populate liviano: el documento completo del profesional (horarios,
+      // excepciones, servicios y el hash de la contraseña) se repetía en cada
+      // cita (~1,5 MB por mes en una org con 190 citas). La agenda, la caja y
+      // las analíticas solo leen estos campos; los horarios/bloqueos vienen
+      // de la lista de profesionales.
       return await appointmentModel
         .find(query)
-        .populate("service")
-        .populate("employee")
+        .populate("service", AGENDA_SERVICE_FIELDS)
+        .populate("employee", AGENDA_EMPLOYEE_FIELDS)
         .populate("client")
         .exec();
     } catch (error) {

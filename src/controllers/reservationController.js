@@ -539,12 +539,13 @@ const reservationController = {
         const startOfDay = moment.tz(dateStr, timezone).startOf('day').toDate();
         const endOfDay = moment.tz(dateStr, timezone).endOf('day').toDate();
 
-        const dayAppointments = await appointmentService.getAppointmentsByOrganizationWithDates(
+        // Las canceladas no ocupan el horario (el endpoint de agenda sí las trae)
+        const dayAppointments = (await appointmentService.getAppointmentsByOrganizationWithDates(
           organizationId,
           startOfDay.toISOString(),
           endOfDay.toISOString(),
           [employeeId]
-        );
+        )).filter((a) => !String(a.status).startsWith("cancelled"));
 
         // Generar slots disponibles respetando citas simultáneas configuradas en el servicio
         const availableSlots = scheduleService.generateAvailableSlots(
