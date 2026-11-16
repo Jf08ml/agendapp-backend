@@ -7,6 +7,39 @@ import subscriptionService from "../services/subscriptionService.js";
 import sendResponse from "../utils/sendResponse.js";
 import { auditLogService } from "../services/auditLogService.js";
 import { notifyClientReschedule } from "../services/rescheduleNotifier.js";
+import Employee from "../models/employeeModel.js";
+
+// Permisos con los que un profesional necesita las citas de toda la org:
+// la agenda completa, la caja diaria y las analíticas usan el mismo endpoint.
+const ORG_WIDE_APPOINTMENT_PERMISSIONS = [
+  "appointments:view_all",
+  "cashManagement:read",
+  "analytics:read",
+];
+
+/**
+ * Alcance de las citas por rango según quién pide:
+ * - admin / superadmin / impersonación → todas
+ * - profesional de otra org → forbidden
+ * - profesional con algún permiso de ORG_WIDE_APPOINTMENT_PERMISSIONS → todas
+ * - profesional sin ellos → solo las suyas
+ */
+async function resolveAppointmentScope(req) {
+  if (req.user?.userType !== "employee") return {};
+  const employee = await Employee.findById(req.user.userId)
+    .select("organizationId customPermissions role")
+    .populate("role", "permissions")
+    .lean();
+  if (!employee || String(employee.organizationId) !== String(req.organization._id)) {
+    return { forbidden: true };
+  }
+  const permissions = [
+    ...(employee.role?.permissions || []),
+    ...(employee.customPermissions || []),
+  ];
+  if (ORG_WIDE_APPOINTMENT_PERMISSIONS.some((p) => permissions.includes(p))) return {};
+  return { ownEmployeeId: String(employee._id) };
+}
 
 const appointmentController = {
   // Controlador para crear una nueva cita
@@ -109,12 +142,28 @@ const appointmentController = {
     const { startDate, endDate, employeeIds } = req.query; // Fechas y empleados como query params
 
     try {
+      // El :organizationId de la URL debe ser la org resuelta por dominio
+      // (mismo patrón que requireOwnOrganization en whatsappTemplateRoutes).
+      if (!req.organization || String(req.organization._id) !== String(organizationId)) {
+        return sendResponse(res, 403, null, "No tienes acceso a esta organización");
+      }
+
       // Parsear employeeIds si viene como string (ej: "id1,id2,id3")
       let parsedEmployeeIds = null;
       if (employeeIds) {
-        parsedEmployeeIds = Array.isArray(employeeIds) 
-          ? employeeIds 
+        parsedEmployeeIds = Array.isArray(employeeIds)
+          ? employeeIds
           : employeeIds.split(',').filter(id => id.trim());
+      }
+
+      // Un profesional sin permiso para ver toda la agenda solo recibe sus
+      // citas (antes recibía las de todos y el navegador las filtraba).
+      const scope = await resolveAppointmentScope(req);
+      if (scope.forbidden) {
+        return sendResponse(res, 403, null, "No tienes acceso a esta organización");
+      }
+      if (scope.ownEmployeeId) {
+        parsedEmployeeIds = [scope.ownEmployeeId];
       }
 
       const appointments =

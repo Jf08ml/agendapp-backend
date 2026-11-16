@@ -273,6 +273,12 @@ function computePaymentStatus(appt) {
 
 appointmentModelSchema.statics.computePaymentStatus = computePaymentStatus;
 
+// Carga de agenda/caja/analíticas: citas de la org en un rango de fechas.
+// Sin este índice cada carga recorría la colección entera (COLLSCAN).
+appointmentModelSchema.index({ organizationId: 1, startDate: 1 });
+// "Sesión N de M" (packageService.getPackageSessionLabels) busca por paquete.
+appointmentModelSchema.index({ clientPackageId: 1 });
+
 // Recalcular paymentStatus automáticamente al guardar
 appointmentModelSchema.pre('save', function (next) {
   this.paymentStatus = computePaymentStatus(this);

@@ -451,7 +451,8 @@ function generateAvailableSlots(date, organization, employee = null, durationMin
 
   // Filtrar citas del empleado si está especificado
   const relevantAppointments = employee 
-    ? appointments.filter(a => a.employee && a.employee.toString() === employee._id.toString())
+    // a.employee puede venir populado: el toString() de un documento no es su id
+    ? appointments.filter(a => a.employee && String(a.employee._id ?? a.employee) === employee._id.toString())
     : appointments;
 
   // Convertir tiempos a minutos

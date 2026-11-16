@@ -17,6 +17,7 @@
     "@anthropic-ai/sdk": "^0.91.1",
     "@babel/runtime": "^7.25.4",
     "bcryptjs": "^2.4.3",
+    "compression": "^1.8.1",
     "cors": "^2.8.5",
     "date-holidays": "^3.26.8",
     "dotenv": "^16.4.5",
