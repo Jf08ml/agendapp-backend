@@ -226,6 +226,24 @@ const clientController = {
     }
   },
 
+  // Controlador para quitar 1 servicio o referido del contador de fidelidad
+  decrementLoyalty: async (req, res) => {
+    const { id } = req.params;
+    const { kind } = req.body || {};
+    try {
+      const client = await clientService.decrementLoyalty(id, req.organization._id, kind);
+      sendResponse(
+        res,
+        200,
+        client,
+        kind === "service" ? "Servicio descontado" : "Referido descontado"
+      );
+    } catch (error) {
+      const status = error.message === "Cliente no encontrado" ? 404 : 400;
+      sendResponse(res, status, null, error.message);
+    }
+  },
+
   // Controlador para marcar una recompensa como canjeada
   redeemReward: async (req, res) => {
     const { id, rewardId } = req.params;

@@ -441,6 +441,26 @@ const clientService = {
     return client;
   },
 
+  // Quitar 1 al contador de servicios o referidos (corrige un registro hecho por
+  // error). No envía WhatsApp ni toca los premios ya ganados: si el registro
+  // equivocado otorgó un premio, se elimina aparte desde la pestaña Premios.
+  decrementLoyalty: async (clientId, organizationId, kind) => {
+    const field = kind === "service" ? "servicesTaken" : kind === "referral" ? "referralsMade" : null;
+    if (!field) throw new Error("Tipo de contador inválido");
+
+    // Atómico y nunca por debajo de 0
+    const updated = await Client.findOneAndUpdate(
+      { _id: clientId, organizationId, [field]: { $gt: 0 } },
+      { $inc: { [field]: -1 } },
+      { new: true }
+    );
+    if (updated) return updated;
+
+    const exists = await Client.exists({ _id: clientId, organizationId });
+    if (!exists) throw new Error("Cliente no encontrado");
+    throw new Error("El contador ya está en 0");
+  },
+
   // Restablecer contadores de fidelidad de un cliente
   resetClientLoyalty: async (clientId) => {
     const client = await Client.findById(clientId);
