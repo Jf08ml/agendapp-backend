@@ -161,6 +161,7 @@ const organizationService = {
       welcomeTitle,
       welcomeDescription,
       homeLayout,
+      seasonalTheme,
       reminderSettings,
       paymentMethods,
       requireReservationDeposit,
@@ -389,6 +390,10 @@ const organizationService = {
 
     if (homeLayout !== undefined) {
       organization.homeLayout = homeLayout;
+    }
+
+    if (seasonalTheme !== undefined) {
+      organization.seasonalTheme = seasonalTheme === "christmas" ? "christmas" : "none";
     }
 
     if (analyticsConfig !== undefined) {

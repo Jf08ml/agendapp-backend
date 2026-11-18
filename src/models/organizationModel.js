@@ -683,6 +683,15 @@ const organizationSchema = new mongoose.Schema({
     enum: ["modern", "minimal", "cards", "landing", "academy"],
     default: "modern",
   },
+  // 🎄 Tema de temporada decorativo en las páginas que ven los clientes (home,
+  // reserva, tienda, tarjeta…). Lo enciende el admin en Mi negocio → Branding;
+  // el frontend solo lo muestra dentro de la temporada (navidad: 1 dic – 6 ene,
+  // utils/seasonalTheme.ts). No cambia los colores de marca. Todos los planes.
+  seasonalTheme: {
+    type: String,
+    enum: ["none", "christmas"],
+    default: "none",
+  },
   // 📊 Tags de Google que el propio negocio configura para medir SU tráfico/
   // campañas en su página pública de reserva (independiente del gtag propio
   // de AgenditApp en index.html). No son secretos — se exponen tal cual en
