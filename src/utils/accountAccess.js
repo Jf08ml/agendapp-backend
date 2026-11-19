@@ -3,6 +3,7 @@
 // services/accountAccessService.js.
 
 import crypto from "crypto";
+import { MAIN_DOMAIN } from "./panelLinks.js";
 
 export const ACCESS_CODE_TTL_MINUTES = 10;
 export const ACCESS_MAX_ATTEMPTS = 5;
@@ -137,4 +138,21 @@ export function accessChannelsFor(org) {
     channels.push({ channel: "whatsapp", masked: maskPhone(org.phoneNumber), available: true });
   }
   return channels;
+}
+
+/**
+ * Página de recuperación en el dominio del negocio (subdominio, o su dominio
+ * propio si no tiene slug). En local, FRONTEND_BASE_URL con ?slug= para el tenant.
+ * @param {{ slug?: string, domains?: string[] }} org
+ * @param {string} query - p. ej. "c=<id>&t=<token>"
+ * @param {{ nodeEnv?: string, frontendBaseUrl?: string }} [env] - inyectable para pruebas
+ */
+export function accessPageUrl(org, query, env = {}) {
+  const nodeEnv = env.nodeEnv ?? process.env.NODE_ENV;
+  if (nodeEnv !== "production") {
+    const base = String(env.frontendBaseUrl ?? process.env.FRONTEND_BASE_URL ?? "http://localhost:5173").replace(/\/+$/, "");
+    return `${base}/recuperar-acceso?${query}${org?.slug ? `&slug=${org.slug}` : ""}`;
+  }
+  const host = org?.slug ? `${org.slug}.${MAIN_DOMAIN}` : org?.domains?.[0] || `app.${MAIN_DOMAIN}`;
+  return `https://${host}/recuperar-acceso?${query}`;
 }

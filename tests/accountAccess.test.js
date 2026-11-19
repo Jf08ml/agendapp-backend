@@ -135,3 +135,15 @@ test("aviso_cuenta: 3 variables, como la plantilla aprobada", async () => {
     /^Hola María, .* cuenta de Salón Luna se actualizaron el 19 de noviembre a las 3:40 pm\./
   );
 });
+
+test("el enlace del correo abre la recuperación en el dominio del negocio", async () => {
+  const { accessPageUrl } = await import("../src/utils/accountAccess.js");
+  const prod = { nodeEnv: "production" };
+  assert.equal(accessPageUrl({ slug: "mibarberia" }, "c=1&t=2", prod), "https://mibarberia.agenditapp.com/recuperar-acceso?c=1&t=2");
+  assert.equal(accessPageUrl({ domains: ["www.minegocio.com"] }, "c=1&t=2", prod), "https://www.minegocio.com/recuperar-acceso?c=1&t=2");
+  assert.equal(accessPageUrl({}, "c=1&t=2", prod), "https://app.agenditapp.com/recuperar-acceso?c=1&t=2");
+  assert.equal(
+    accessPageUrl({ slug: "mibarberia" }, "c=1&t=2", { nodeEnv: "development", frontendBaseUrl: "http://localhost:5173/" }),
+    "http://localhost:5173/recuperar-acceso?c=1&t=2&slug=mibarberia"
+  );
+});
