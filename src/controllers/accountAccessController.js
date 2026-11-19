@@ -15,16 +15,20 @@ function handleError(res, err, where) {
 }
 
 const accountAccessController = {
-  /** POST /account-access/lookup { identifier, turnstileToken } */
+  /** POST /account-access/lookup { identifier, organizationId? , turnstileToken? } */
   lookup: async (req, res) => {
     try {
-      const { identifier, turnstileToken } = req.body || {};
-      if (process.env.NODE_ENV === "production" || turnstileToken) {
+      const { identifier, turnstileToken, organizationId } = req.body || {};
+      // En la página de un negocio la búsqueda se limita a ese negocio: solo
+      // confirma el correo/celular de su dueño, que ya son públicos en
+      // /organization-config. El captcha protege la búsqueda general de
+      // app.agenditapp.com (enumerar cuentas). Los envíos tienen sus propios topes.
+      if (!organizationId && (process.env.NODE_ENV === "production" || turnstileToken)) {
         if (!(await verifyTurnstile(turnstileToken))) {
           return sendResponse(res, 400, { reason: "captcha" }, "No pudimos verificar que no eres un robot. Recarga la página.");
         }
       }
-      const accounts = await lookup(identifier);
+      const accounts = await lookup(identifier, organizationId || undefined);
       return sendResponse(res, 200, { accounts }, accounts.length ? "ok" : "Sin coincidencias");
     } catch (err) {
       return handleError(res, err, "lookup");

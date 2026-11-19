@@ -9,7 +9,7 @@ import { sendTemplateMessage } from "./metaApiService.js";
 import { logOutboundMessage } from "./platformInboxService.js";
 import { notifyPasswordChanged } from "./accountNoticeService.js";
 import { buildAccessCodeEmail } from "../utils/emailTemplates/accessEmails.js";
-import { ACCESS_WA_LINE, MAIN_DOMAIN } from "../utils/panelLinks.js";
+import { ACCESS_WA_LINE } from "../utils/panelLinks.js";
 import { isRecipientAllowed } from "../utils/devRecipientGuard.js";
 import {
   ACCESS_CODE_TTL_MINUTES,
@@ -20,6 +20,7 @@ import {
   ACCESS_CODE_WA_TEMPLATE,
   MIN_PASSWORD_LENGTH,
   accessChannelsFor,
+  accessPageUrl,
   codigoAccesoComponents,
   generateAccessCode,
   generateAccessToken,
@@ -30,12 +31,14 @@ import {
 } from "../utils/accountAccess.js";
 
 // Recuperación del acceso al panel para DUEÑOS (Organization = usuario admin),
-// desde app.agenditapp.com o el login del subdominio, sin saber la contraseña:
+// sin saber la contraseña. Se usa en el dominio o subdominio del negocio
+// (búsqueda limitada a ese negocio, sin captcha) y en app.agenditapp.com
+// (búsqueda en todos los negocios, con Turnstile en el controlador):
 //   1. lookup(correo o celular) → negocios con destinos enmascarados
 //   2. sendCode(negocio, canal) → código de 6 dígitos por correo (con enlace) o WhatsApp
 //   3. verify(código o enlace)  → completionToken
 //   4. complete(completionToken, contraseña nueva opcional) → ExchangeCode, que el
-//      frontend canjea en {slug}.agenditapp.com/exchange (el mismo flujo del registro).
+//      frontend canjea en /exchange del dominio del negocio (el mismo flujo del registro).
 // Los empleados no entran aquí: su contraseña la cambia el dueño.
 
 export class AccessError extends Error {
@@ -47,26 +50,31 @@ export class AccessError extends Error {
   }
 }
 
-const OWNER_FIELDS = "_id name ownerName email phoneNumber slug timezone ownerEmailBounce";
+const OWNER_FIELDS = "_id name ownerName email phoneNumber slug domains timezone ownerEmailBounce";
 
-function accessPageBaseUrl() {
-  if (process.env.NODE_ENV === "production") return `https://app.${MAIN_DOMAIN}`;
-  return (process.env.FRONTEND_BASE_URL || "http://localhost:5173").replace(/\/+$/, "");
-}
+const isObjectId = (v) => /^[a-f0-9]{24}$/i.test(String(v ?? ""));
 
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-async function findOwners(identifier) {
+/**
+ * @param {string} identifier - correo o celular del dueño
+ * @param {string} [organizationId] - limita la búsqueda a ese negocio (página del negocio)
+ */
+async function findOwners(identifier, organizationId) {
   const parsed = parseIdentifier(identifier);
   if (!parsed) throw new AccessError("invalid_identifier", "Escribe tu correo o tu número de celular.");
+  if (organizationId && !isObjectId(organizationId)) {
+    throw new AccessError("not_found", "No encontramos ese negocio.", 404);
+  }
+  const scope = organizationId ? { _id: organizationId } : {};
   if (parsed.type === "email") {
-    return Organization.find({ email: parsed.value }).select(OWNER_FIELDS).limit(10).lean();
+    return Organization.find({ ...scope, email: parsed.value }).select(OWNER_FIELDS).limit(10).lean();
   }
   // Los teléfonos viejos no siempre están en E.164: se compara por los últimos
   // 10 dígitos. El código va al teléfono guardado, no al escrito.
   const key = phoneMatchKey(parsed.value);
   const loose = key.split("").map(escapeRegex).join("\\D*");
-  const candidates = await Organization.find({ phoneNumber: { $regex: `${loose}\\D*$` } })
+  const candidates = await Organization.find({ ...scope, phoneNumber: { $regex: `${loose}\\D*$` } })
     .select(OWNER_FIELDS)
     .limit(20)
     .lean();
@@ -77,8 +85,8 @@ async function findOwners(identifier) {
  * Negocios cuyo dueño tiene ese correo o celular, con los canales enmascarados.
  * No revela datos completos: solo nombre del negocio y destinos parciales.
  */
-export async function lookup(identifier) {
-  const owners = await findOwners(identifier);
+export async function lookup(identifier, organizationId) {
+  const owners = await findOwners(identifier, organizationId);
   return owners.map((o) => ({
     organizationId: String(o._id),
     businessName: o.name,
@@ -93,7 +101,8 @@ export async function lookup(identifier) {
  */
 export async function sendCode({ identifier, organizationId, channel, ip }) {
   if (!["email", "whatsapp"].includes(channel)) throw new AccessError("invalid_channel", "Canal no válido.");
-  const owners = await findOwners(identifier);
+  if (!isObjectId(organizationId)) throw new AccessError("not_found", "No encontramos ese negocio.", 404);
+  const owners = await findOwners(identifier, organizationId);
   const org = owners.find((o) => String(o._id) === String(organizationId));
   if (!org) throw new AccessError("not_found", "No encontramos ese negocio con el dato que escribiste.", 404);
 
@@ -144,7 +153,7 @@ export async function sendCode({ identifier, organizationId, channel, ip }) {
 
   const sent =
     channel === "email"
-      ? await sendCodeEmail(org, code, `${accessPageBaseUrl()}/recuperar-acceso?c=${challenge._id}&t=${linkToken}`)
+      ? await sendCodeEmail(org, code, accessPageUrl(org, `c=${challenge._id}&t=${linkToken}`))
       : await sendCodeWhatsapp(org, code);
 
   if (!sent.ok) {
