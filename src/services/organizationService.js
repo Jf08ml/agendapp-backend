@@ -8,6 +8,7 @@ import { sendTemplateMessage } from "./metaApiService.js";
 import { normalizePhone } from "./waAgentService.js";
 import { getVerticalCatalog, LARGE_DENOMINATION_CURRENCIES } from "../utils/verticalCatalogs.js";
 import { validateTimeRange, validateWeeklyScheduleDays } from "../utils/scheduleValidation.js";
+import { notifyPasswordChanged } from "./accountNoticeService.js";
 
 // Monedas de denominación grande (sin centavos en la práctica): los precios
 // de ejemplo se multiplican ×1000 para que se vean realistas (ej: $40.000 COP vs $40 USD)
@@ -215,6 +216,10 @@ const organizationService = {
     organization.name = name !== undefined ? name : organization.name;
     organization.iconUrl =
       iconUrl !== undefined ? iconUrl : organization.iconUrl;
+    // Un correo nuevo deja atrás el rebote del anterior.
+    if (email !== undefined && String(email ?? "").trim().toLowerCase() !== String(organization.email ?? "").trim().toLowerCase()) {
+      organization.ownerEmailBounce = { address: null, bouncedAt: null, status: null, reason: null };
+    }
     organization.email = email !== undefined ? email : organization.email;
     organization.location =
       location !== undefined ? location : organization.location;
@@ -596,6 +601,9 @@ const organizationService = {
     }
 
     const updatedOrganization = await organization.save();
+
+    // Aviso al dueño por correo y WhatsApp (aviso_cuenta). No se espera; nunca lanza.
+    if (password) notifyPasswordChanged(updatedOrganization).catch(() => {});
 
     // Popular el campo 'role'
     await updatedOrganization.populate("role");
