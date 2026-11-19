@@ -506,6 +506,17 @@ const organizationSchema = new mongoose.Schema({
     whatsappError:  { type: String, default: null },
   },
 
+  // Rebote permanente del correo del dueño (cron/emailBounceJob.js lee los
+  // avisos de no entrega que llegan a hola@agenditapp.com). Mientras `address`
+  // sea igual a `email`, la recuperación de acceso no ofrece el correo. Se
+  // limpia cuando el dueño cambia su correo.
+  ownerEmailBounce: {
+    address:   { type: String, default: null },
+    bouncedAt: { type: Date, default: null },
+    status:    { type: String, default: null }, // p. ej. "5.1.1"
+    reason:    { type: String, default: null },
+  },
+
   // ── Atribución de adquisición (capturada en el registro) ─────────────────
   // UTM y fbclid con los que llegó el dueño desde la landing. Sin datos
   // personales. Lo usa AgenditApp Oficina IA para atribuir registros y pagos

@@ -26,6 +26,7 @@ import birthdayJob from "./cron/birthdayJob.js";
 import followUpReminderJob from "./cron/followUpReminderJob.js";
 import retargetingJob from "./cron/retargetingJob.js";
 import waHealthCheckJob from "./cron/waHealthCheckJob.js";
+import emailBounceJob from "./cron/emailBounceJob.js";
 import { dynamicCorsOptions } from "./middleware/corsMiddleware.js";
 
 const app = express();
@@ -178,6 +179,8 @@ dbConnection()
     console.log("⏰ Cron job iniciado: retargeting de activación (11 AM hora Colombia)");
     waHealthCheckJob.start();
     console.log("⏰ Cron job iniciado: salud de conexión WhatsApp (cada 15 min)");
+    emailBounceJob.start();
+    console.log("⏰ Cron job iniciado: rebotes de correo del buzón hola@ (cada hora)");
   })
   .catch((err) => {
     console.error("Failed to connect to the database", err);

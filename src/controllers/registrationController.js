@@ -16,31 +16,8 @@ import sendResponse from "../utils/sendResponse.js";
 import getClientIp from "../utils/getClientIp.js";
 import { sendWelcomeMessages } from "../services/welcomeService.js";
 import { recordOwnerLogin } from "../utils/loginTracking.js";
+import { verifyTurnstile } from "../utils/turnstile.js";
 import { isValidSlug, isSlugAvailable, suggestSlugs } from "../utils/reservedSlugs.js";
-
-const TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
-
-/**
- * Valida token de Cloudflare Turnstile.
- * En dev sin secret configurado, se salta la validación.
- */
-async function verifyTurnstile(token) {
-  const secret = process.env.TURNSTILE_SECRET_KEY;
-  if (!secret) {
-    // En dev sin Turnstile configurado, permitir
-    if (process.env.NODE_ENV !== "production") return true;
-    throw new Error("Turnstile no configurado");
-  }
-
-  const response = await fetch(TURNSTILE_VERIFY_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ secret, response: token }),
-  });
-
-  const data = await response.json();
-  return data.success === true;
-}
 
 const registrationController = {
   /**

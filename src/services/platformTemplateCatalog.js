@@ -8,6 +8,10 @@ export const PLATFORM_TEMPLATE_BODIES = {
   // dinámica https://app.agenditapp.com/ingresar/{{1}} (= slug); no va en el body.
   cuenta_creada:
     "¡Hola, {{1}}! Confirmamos que la cuenta de {{2}} en AgenditApp quedó creada. 🎉\n\nCon el botón de abajo vas a tu panel, donde configuras tus servicios, tu horario y tu agenda. El correo registrado en tu cuenta es {{3}}.\n\nGuarda este mensaje para volver a tu panel cuando lo necesites. Si tienes dudas, responde a este mensaje.",
+  // Aviso de cambio de contraseña del dueño (accountNoticeService.js), número Oficina IA.
+  // codigo_acceso (Autenticación) no va aquí: el inbox nunca guarda el código.
+  aviso_cuenta:
+    "Hola {{1}}, te escribimos de AgenditApp. Los datos de ingreso de la cuenta de {{2}} se actualizaron el {{3}}. Si fuiste tú, no tienes que hacer nada. Si no reconoces este cambio, responde a este mensaje y te ayudamos.",
   activa_tu_cuenta:
     "¡Hola {{1}}! 👋 Vimos que creaste la cuenta de *{{2}}* en AgenditApp pero aún no terminaste de configurarla. Faltan solo un par de minutos para tener tu agenda lista y empezar a recibir reservas. 🗓️\n\nContinúa aquí: {{3}}\n\nSi tuviste algún problema o tienes dudas, escríbenos al +57 350 667 4686 y con gusto te ayudamos.",
   agenda_tu_primera_cita:

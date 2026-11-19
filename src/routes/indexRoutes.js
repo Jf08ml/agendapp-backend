@@ -33,6 +33,7 @@ import enrollmentRoutes from "./enrollmentRoutes.js";
 import expenseRoutes from "./expenseRoutes.js";
 import productRoutes from "./productRoutes.js";
 import registrationRoutes from "./registrationRoutes.js";
+import accountAccessRoutes from "./accountAccessRoutes.js";
 import adminRoutes from "./adminRoutes.js";
 import agentRoutes from "./agentRoutes.js";
 import platformInboxRoutes from "./platformInboxRoutes.js";
@@ -72,6 +73,11 @@ router.get("/organization-config", organizationResolver, async (req, res) => {
   delete orgObj.password;
   delete orgObj.__v;
   delete orgObj.brandingBackup;
+  // Rebote del correo del dueño: solo la dirección (ya pública como `email`)
+  // para el aviso en Mi negocio; el diagnóstico del servidor no sale.
+  orgObj.ownerEmailBounce = orgObj.ownerEmailBounce?.address
+    ? { address: orgObj.ownerEmailBounce.address, bouncedAt: orgObj.ownerEmailBounce.bouncedAt }
+    : null;
 
   // 🔐 No exponer credenciales de cobro (tokens del vendedor). Solo el flag de
   // conexión, que el flujo de depósito público necesita.
@@ -207,6 +213,9 @@ router.use("/store", storePublicRoutes);
 
 // Registro público: signup, exchange code, check slug
 router.use(registrationRoutes);
+
+// Recuperar el acceso al panel del dueño (código por correo o WhatsApp). Público.
+router.use("/account-access", accountAccessRoutes);
 
 // Meta Pixel + Conversions API: CompleteRegistration server-side (dedup con el Pixel)
 router.use("/meta-capi", metaConversionsRoutes);
