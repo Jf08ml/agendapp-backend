@@ -146,6 +146,17 @@ const appointmentModelSchema = new mongoose.Schema(
     followUpReminderDeliveryStatus: { type: String, enum: ["sent", "delivered", "failed"] },
     followUpReminderDeliveryUpdatedAt: { type: Date },
     followUpReminderDeliveryError: { type: String },
+    // ⭐ Pedido de reseña en Google tras la cita (cron/googleReviewRequestJob.js).
+    // outcome != null = ya resuelta (enviada o descartada con su motivo); nunca
+    // se vuelve a evaluar. Entrega por externalRef "review:<id>".
+    googleReviewRequestOutcome: {
+      type: String,
+      enum: ["sent", "skipped_no_phone", "skipped_same_visit", "skipped_recent", "skipped_no_whatsapp", "failed"],
+    },
+    googleReviewRequestProcessedAt: { type: Date },
+    googleReviewRequestDeliveryStatus: { type: String, enum: ["sent", "delivered", "failed"] },
+    googleReviewRequestDeliveryUpdatedAt: { type: Date },
+    googleReviewRequestDeliveryError: { type: String },
     // 📨 Resultado del intento de envío de la confirmación de agendamiento por
     // WhatsApp (scheduleAppointment/scheduleAppointmentBatch). Permite diagnosticar
     // reclamos de "no llegó la confirmación" sin depender de logs de servidor.

@@ -54,6 +54,8 @@ const whatsappTemplateController = {
         birthdayGreeting: whatsappTemplates.getDefaultTemplate('birthdayGreeting'),
         // 🔁 Recordatorio de seguimiento entre servicios relacionados
         followUpReminder: whatsappTemplates.getDefaultTemplate('followUpReminder'),
+        // ⭐ Pedido de reseña en Google tras la cita
+        googleReviewRequest: whatsappTemplates.getDefaultTemplate('googleReviewRequest'),
         // 🛍️ Tienda pública
         paymentReceived: whatsappTemplates.getDefaultTemplate('paymentReceived'),
         // 🔔 Mensajes del sistema (avisos al admin)
@@ -202,6 +204,12 @@ const whatsappTemplateController = {
           isCustom: !!customTemplates.followUpReminder,
           variables: ['{{names}}', '{{organization}}', '{{service}}', '{{originalService}}', '{{days}}'],
         },
+        // ⭐ Pedido de reseña en Google tras la cita
+        googleReviewRequest: {
+          content: customTemplates.googleReviewRequest || defaultTemplates.googleReviewRequest,
+          isCustom: !!customTemplates.googleReviewRequest,
+          variables: ['{{names}}', '{{organization}}', '{{reviewUrl}}'],
+        },
         // 🛍️ Tienda pública
         paymentReceived: {
           content: customTemplates.paymentReceived || defaultTemplates.paymentReceived,
@@ -270,6 +278,7 @@ const whatsappTemplateController = {
         'classReminder',
         'birthdayGreeting',
         'followUpReminder',
+        'googleReviewRequest',
         'paymentReceived',
         'adminPaymentAlert',
         'adminNewOrderAlert',
@@ -354,6 +363,7 @@ const whatsappTemplateController = {
         'classReminder',
         'birthdayGreeting',
         'followUpReminder',
+        'googleReviewRequest',
         'paymentReceived',
         'adminPaymentAlert',
         'adminNewOrderAlert',
@@ -435,6 +445,7 @@ const whatsappTemplateController = {
         'classReminder',
         'birthdayGreeting',
         'followUpReminder',
+        'googleReviewRequest',
         'paymentReceived',
         'adminPaymentAlert',
         'adminNewOrderAlert',
@@ -601,6 +612,7 @@ const whatsappTemplateController = {
           classReminder: true,
           birthdayGreeting: false,
           followUpReminder: false,
+          googleReviewRequest: false,
           paymentReceived: true,
           adminPaymentAlert: true,
           adminNewOrderAlert: true,
@@ -632,6 +644,7 @@ const whatsappTemplateController = {
         classReminder: true,
         birthdayGreeting: false,
         followUpReminder: false,
+        googleReviewRequest: false,
         paymentReceived: true,
         adminPaymentAlert: true,
         adminNewOrderAlert: true,
@@ -682,6 +695,7 @@ const whatsappTemplateController = {
         'classReminder',
         'birthdayGreeting',
         'followUpReminder',
+        'googleReviewRequest',
         'paymentReceived',
         'adminPaymentAlert',
         'adminNewOrderAlert',

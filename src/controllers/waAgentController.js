@@ -391,6 +391,11 @@ const REF_KIND_FIELDS = {
     updatedAtField: "followUpReminderDeliveryUpdatedAt",
     errorField: "followUpReminderDeliveryError",
   },
+  review: {
+    statusField: "googleReviewRequestDeliveryStatus",
+    updatedAtField: "googleReviewRequestDeliveryUpdatedAt",
+    errorField: "googleReviewRequestDeliveryError",
+  },
 };
 
 /**

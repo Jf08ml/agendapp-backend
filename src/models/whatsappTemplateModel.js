@@ -115,6 +115,12 @@ const whatsappTemplateSchema = new mongoose.Schema(
           type: Boolean,
           default: false,
         },
+        // ⭐ Pedido de reseña en Google tras la cita (desactivado por defecto:
+        // solo sale si el administrador lo activa)
+        googleReviewRequest: {
+          type: Boolean,
+          default: false,
+        },
         // 🛍️ Pago recibido (tienda pública) — transaccional, activo por defecto
         paymentReceived: {
           type: Boolean,
@@ -155,6 +161,7 @@ const whatsappTemplateSchema = new mongoose.Schema(
         classReminder: true,
         birthdayGreeting: false,
         followUpReminder: false,
+        googleReviewRequest: false,
         paymentReceived: true,
         adminPaymentAlert: true,
         adminNewOrderAlert: true,
@@ -272,6 +279,11 @@ const whatsappTemplateSchema = new mongoose.Schema(
     },
     // 🔁 Recordatorio de seguimiento entre servicios relacionados
     followUpReminder: {
+      type: String,
+      default: null, // null = usar template por defecto del sistema
+    },
+    // ⭐ Pedido de reseña en Google tras la cita
+    googleReviewRequest: {
       type: String,
       default: null, // null = usar template por defecto del sistema
     },

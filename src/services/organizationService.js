@@ -9,6 +9,7 @@ import { normalizePhone } from "./waAgentService.js";
 import { getVerticalCatalog, LARGE_DENOMINATION_CURRENCIES } from "../utils/verticalCatalogs.js";
 import { validateTimeRange, validateWeeklyScheduleDays } from "../utils/scheduleValidation.js";
 import { notifyPasswordChanged } from "./accountNoticeService.js";
+import { isValidPlaceId } from "../utils/googleReviews.js";
 
 // Monedas de denominación grande (sin centavos en la práctica): los precios
 // de ejemplo se multiplican ×1000 para que se vean realistas (ej: $40.000 COP vs $40 USD)
@@ -567,6 +568,21 @@ const organizationService = {
       const info = String(aiAssistantInfo ?? "").trim();
       if (info.length > 4000) throw new Error("La información para el asistente admite máximo 4000 caracteres.");
       organization.aiAssistantInfo = info;
+    }
+
+    // ⭐ Perfil del negocio en Google (Place ID para el enlace de reseñas)
+    if (organizationData.googleBusiness !== undefined) {
+      const gb = organizationData.googleBusiness || {};
+      const placeId = typeof gb.placeId === "string" ? gb.placeId.trim() : "";
+      if (placeId && !isValidPlaceId(placeId)) {
+        const err = new Error("El perfil de Google seleccionado no es válido. Búscalo de nuevo.");
+        err.statusCode = 400;
+        throw err;
+      }
+      const text = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "") || null;
+      organization.googleBusiness = placeId
+        ? { placeId, name: text(gb.name, 200), address: text(gb.address, 300) }
+        : { placeId: null, name: null, address: null };
     }
 
     // ✅ Auto-marcar asistencia
