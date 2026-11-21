@@ -28,6 +28,7 @@
  *   days            → dias
  *   originalService → servicio_original
  *   service (followUpReminder) → servicio_seguimiento
+ *   reviewUrl       → enlace_resena (googleReviewRequest)
  *   previousDate    → fecha_anterior (reprogramación)
  */
 
@@ -66,6 +67,8 @@ const META_TEMPLATE_NAMES = {
   birthdayGreeting:          "cumpleanos_cliente",
   // 🔁 Recordatorio de seguimiento entre servicios relacionados
   followUpReminder:          "recordatorio_seguimiento",
+  // ⭐ Pedido de reseña en Google tras la cita
+  googleReviewRequest:       "solicitud_resena",
   // 🛍️ Tienda pública
   paymentReceived:           "pago_recibido",
   // 🔔 Mensajes del sistema (avisos al admin)
@@ -126,6 +129,8 @@ const VARIABLE_ORDER = {
   cumpleanos_cliente:      ["nombre_cliente", "nombre_negocio", "beneficio"],
   // 🔁 Recordatorio de seguimiento entre servicios relacionados
   recordatorio_seguimiento: ["nombre_cliente", "dias", "servicio_original", "nombre_negocio", "servicio_seguimiento"],
+  // ⭐ Pedido de reseña en Google tras la cita
+  solicitud_resena:        ["nombre_cliente", "nombre_negocio", "enlace_resena"],
   // 🛍️ Tienda pública
   pago_recibido:           ["nombre_cliente", "nombre_negocio", "monto", "detalle_pedido"],
   // 🔔 Mensajes del sistema (avisos al admin)
@@ -171,6 +176,8 @@ function buildMetaVarMap(data) {
     dias:                 String(data.days        ?? ""),
     servicio_original:    data.originalService    ?? "",
     servicio_seguimiento: data.service            ?? "",
+    // ⭐ Pedido de reseña en Google
+    enlace_resena:        data.reviewUrl          ?? "",
     // 🛍️ Tienda pública
     monto:                data.monto              ?? "",
     detalle_pedido:       data.detalle            ?? "",

@@ -27,6 +27,7 @@ import followUpReminderJob from "./cron/followUpReminderJob.js";
 import retargetingJob from "./cron/retargetingJob.js";
 import waHealthCheckJob from "./cron/waHealthCheckJob.js";
 import emailBounceJob from "./cron/emailBounceJob.js";
+import googleReviewRequestJob from "./cron/googleReviewRequestJob.js";
 import { dynamicCorsOptions } from "./middleware/corsMiddleware.js";
 
 const app = express();
@@ -181,6 +182,8 @@ dbConnection()
     console.log("⏰ Cron job iniciado: salud de conexión WhatsApp (cada 15 min)");
     emailBounceJob.start();
     console.log("⏰ Cron job iniciado: rebotes de correo del buzón hola@ (cada hora)");
+    googleReviewRequestJob.start();
+    console.log("⏰ Cron job iniciado: pedido de reseña en Google tras la cita (cada hora, solo orgs que lo activan)");
   })
   .catch((err) => {
     console.error("Failed to connect to the database", err);

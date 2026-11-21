@@ -337,6 +337,17 @@ Es un buen momento para agendar tu *{{service}}* y mantener tu resultado al día
 
 Si tienes alguna pregunta o quieres agendar, responde a este mensaje. ¡Te esperamos! 💖`,
 
+      // ⭐ Pedido de reseña en Google tras la cita. Va a todos los clientes por
+      // igual: Google prohíbe pedirla solo a los que quedaron contentos.
+      googleReviewRequest: `¡Hola, {{names}}! 😊
+
+Gracias por visitarnos en *{{organization}}*.
+
+Tu opinión nos ayuda muchísimo a crecer. Si tienes un minuto, cuéntanos cómo te fue en Google:
+{{reviewUrl}}
+
+¡Gracias por confiar en nosotros! 💖`,
+
       // 🛍️ Pago recibido (pedido de la tienda pública)
       paymentReceived: `✅ ¡Hola, {{names}}!
 

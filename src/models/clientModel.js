@@ -97,6 +97,12 @@ const clientSchema = new mongoose.Schema(
     // Distinto del de la tarjeta a propósito: la tarjeta puede mostrarse sin
     // verificar el teléfono (fallback cuando la org no envía WhatsApp) y las
     // reservas son más sensibles (fechas, profesional) y permiten cancelar.
+    // ⭐ Último pedido de reseña en Google por WhatsApp (máximo 1 cada
+    // REVIEW_COOLDOWN_DAYS, utils/googleReviews.js).
+    googleReviewRequestedAt: {
+      type: Date,
+      default: null,
+    },
     bookingsToken: {
       type: String,
       required: false,

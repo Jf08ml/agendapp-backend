@@ -324,6 +324,14 @@ const organizationSchema = new mongoose.Schema({
     maxlength: 4000,
     trim: true,
   },
+  // ⭐ Perfil del negocio en Google (Mi negocio → Ubicación). El Place ID arma
+  // el enlace para dejar reseña (utils/googleReviews.js) que va en el WhatsApp
+  // `googleReviewRequest` tras la cita. name/address: solo para mostrarlo.
+  googleBusiness: {
+    placeId: { type: String, default: null, trim: true },
+    name:    { type: String, default: null, trim: true },
+    address: { type: String, default: null, trim: true },
+  },
   // Última vez que el admin respondió a AgenditApp vía Meta (ventana de 24h a nivel de org)
   agentAdminLastContactAt: { type: Date, default: null },
   // Tipo de conexión WA activa: 'baileys' | 'meta' | null
