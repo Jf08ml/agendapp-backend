@@ -470,6 +470,7 @@ export const submitReceipt = async (req, res) => {
       aiConfidence: extracted.confidence,
       aiVerdict: decision.verdict,
       aiNotes: [extracted.notes, ...decision.reasons].filter(Boolean).join(" "),
+      reasons: decision.reasons,
     };
 
     if (decision.autoApprove) {

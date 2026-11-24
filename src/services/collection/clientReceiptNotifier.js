@@ -34,7 +34,14 @@ async function resolveOrderCustomer(order) {
 
 const firstName = (name) => String(name || "").trim().split(/\s+/)[0] || "";
 
-function buildMessage(outcome, order, orgName, name) {
+/** Motivo del rechazo escrito por el negocio, limpio y corto (para el WhatsApp). */
+function cleanReason(notes) {
+  const t = String(notes || "").replace(/\s+/g, " ").trim();
+  if (!t) return "";
+  return t.length > 200 ? `${t.slice(0, 197)}…` : t;
+}
+
+export function buildMessage(outcome, order, orgName, name) {
   const hello = firstName(name) ? `Hola ${firstName(name)} 👋` : "Hola 👋";
   const isBooking = order.type === "reservation" || order.type === "class";
   if (outcome === "in_review") {
@@ -44,10 +51,14 @@ function buildMessage(outcome, order, orgName, name) {
       (isBooking ? " Mientras tanto tu cupo sigue apartado." : "")
     );
   }
+  // Fase 3: el motivo que eligió el negocio, para que el cliente sepa qué corregir
+  const reason = cleanReason(order?.receipt?.reviewNotes);
   return (
     `${hello} El equipo de *${orgName}* no pudo validar tu comprobante de pago` +
     (isBooking ? ", así que tu reserva no quedó confirmada." : ".") +
-    " Si crees que es un error, respóndenos por aquí."
+    (reason ? `\n\nMotivo: ${reason}` : "") +
+    (reason ? "\n\n" : " ") +
+    "Si crees que es un error, respóndenos por aquí."
   );
 }
 
