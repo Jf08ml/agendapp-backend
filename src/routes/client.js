@@ -33,6 +33,8 @@ router.get(
 );
 // Antes de "/:id" para que "follow-ups" no se interprete como un id de cliente
 router.get("/follow-ups", organizationResolver, verifyToken, clientController.getOrgFollowUps);
+// Cifras por cliente (última visita, visitas, total, paquete) para los segmentos
+router.get("/stats", organizationResolver, verifyToken, clientController.getClientStats);
 // 💳 Tarjeta de fidelidad: cliente por token del QR / enlace de su tarjeta
 router.get("/loyalty-card/by-token/:token", organizationResolver, verifyToken, loyaltyCardController.getClientByCardToken);
 router.get("/:id/loyalty-card", organizationResolver, verifyToken, loyaltyCardController.getClientCardLink);
