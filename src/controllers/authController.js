@@ -6,6 +6,8 @@ import Organization from "../models/organizationModel.js";
 import Employee from "../models/employeeModel.js";
 import jwt from "jsonwebtoken";
 import { recordOwnerLogin } from "../utils/loginTracking.js";
+import AdminUser from "../models/adminUserModel.js";
+import { superadminRefreshDecision, SUPERADMIN_TOKEN_TTL, SUPERADMIN_TOKEN_TTL_MS } from "../utils/superadminRefresh.js";
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 días, igual que el JWT
 
@@ -99,6 +101,31 @@ const authController = {
       // Los tokens de impersonación no son renovables (deben expirar naturalmente)
       if (decoded.impersonated) {
         return sendResponse(res, 403, null, "Los tokens de impersonación no se pueden renovar");
+      }
+
+      // Superadmin: conserva adminId y 8 h; no se renueva vencido (ver superadminRefresh.js).
+      if (decoded.userType === "superadmin") {
+        const decision = superadminRefreshDecision(decoded);
+        if (!decision.ok) return sendResponse(res, 401, null, decision.message);
+        const admin = await AdminUser.findById(decoded.adminId).select("isActive").lean();
+        if (!admin || !admin.isActive) {
+          return sendResponse(res, 401, null, "Inicia sesión de nuevo en el panel de plataforma.");
+        }
+        const superToken = jwt.sign({ adminId: decoded.adminId, userType: "superadmin" }, process.env.JWT_SECRET, {
+          expiresIn: SUPERADMIN_TOKEN_TTL,
+        });
+        return sendResponse(
+          res,
+          200,
+          {
+            token: superToken,
+            sessionId: null,
+            userId: decoded.adminId,
+            userType: "superadmin",
+            expiresAt: new Date(Date.now() + SUPERADMIN_TOKEN_TTL_MS).toISOString(),
+          },
+          "Token renovado exitosamente"
+        );
       }
 
       // Verificar que el token no sea muy antiguo (máx 30 días)
