@@ -57,6 +57,39 @@ export const cancelBooking = async (req, res) => {
   }
 };
 
+// Reagendar desde Mis reservas (mismas reglas que el enlace de la cita)
+// GET  /public/my-bookings/:token/reschedule-info?id=
+// POST /public/my-bookings/:token/reschedule/slots  { id, date: "YYYY-MM-DD" }
+// POST /public/my-bookings/:token/reschedule        { id, newStartDate }
+export const getRescheduleInfo = async (req, res) => {
+  try {
+    const result = await clientBookingsService.getRescheduleInfo(req.params.token, req.query.id);
+    return sendResponse(res, result.status, result.success ? result.data : null, result.success ? "Información de reagendamiento" : result.message);
+  } catch (err) {
+    return sendResponse(res, 500, null, "Error al consultar el reagendamiento");
+  }
+};
+
+export const getRescheduleSlots = async (req, res) => {
+  try {
+    const { id, date } = req.body || {};
+    const result = await clientBookingsService.getRescheduleSlots(req.params.token, id, date);
+    return sendResponse(res, result.status, result.success ? result.data : null, result.success ? "Horarios disponibles" : result.message);
+  } catch (err) {
+    return sendResponse(res, 500, null, "Error al obtener los horarios");
+  }
+};
+
+export const reschedule = async (req, res) => {
+  try {
+    const { id, newStartDate } = req.body || {};
+    const result = await clientBookingsService.reschedule(req.params.token, id, newStartDate);
+    return sendResponse(res, result.status, result.success ? result.data : null, result.message);
+  } catch (err) {
+    return sendResponse(res, 500, null, "Error al reagendar la cita");
+  }
+};
+
 // GET /clients/:id/bookings-link   (admin) → { url, token }
 export const getClientBookingsLink = async (req, res) => {
   try {
@@ -68,4 +101,4 @@ export const getClientBookingsLink = async (req, res) => {
   }
 };
 
-export default { requestLink, lookupByPhone, getBookings, cancelBooking, getClientBookingsLink };
+export default { requestLink, lookupByPhone, getBookings, cancelBooking, getRescheduleInfo, getRescheduleSlots, reschedule, getClientBookingsLink };
