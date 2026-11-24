@@ -121,6 +121,9 @@ const orderSchema = new mongoose.Schema(
       aiConfidence: { type: Number }, // 0–1
       aiVerdict: { type: String, enum: ["match", "mismatch", "unreadable"] },
       aiNotes: { type: String }, // explicación corta de la IA
+      // Por qué no se aprobó solo (evaluateReceipt): «El monto no coincide…».
+      // El panel lo muestra como «No se aprobó solo porque…» (Fase 3).
+      reasons: { type: [String], default: undefined },
       // auto_approved: la IA confirmó sola | pending_review: requiere admin
       // approved/rejected: decisión manual del admin.
       reviewStatus: {
