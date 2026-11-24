@@ -18,6 +18,9 @@ import Organization from "../models/organizationModel.js";
 import Appointment from "../models/appointmentModel.js";
 import Reservation from "../models/reservationModel.js";
 import Enrollment from "../models/enrollmentModel.js";
+import ClientPackage from "../models/clientPackageModel.js";
+import "../models/servicePackageModel.js";
+import { isPackageVisible, packageView, sortPackages } from "../utils/clientPackagesView.js";
 import "../models/classSessionModel.js";
 import "../models/classModel.js";
 import clientService from "./clientService.js";
@@ -108,7 +111,7 @@ export async function lookupBookingsByPhone(org, phone) {
 async function buildBookingsView(client, org, { readOnly }) {
   const now = new Date();
 
-  const [upcomingAppts, pastAppts, pendingRes, enrollments] = await Promise.all([
+  const [upcomingAppts, pastAppts, pendingRes, enrollments, clientPackages] = await Promise.all([
     Appointment.find({
       organizationId: org._id,
       client: client._id,
@@ -154,6 +157,17 @@ async function buildBookingsView(client, org, { readOnly }) {
       .sort({ createdAt: -1 })
       .limit(200)
       .lean(),
+    // Mis paquetes (Fase 3): solo con el enlace personal, no en la consulta por teléfono
+    readOnly
+      ? []
+      : ClientPackage.find({ organizationId: org._id, clientId: client._id, status: { $ne: "cancelled" } })
+          .select("servicePackageId tierLabel purchaseDate expirationDate status services classes updatedAt")
+          .populate("servicePackageId", "name")
+          .populate("services.serviceId", "name")
+          .populate("classes.classId", "name")
+          .sort({ expirationDate: -1 })
+          .limit(30)
+          .lean(),
   ]);
 
   const appointments = upcomingAppts.map((a) => {
@@ -238,6 +252,7 @@ async function buildBookingsView(client, org, { readOnly }) {
     pendingReservations,
     classes,
     history,
+    packages: sortPackages(clientPackages.filter((p) => isPackageVisible(p, now)).map((p) => packageView(p, now))),
   };
 }
 
