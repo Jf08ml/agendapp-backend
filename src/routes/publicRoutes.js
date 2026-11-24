@@ -39,5 +39,9 @@ router.post('/my-bookings/lookup', organizationResolver, clientBookingsControlle
 router.get('/my-bookings/:token', clientBookingsController.getBookings);
 // POST /api/public/my-bookings/:token/cancel { type, id }
 router.post('/my-bookings/:token/cancel', clientBookingsController.cancelBooking);
+// Reagendar una cita desde Mis reservas
+router.get('/my-bookings/:token/reschedule-info', clientBookingsController.getRescheduleInfo);
+router.post('/my-bookings/:token/reschedule/slots', clientBookingsController.getRescheduleSlots);
+router.post('/my-bookings/:token/reschedule', clientBookingsController.reschedule);
 
 export default router;

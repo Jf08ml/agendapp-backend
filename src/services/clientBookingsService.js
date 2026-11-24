@@ -312,6 +312,41 @@ export async function cancelBooking(token, type, id) {
   return { success: false, status: 400, message: "Tipo de reserva no soportado." };
 }
 
+/**
+ * Reagendar desde Mis reservas: mismas reglas que el enlace de la cita
+ * (cancellationService), pero la cita se identifica por el enlace del cliente
+ * + su id, y solo si es de ese cliente.
+ * @returns {{ locator } | { error, status }}
+ */
+async function rescheduleLocator(token, id) {
+  const ctx = await loadByToken(token);
+  if (!ctx) return { error: "Enlace inválido.", status: 404 };
+  if (!id || !/^[a-f0-9]{24}$/i.test(String(id))) return { error: "Cita inválida.", status: 400 };
+  return { locator: { appointmentId: String(id), clientId: ctx.client._id, organizationId: ctx.org._id } };
+}
+
+export async function getRescheduleInfo(token, id) {
+  const r = await rescheduleLocator(token, id);
+  if (r.error) return { success: false, status: r.status, message: r.error };
+  const result = await cancellationService.getRescheduleInfo(r.locator);
+  return { ...result, status: result.success ? 200 : 404 };
+}
+
+export async function getRescheduleSlots(token, id, date) {
+  const r = await rescheduleLocator(token, id);
+  if (r.error) return { success: false, status: r.status, message: r.error };
+  const result = await cancellationService.getRescheduleSlots(r.locator, date);
+  return { ...result, status: result.success ? 200 : 400 };
+}
+
+export async function reschedule(token, id, newStartDate) {
+  const r = await rescheduleLocator(token, id);
+  if (r.error) return { success: false, status: r.status, message: r.error };
+  if (!newStartDate) return { success: false, status: 400, message: "Nuevo horario requerido." };
+  const result = await cancellationService.rescheduleByToken(r.locator, newStartDate);
+  return { ...result, status: result.success ? 200 : 400 };
+}
+
 // Anti-spam del envío por WhatsApp: 1 envío por cliente y org cada 2 minutos
 // (en memoria; el rate limit general de la API sigue aplicando).
 const REQUEST_COOLDOWN_MS = 2 * 60 * 1000;
@@ -382,6 +417,9 @@ export default {
   getBookings,
   lookupBookingsByPhone,
   cancelBooking,
+  getRescheduleInfo,
+  getRescheduleSlots,
+  reschedule,
   requestBookingsLink,
   getClientBookingsLink,
 };

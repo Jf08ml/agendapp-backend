@@ -1268,13 +1268,36 @@ const cancellationService = {
   },
 
   /**
-   * Valida si la cita del token se puede reagendar según la política de la org.
+   * Cita de un cliente (Mis reservas): solo si es de ese cliente y negocio.
+   * `locator` = { appointmentId, clientId, organizationId }.
+   */
+  async _findAppointmentForClient({ appointmentId, clientId, organizationId }) {
+    if (!/^[a-f0-9]{24}$/i.test(String(appointmentId || ''))) return null;
+    return Appointment.findOne({ _id: appointmentId, client: clientId, organizationId })
+      .populate([
+        { path: 'service', select: 'name duration maxConcurrentAppointments' },
+        { path: 'employee' },
+        { path: 'client', select: 'name' },
+        { path: 'organizationId' },
+      ])
+      .lean();
+  },
+
+  /**
+   * Valida si la cita se puede reagendar según la política de la org.
+   * `locator`: el token del enlace de la cita (string) o, desde Mis reservas,
+   * { appointmentId, clientId, organizationId }.
    * @returns {{ ok: true, appointment, org, policy, remaining, timezone } | { ok: false, reason, notFound? }}
    */
-  async _getRescheduleContext(token) {
-    if (!token) return { ok: false, reason: 'Token requerido', notFound: true };
-    const appointment = await this._findAppointmentByToken(token);
-    if (!appointment) return { ok: false, reason: 'Enlace no válido o vencido', notFound: true };
+  async _getRescheduleContext(locator) {
+    if (!locator) return { ok: false, reason: 'Token requerido', notFound: true };
+    const appointment =
+      typeof locator === 'string'
+        ? await this._findAppointmentByToken(locator)
+        : await this._findAppointmentForClient(locator);
+    if (!appointment) {
+      return { ok: false, reason: typeof locator === 'string' ? 'Enlace no válido o vencido' : 'Cita no encontrada', notFound: true };
+    }
 
     const org = appointment.organizationId;
     const policy = org?.reschedulePolicy || {};
