@@ -25,6 +25,7 @@ import ChatLog from "../models/chatLogModel.js";
 import { auditLogService } from "../services/auditLogService.js";
 import { getCustomFieldDefinitions, validateAndSplitCustomFieldValues } from "../utils/customFieldUtils.js";
 import { onlineBookingEmployeeError } from "../utils/onlineBooking.js";
+import { hasSlotConflict } from "../services/paymentHoldService.js";
 
 // Marca como convertido el ChatLog del chatbot de reserva, del lado del servidor
 // y en la misma request que crea la reserva. Reemplaza al frágil POST
@@ -778,6 +779,18 @@ const reservationController = {
               null,
               "Para auto-reserva, cada servicio debe tener un empleado asignado."
             );
+          }
+
+          // 1b) Cupo apartado por otro cliente que está pagando el abono
+          if (
+            await hasSlotConflict({
+              organizationId,
+              start: moment.tz(startDate, "YYYY-MM-DDTHH:mm:ss", timezone).toDate(),
+              items: services.map((s) => ({ serviceId: normalizeId(s.serviceId), employeeId: normalizeId(s.employeeId), duration: s.duration })),
+              excludeCustomerId: customer._id,
+            })
+          ) {
+            return sendResponse(res, 409, { code: SLOT_TAKEN_CODE }, "Ese horario se acaba de ocupar: otra persona lo está reservando. Por favor elige otro horario.");
           }
 
           // 2) Normalizar duraciones y calcular startDate encadenado por servicio

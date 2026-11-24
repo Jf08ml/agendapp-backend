@@ -10,6 +10,7 @@ import appointmentModel from "../models/appointmentModel.js";
 import serviceModel from "../models/serviceModel.js";
 import scheduleService from "./scheduleService.js";
 import { ONLINE_SELECTABLE_EMPLOYEE } from "../utils/onlineBooking.js";
+import { withHolds } from "./paymentHoldService.js";
 
 const SEARCH_DAYS = 14;
 const CACHE_MS = 60 * 1000;
@@ -86,14 +87,18 @@ async function compute(organizationId, serviceId) {
     const date = day.format("YYYY-MM-DD");
     if (scheduleService.isBlockedHoliday(date, org)) continue;
 
-    const appointments = await appointmentModel
-      .find({
-        organizationId,
-        employee: { $in: employees.map((e) => e._id) },
-        startDate: { $gte: day.toDate(), $lte: day.clone().endOf("day").toDate() },
-        status: { $nin: CANCELLED },
-      })
-      .lean();
+    const dayEnd = day.clone().endOf("day").toDate();
+    const appointments = await withHolds(
+      await appointmentModel
+        .find({
+          organizationId,
+          employee: { $in: employees.map((e) => e._id) },
+          startDate: { $gte: day.toDate(), $lte: dayEnd },
+          status: { $nin: CANCELLED },
+        })
+        .lean(),
+      { organizationId, employeeIds: employees.map((e) => e._id), from: day.toDate(), to: dayEnd } // + cupos apartados
+    );
 
     const slotsByEmployee = employees.map((emp) => ({
       employeeId: String(emp._id),

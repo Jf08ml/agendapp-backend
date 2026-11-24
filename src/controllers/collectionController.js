@@ -27,6 +27,7 @@ import ServicePackage from "../models/servicePackageModel.js";
 import { resolveBaseUrl } from "../utils/cancellationUtils.js";
 import Order from "../models/orderModel.js";
 import { onlineBookingEmployeeError } from "../utils/onlineBooking.js";
+import { hasSlotConflict } from "../services/paymentHoldService.js";
 
 // Minutos que se retiene el cupo mientras el cliente paga (hold).
 const HOLD_MINUTES = 15;
@@ -164,6 +165,19 @@ export const createReservationCheckout = async (req, res) => {
       documentId: customerDetails.documentId,
       notes: customerDetails.notes,
     });
+
+    // Cupo apartado: si otro cliente está pagando ese horario (o ya se ocupó), no
+    // se abre otro pago para el mismo cupo (paymentHoldService).
+    if (
+      await hasSlotConflict({
+        organizationId,
+        start: moment.tz(startDate, "YYYY-MM-DDTHH:mm:ss", timezone).toDate(),
+        items: services.map((s, i) => ({ serviceId: s.serviceId, employeeId: s.employeeId || null, duration: withPrice[i].duration })),
+        excludeCustomerId: customer._id,
+      })
+    ) {
+      return sendResponse(res, 409, { code: "SLOT_TAKEN" }, "Ese horario se acaba de ocupar: otra persona lo está reservando. Por favor elige otro horario.");
+    }
 
     // Crear las reservas en pending con hold (cupo retenido hasta expiresAt).
     const groupId = new mongoose.Types.ObjectId();

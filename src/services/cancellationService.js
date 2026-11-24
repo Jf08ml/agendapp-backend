@@ -11,6 +11,7 @@ import whatsappTemplates from '../utils/whatsappTemplates.js';
 import packageService from './packageService.js';
 import clientService from './clientService.js';
 import scheduleService from './scheduleService.js';
+import { withHolds } from './paymentHoldService.js';
 import serviceModel from '../models/serviceModel.js';
 
 // Hashes bcrypt ($2a$/$2b$/$2y$) — solo los tokens antiguos los tienen. El fallback
@@ -1394,13 +1395,16 @@ const cancellationService = {
     );
     const startOfDay = moment.tz(date, timezone).startOf('day').toDate();
     const endOfDay = moment.tz(date, timezone).endOf('day').toDate();
-    const appointments = await Appointment.find({
-      organizationId: org._id,
-      employee: appointment.employee._id,
-      _id: { $ne: appointment._id }, // su propio horario actual queda libre
-      startDate: { $gte: startOfDay, $lte: endOfDay },
-      status: { $nin: ['cancelled', 'cancelled_by_customer', 'cancelled_by_admin'] },
-    });
+    const appointments = await withHolds(
+      await Appointment.find({
+        organizationId: org._id,
+        employee: appointment.employee._id,
+        _id: { $ne: appointment._id }, // su propio horario actual queda libre
+        startDate: { $gte: startOfDay, $lte: endOfDay },
+        status: { $nin: ['cancelled', 'cancelled_by_customer', 'cancelled_by_admin'] },
+      }),
+      { organizationId: org._id, employeeIds: [appointment.employee._id], from: startOfDay, to: endOfDay } // + cupos apartados
+    );
 
     const service = appointment.service?._id
       ? await serviceModel.findById(appointment.service._id).select('maxConcurrentAppointments').lean()

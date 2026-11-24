@@ -14,6 +14,7 @@ import scheduleService from "../services/scheduleService.js";
 import sendResponse from "../utils/sendResponse.js";
 import { ONLINE_BOOKABLE_EMPLOYEE } from "../utils/onlineBooking.js";
 import { findNextFreeSlot } from "../services/nextFreeSlotService.js";
+import { withHolds } from "../services/paymentHoldService.js";
 
 // Valida acceso a las excepciones de horario (bloqueos) de un empleado:
 // 1) el empleado debe pertenecer a la organización resuelta por organizationResolver
@@ -364,7 +365,13 @@ const scheduleController = {
         appointmentQuery.employee = employeeId;
       }
 
-      const appointments = await appointmentModel.find(appointmentQuery);
+      // + cupos apartados por pagos en curso (paymentHoldService)
+      const appointments = await withHolds(await appointmentModel.find(appointmentQuery), {
+        organizationId,
+        employeeIds: employeeId ? [employeeId] : undefined,
+        from: startOfDay,
+        to: endOfDay,
+      });
 
       // 👥 Si se proporciona serviceId, obtener maxConcurrentAppointments del servicio
       let maxConcurrentAppointments = 1;
@@ -714,12 +721,15 @@ const scheduleController = {
       const endOfDay = moment.tz(date, timezone).endOf('day').toDate();
       
       // ✅ EXCLUIR citas canceladas para que sus slots estén disponibles
-      const appointments = await appointmentModel.find({
-        organizationId,
-        employee: { $in: availableEmployeeIds },
-        startDate: { $gte: startOfDay, $lte: endOfDay },
-        status: { $nin: ['cancelled_by_customer', 'cancelled_by_admin'] } // ✅ Excluir canceladas
-      });
+      const appointments = await withHolds(
+        await appointmentModel.find({
+          organizationId,
+          employee: { $in: availableEmployeeIds },
+          startDate: { $gte: startOfDay, $lte: endOfDay },
+          status: { $nin: ['cancelled_by_customer', 'cancelled_by_admin'] } // ✅ Excluir canceladas
+        }),
+        { organizationId, employeeIds: availableEmployeeIds, from: startOfDay, to: endOfDay } // + cupos apartados
+      );
       
       // Obtener maxConcurrentAppointments de cada servicio
       const serviceIds = [...new Set(services.map(s => s.serviceId).filter(Boolean))];
@@ -842,12 +852,15 @@ const scheduleController = {
       
       // Obtener todas las citas en el rango de una sola vez
       // ✅ EXCLUIR citas canceladas para que sus slots estén disponibles
-      const appointments = await appointmentModel.find({
-        organizationId,
-        employee: { $in: Array.from(allEmployeeIds) },
-        startDate: { $gte: minDate, $lte: maxDate },
-        status: { $nin: ['cancelled_by_customer', 'cancelled_by_admin'] } // ✅ Excluir canceladas
-      });
+      const appointments = await withHolds(
+        await appointmentModel.find({
+          organizationId,
+          employee: { $in: Array.from(allEmployeeIds) },
+          startDate: { $gte: minDate, $lte: maxDate },
+          status: { $nin: ['cancelled_by_customer', 'cancelled_by_admin'] } // ✅ Excluir canceladas
+        }),
+        { organizationId, employeeIds: Array.from(allEmployeeIds), from: minDate, to: maxDate } // + cupos apartados
+      );
 
       
       // Procesar cada solicitud
@@ -1008,12 +1021,15 @@ const scheduleController = {
       const rangeStart = moment.tz(startDate, timezone).startOf('day').toDate();
       const rangeEnd = moment.tz(endDate, timezone).endOf('day').toDate();
 
-      const appointments = await appointmentModel.find({
-        organizationId,
-        employee: { $in: Array.from(allEmployeeIds) },
-        startDate: { $gte: rangeStart, $lte: rangeEnd },
-        status: { $nin: ['cancelled_by_customer', 'cancelled_by_admin'] }
-      });
+      const appointments = await withHolds(
+        await appointmentModel.find({
+          organizationId,
+          employee: { $in: Array.from(allEmployeeIds) },
+          startDate: { $gte: rangeStart, $lte: rangeEnd },
+          status: { $nin: ['cancelled_by_customer', 'cancelled_by_admin'] }
+        }),
+        { organizationId, employeeIds: Array.from(allEmployeeIds), from: rangeStart, to: rangeEnd } // + cupos apartados
+      );
 
       // Obtener maxConcurrentAppointments de cada servicio
       const serviceIdsForCheck = [...new Set(services.map(s => s.serviceId).filter(Boolean))];

@@ -36,6 +36,7 @@ import "../models/classSessionModel.js"; // populate de Enrollment.sessionId
 import "../models/classModel.js"; // populate de ClassSession.classId
 import Order from "../models/orderModel.js";
 import { onlineBookingEmployeeError } from "../utils/onlineBooking.js";
+import { hasSlotConflict } from "../services/paymentHoldService.js";
 
 // El cliente necesita tiempo para transferir y subir el comprobante.
 const HOLD_MINUTES = 60;
@@ -156,6 +157,19 @@ export const createReceiptReservationCheckout = async (req, res) => {
     // #6 Liberar holds ABANDONADOS del mismo cliente (intentos previos donde se
     // creó la reserva pero nunca se subió comprobante) para no acumular pendientes.
     await releaseAbandonedReceiptHolds(organizationId, customer._id);
+
+    // Cupo apartado: si otro cliente está pagando ese horario (o ya se ocupó), no
+    // se abre otro pago para el mismo cupo (paymentHoldService).
+    if (
+      await hasSlotConflict({
+        organizationId,
+        start: moment.tz(startDate, "YYYY-MM-DDTHH:mm:ss", timezone).toDate(),
+        items: services.map((s, i) => ({ serviceId: s.serviceId, employeeId: s.employeeId || null, duration: withPrice[i].duration })),
+        excludeCustomerId: customer._id,
+      })
+    ) {
+      return sendResponse(res, 409, { code: "SLOT_TAKEN" }, "Ese horario se acaba de ocupar: otra persona lo está reservando. Por favor elige otro horario.");
+    }
 
     const groupId = new mongoose.Types.ObjectId();
     const expiresAt = moment().add(HOLD_MINUTES, "minutes").toDate();
