@@ -4,12 +4,28 @@ import membershipService from "../services/membershipService.js";
 import Service from "../models/serviceModel.js";
 import { resolveUserOrgId } from "../middleware/organizationAccess.js";
 import { bulkOrganization } from "../utils/bulkServices.js";
+import { canAccessService, editableServiceFields, listScope } from "../utils/serviceAccess.js";
+
+// Servicio por id solo si es del negocio del usuario (superadmin: cualquiera).
+// Si no, se responde igual que si no existiera.
+async function findAccessibleService(req) {
+  const service = await Service.findById(req.params.id).select("organizationId").lean();
+  if (!service) return null;
+  const userOrgId = await resolveUserOrgId(req.user);
+  return canAccessService({ user: req.user, userOrgId, serviceOrgId: service.organizationId }) ? service : null;
+}
 
 const serviceController = {
   // Crear un nuevo servicio
   createService: async (req, res) => {
     try {
-      const organizationId = req.organization?._id || req.body.organizationId;
+      // El negocio sale de la sesión (superadmin: el del body)
+      const userOrgId = await resolveUserOrgId(req.user);
+      const access = bulkOrganization({ user: req.user, userOrgId, bodyOrgId: req.body.organizationId });
+      if (access.error) {
+        return sendResponse(res, access.status, null, access.error);
+      }
+      const organizationId = access.orgId;
       const limits = await membershipService.getPlanLimits(organizationId);
       if (limits?.maxServices !== null && limits?.maxServices !== undefined) {
         const count = await Service.countDocuments({ organizationId });
@@ -20,7 +36,7 @@ const serviceController = {
           );
         }
       }
-      const newService = await serviceService.createService(req.body);
+      const newService = await serviceService.createService({ ...req.body, organizationId });
       sendResponse(res, 201, newService, "Servicio creado exitosamente");
     } catch (error) {
       sendResponse(res, 500, null, error.message);
@@ -30,7 +46,13 @@ const serviceController = {
   // Obtener todos los servicios
   getServices: async (req, res) => {
     try {
-      const services = await serviceService.getServices();
+      const scope = listScope({ user: req.user, userOrgId: await resolveUserOrgId(req.user) });
+      if (scope.deny) {
+        return sendResponse(res, 403, null, "No tienes acceso a esta organización");
+      }
+      const services = scope.all
+        ? await serviceService.getServices()
+        : await serviceService.getServicesByOrganizationId(scope.orgId);
       sendResponse(res, 200, services, "Servicios obtenidos exitosamente");
     } catch (error) {
       sendResponse(res, 500, null, error.message);
@@ -58,6 +80,9 @@ const serviceController = {
   // Obtener un servicio por ID
   getServiceById: async (req, res) => {
     try {
+      if (!(await findAccessibleService(req))) {
+        return sendResponse(res, 404, null, "Servicio no encontrado");
+      }
       const service = await serviceService.getServiceById(req.params.id);
       sendResponse(res, 200, service, "Servicio encontrado");
     } catch (error) {
@@ -81,9 +106,12 @@ const serviceController = {
   // Actualizar un servicio
   updateService: async (req, res) => {
     try {
+      if (!(await findAccessibleService(req))) {
+        return sendResponse(res, 404, null, "Servicio no encontrado");
+      }
       const updatedService = await serviceService.updateService(
         req.params.id,
-        req.body
+        editableServiceFields(req.body)
       );
       sendResponse(
         res,
@@ -99,6 +127,9 @@ const serviceController = {
   // Eliminar un servicio
   deleteService: async (req, res) => {
     try {
+      if (!(await findAccessibleService(req))) {
+        return sendResponse(res, 404, null, "Servicio no encontrado");
+      }
       const result = await serviceService.deleteService(req.params.id);
       sendResponse(res, 200, null, result.message);
     } catch (error) {
