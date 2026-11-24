@@ -1,4 +1,5 @@
 import Service from "../models/serviceModel.js";
+import { bulkServiceRow } from "../utils/bulkServices.js";
 import Appointment from "../models/appointmentModel.js";
 import ServicePackage from "../models/servicePackageModel.js";
 
@@ -118,76 +119,33 @@ const serviceService = {
       results.totalProcessed++;
 
       try {
-        // Validar datos requeridos
-        if (!row.name || row.price === undefined || row.duration === undefined) {
-          throw new Error('Nombre, precio y duración son obligatorios');
+        // Validación y campos a guardar (utils/bulkServices.js): al actualizar
+        // solo se tocan los campos que vienen en la fila.
+        const parsed = bulkServiceRow(row);
+        if (parsed.error) {
+          throw new Error(parsed.error);
         }
-
-        // Validar que precio y duración sean números válidos
-        const price = parseFloat(row.price);
-        const duration = parseInt(row.duration);
-
-        if (isNaN(price) || price < 0) {
-          throw new Error('El precio debe ser un número válido mayor o igual a 0');
-        }
-
-        if (isNaN(duration) || duration <= 0) {
-          throw new Error('La duración debe ser un número válido mayor a 0');
-        }
-
-        // Validar maxConcurrentAppointments si existe
-        let maxConcurrentAppointments = 1;
-        if (row.maxConcurrentAppointments !== undefined && row.maxConcurrentAppointments !== null && row.maxConcurrentAppointments !== '') {
-          maxConcurrentAppointments = parseInt(row.maxConcurrentAppointments);
-          if (isNaN(maxConcurrentAppointments) || maxConcurrentAppointments < 1) {
-            throw new Error('Las citas concurrentes deben ser un número válido mayor o igual a 1');
-          }
-        }
-
-        // Determinar si es isActive
-        const isActive = row.isActive !== false && row.isActive !== 'No' && row.isActive !== 'no';
-
-        const serviceData = {
-          name: row.name.trim(),
-          type: row.type ? row.type.trim() : '',
-          description: row.description ? row.description.trim() : '',
-          price: price,
-          duration: duration,
-          hidePrice: row.hidePrice === true || row.hidePrice === 'true' || row.hidePrice === 'Sí' || row.hidePrice === 'Si',
-          featured: row.featured === true || row.featured === 'true' || row.featured === 'Sí' || row.featured === 'Si',
-          maxConcurrentAppointments: maxConcurrentAppointments,
-          organizationId,
-          isActive: isActive,
-        };
 
         let savedService;
-        let action = 'CREADO';
+        let action = "CREADO";
 
-        // Si tiene ID, intenta actualizar; si no, crea nuevo
-        if (row._id && row._id !== '' && row._id !== '(dejar vacío para crear nuevo)') {
-          console.log(`[bulkCreateServices] Fila ${i + 2}: Actualizando servicio ${row._id}`);
-          
-          // Buscar y actualizar servicio existente
-          savedService = await Service.findByIdAndUpdate(
-            row._id,
-            serviceData,
+        if (parsed.action === "update") {
+          console.log(`[bulkCreateServices] Fila ${i + 2}: Actualizando servicio ${parsed.id}`);
+          // Solo servicios de este negocio, y solo los campos que vienen
+          savedService = await Service.findOneAndUpdate(
+            { _id: parsed.id, organizationId },
+            { $set: parsed.data },
             { new: true, runValidators: true }
           );
-
           if (!savedService) {
-            throw new Error(`Servicio con ID ${row._id} no encontrado`);
+            throw new Error("Ese ID no es de uno de tus servicios");
           }
-
           results.updated++;
-          action = 'ACTUALIZADO';
+          action = "ACTUALIZADO";
         } else {
-          console.log(`[bulkCreateServices] Fila ${i + 2}: Creando nuevo servicio ${row.name}`);
-          
-          // Crear nuevo servicio
-          const newService = new Service(serviceData);
-          savedService = await newService.save();
+          console.log(`[bulkCreateServices] Fila ${i + 2}: Creando nuevo servicio ${parsed.data.name}`);
+          savedService = await new Service({ ...parsed.data, organizationId }).save();
           results.created++;
-          action = 'CREADO';
         }
 
         results.success.push({

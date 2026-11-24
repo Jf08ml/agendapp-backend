@@ -34,7 +34,7 @@ export function organizationAccessDecision({ method, path, user, userOrgId }) {
   return userOrgId && String(userOrgId) === first ? "allow" : "deny";
 }
 
-async function resolveUserOrgId(user) {
+export async function resolveUserOrgId(user) {
   if (user.userType === "admin") return String(user.userId);
   if (user.userType === "employee") {
     const emp = await Employee.findById(user.userId).select("organizationId").lean();
