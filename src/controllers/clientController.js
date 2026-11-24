@@ -4,6 +4,7 @@ import sendResponse from "../utils/sendResponse.js";
 import { auditLogService } from "../services/auditLogService.js";
 import mongoose from "mongoose";
 import { getClientFollowUpOverview, getOrgFollowUpOverview } from "../services/followUpReminderService.js";
+import { getClientStats } from "../services/clientStatsService.js";
 
 const FOLLOW_UP_VIEWS = ["pending", "sent", "not_sent"];
 
@@ -94,6 +95,17 @@ const clientController = {
   },
 
   // Lista general (toda la organización) de recordatorios de seguimiento: programados/enviados/no enviados
+  // GET /clients/stats → { [clientId]: { lastVisit, visits, totalSpent, activePackage } }
+  getClientStats: async (req, res) => {
+    try {
+      if (!req.organization?._id) return sendResponse(res, 400, null, "Organización requerida");
+      const stats = await getClientStats(req.organization._id);
+      return sendResponse(res, 200, stats, "Cifras de clientes");
+    } catch (error) {
+      return sendResponse(res, 500, null, "No se pudieron calcular las cifras de clientes");
+    }
+  },
+
   getOrgFollowUps: async (req, res) => {
     const { view = "pending", serviceId, search, page, limit } = req.query;
     if (!FOLLOW_UP_VIEWS.includes(view)) {
