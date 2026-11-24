@@ -8,6 +8,7 @@ import imagesRoutes from "./images";
 import employeeRoutes from "./employee";
 import advanceRoutes from "./advance";
 import roleRoutes from "./role";
+import { requireOrganizationAccess } from "../middleware/organizationAccess.js";
 import organizationRoutes from "./organizationRoutes";
 import organizationRoutesPublic from "./organizationRoutesPublic";
 import authRoutes from "./authRoutes";
@@ -248,10 +249,10 @@ router.use("/packages", packageRoutes);
 // 3. EXCEPCIONES: auth requerido pero SIN membership check
 //    (admin necesita ver su org/notificaciones aunque esté vencido)
 // ═══════════════════════════════════════════════════
-router.use("/organizations", organizationResolver, verifyToken, organizationRoutes);
-router.use("/organizations", organizationResolver, verifyToken, metaRoutes);
-router.use("/organizations", organizationResolver, verifyToken, collectionRoutes);
-router.use("/organizations", organizationResolver, verifyToken, sessionRoutes);
+router.use("/organizations", organizationResolver, verifyToken, requireOrganizationAccess, organizationRoutes);
+router.use("/organizations", organizationResolver, verifyToken, requireOrganizationAccess, metaRoutes);
+router.use("/organizations", organizationResolver, verifyToken, requireOrganizationAccess, collectionRoutes);
+router.use("/organizations", organizationResolver, verifyToken, requireOrganizationAccess, sessionRoutes);
 router.use("/receipts", organizationResolver, verifyToken, receiptAdminRoutes);
 router.use("/notifications", verifyToken, notificationRoutes);
 router.use("/chat", organizationResolver, verifyToken, chatRoutes);
