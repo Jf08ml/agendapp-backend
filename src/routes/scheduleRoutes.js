@@ -15,6 +15,8 @@ router.post("/validate-datetime", scheduleController.validateDateTime);
 router.post("/multi-service-blocks", scheduleController.getMultiServiceBlocks);
 router.post("/available-slots-batch", scheduleController.getAvailableSlotsBatch);
 router.post("/check-days-availability", scheduleController.checkDaysAvailability);
+// Próximo horario libre para las landings (?serviceId= opcional)
+router.get("/next-free/:organizationId", scheduleController.getNextFreeSlot);
 
 // 🔒 Rutas PROTEGIDAS (requieren autenticación) - Para gestión de horarios
 router.put("/organization/:orgId", verifyToken, scheduleController.updateOrganizationSchedule);

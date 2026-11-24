@@ -13,6 +13,7 @@ import reservationModel from "../models/reservationModel.js";
 import scheduleService from "../services/scheduleService.js";
 import sendResponse from "../utils/sendResponse.js";
 import { ONLINE_BOOKABLE_EMPLOYEE } from "../utils/onlineBooking.js";
+import { findNextFreeSlot } from "../services/nextFreeSlotService.js";
 
 // Valida acceso a las excepciones de horario (bloqueos) de un empleado:
 // 1) el empleado debe pertenecer a la organización resuelta por organizationResolver
@@ -296,6 +297,25 @@ const scheduleController = {
    * Obtener slots de tiempo disponibles para un día y empleado específico
    * POST /api/schedule/available-slots
    */
+  /**
+   * GET /api/schedule/next-free/:organizationId?serviceId=
+   * Próximo horario libre (landings). data = null si no hay en 14 días.
+   */
+  getNextFreeSlot: async (req, res) => {
+    try {
+      const { organizationId } = req.params;
+      const { serviceId } = req.query;
+      const oid = /^[a-f0-9]{24}$/i;
+      if (!oid.test(String(organizationId)) || (serviceId && !oid.test(String(serviceId)))) {
+        return sendResponse(res, 400, null, "Parámetros inválidos");
+      }
+      const slot = await findNextFreeSlot(organizationId, serviceId || null);
+      return sendResponse(res, 200, slot, slot ? "Próximo horario libre" : "Sin horarios libres próximos");
+    } catch (error) {
+      return sendResponse(res, 500, null, "No se pudo consultar la disponibilidad");
+    }
+  },
+
   getAvailableSlots: async (req, res) => {
     const { date, organizationId, employeeId, serviceDuration } = req.body;
 
