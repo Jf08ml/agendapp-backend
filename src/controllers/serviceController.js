@@ -2,6 +2,8 @@ import serviceService from "../services/serviceService.js";
 import sendResponse from "../utils/sendResponse.js";
 import membershipService from "../services/membershipService.js";
 import Service from "../models/serviceModel.js";
+import { resolveUserOrgId } from "../middleware/organizationAccess.js";
+import { bulkOrganization } from "../utils/bulkServices.js";
 
 const serviceController = {
   // Crear un nuevo servicio
@@ -107,17 +109,20 @@ const serviceController = {
   // Controlador para carga masiva de servicios desde Excel
   bulkUploadServices: async (req, res) => {
     try {
-      const { services, organizationId } = req.body;
+      const { services, organizationId: bodyOrgId } = req.body;
 
       if (!services || !Array.isArray(services) || services.length === 0) {
         return sendResponse(res, 400, null, "No se proporcionaron datos de servicios");
       }
 
-      if (!organizationId) {
-        return sendResponse(res, 400, null, "Se requiere el ID de la organización");
+      // El negocio sale de la sesión (superadmin: el que indique el body)
+      const userOrgId = await resolveUserOrgId(req.user);
+      const access = bulkOrganization({ user: req.user, userOrgId, bodyOrgId });
+      if (access.error) {
+        return sendResponse(res, access.status, null, access.error);
       }
 
-      const results = await serviceService.bulkCreateServices(services, organizationId);
+      const results = await serviceService.bulkCreateServices(services, access.orgId);
       
       sendResponse(
         res,
