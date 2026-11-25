@@ -8,7 +8,7 @@ import imagesRoutes from "./images";
 import employeeRoutes from "./employee";
 import advanceRoutes from "./advance";
 import roleRoutes from "./role";
-import { requireOrganizationAccess } from "../middleware/organizationAccess.js";
+import { requireOrganizationAccess, requireOwnOrganization } from "../middleware/organizationAccess.js";
 import organizationRoutes from "./organizationRoutes";
 import organizationRoutesPublic from "./organizationRoutesPublic";
 import authRoutes from "./authRoutes";
@@ -263,12 +263,12 @@ router.use("/chat", organizationResolver, verifyToken, chatRoutes);
 // ═══════════════════════════════════════════════════
 router.use("/appointments", organizationResolver, verifyToken, requireActiveMembership, appointmentRoutes);
 router.use("/images", organizationResolver, verifyToken, requireActiveMembership, imagesRoutes);
-router.use("/advances", organizationResolver, verifyToken, requireActiveMembership, advanceRoutes);
+router.use("/advances", organizationResolver, verifyToken, requireOwnOrganization, requireActiveMembership, advanceRoutes);
 router.use("/whatsapp-templates", organizationResolver, verifyToken, requireActiveMembership, whatsappTemplateRoutes);
 router.use("/wa", verifyToken, requireActiveMembership, waRoutes);
 router.use("/reminders", verifyToken, requireActiveMembership, reminderRoutes);
 router.use("/campaigns", verifyToken, requireActiveMembership, campaignRoutes);
-router.use("/expenses", organizationResolver, verifyToken, requireActiveMembership, expenseRoutes);
+router.use("/expenses", organizationResolver, verifyToken, requireOwnOrganization, requireActiveMembership, expenseRoutes);
 router.use("/products", organizationResolver, verifyToken, requireActiveMembership, productRoutes);
 // Hook futuro para límite por plan: checkPlanLimit("maxProducts") — NO activar ahora
 // 🛍️ Bandeja admin de pedidos de la tienda pública
