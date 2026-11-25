@@ -43,6 +43,38 @@ export async function resolveUserOrgId(user) {
   return null;
 }
 
+/**
+ * Rutas que trabajan sobre req.organization (resuelto por dominio o por el
+ * encabezado X-Tenant-Domain, que manda el navegador): con una sesión de otro
+ * negocio bastaba cambiar ese encabezado para leer o editar sus datos.
+ * Decisión pura: "allow" | "deny" | "need-org".
+ */
+export function ownOrganizationDecision({ user, organizationId, userOrgId }) {
+  if (!user) return "deny";
+  if (isSuperadmin(user)) return "allow";
+  if (!organizationId) return "deny";
+  if (userOrgId === undefined) return "need-org";
+  return userOrgId && String(userOrgId) === String(organizationId) ? "allow" : "deny";
+}
+
+/** Middleware DESPUÉS de organizationResolver y verifyToken. */
+export const requireOwnOrganization = async (req, res, next) => {
+  try {
+    const base = { user: req.user, organizationId: req.organization?._id };
+    let decision = ownOrganizationDecision(base);
+    if (decision === "need-org") {
+      decision = ownOrganizationDecision({ ...base, userOrgId: await resolveUserOrgId(req.user) });
+    }
+    if (decision !== "allow") {
+      return res.status(403).json({ result: "error", message: "No tienes acceso a esta organización" });
+    }
+    next();
+  } catch (error) {
+    console.error("[requireOwnOrganization]", error);
+    return res.status(500).json({ result: "error", message: "No se pudo verificar el acceso" });
+  }
+};
+
 export const requireOrganizationAccess = async (req, res, next) => {
   try {
     // El mismo request pasa por varios montajes de /organizations: decidir una vez.

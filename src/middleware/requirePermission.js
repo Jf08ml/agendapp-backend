@@ -85,4 +85,26 @@ export const PERMS = {
   // Sellar la tarjeta (servicio o referido) al escanearla: como hoy, cualquier
   // persona del equipo con sesión (todos los roles tienen appointments:view_own).
   loyaltyStamp: ["clients:add_service", "clients:add_referral", "clients:update", "appointments:view_own"],
+  // Caja: gastos e ingresos generales del negocio (pantalla Caja).
+  cash: ["cashManagement:read"],
+  // Anticipos e ingresos de un profesional: los registra Profesionales o la
+  // nómina de Caja (ambas piden employees:read en el panel).
+  advancesWrite: ["employees:add_advance", "employees:update", "employees:read"],
+  // Ver los de OTRO profesional; los propios los ve cualquiera del equipo
+  // (Mi información). Ver advanceRoutes.
+  advancesReadOthers: ["employees:read", "employees:view_payroll", "employees:add_advance", "cashManagement:read"],
 };
+
+/**
+ * GET /advances/employee/:employeeId: cada profesional ve los suyos; los de
+ * otro, solo con permiso de Profesionales o Caja.
+ */
+export function requireOwnOrPermission(paramName, anyOf) {
+  const check = requirePermission(...anyOf);
+  return (req, res, next) => {
+    if (req.user?.userType === "employee" && String(req.params[paramName]) === String(req.user.userId)) {
+      return next();
+    }
+    return check(req, res, next);
+  };
+}
