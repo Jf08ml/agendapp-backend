@@ -3,12 +3,39 @@ import sendResponse from "../utils/sendResponse.js";
 import { auditLogService } from "../services/auditLogService.js";
 import membershipService from "../services/membershipService.js";
 import Employee from "../models/employeeModel.js";
+import { resolveUserOrgId } from "../middleware/organizationAccess.js";
+import { employeeEditScope, filterEmployeeUpdate } from "../utils/editGuards.js";
+
+const isSuperadmin = (user) => user?.userType === "superadmin" && !!user?.adminId;
+
+/** Permisos del usuario (rol + individuales); [] si no es empleado. */
+async function userPermissions(user) {
+  if (user?.userType !== "employee") return [];
+  const me = await Employee.findById(user.userId).select("role customPermissions isActive").populate("role", "permissions").lean();
+  if (!me || me.isActive === false) return [];
+  return [...(me.role?.permissions || []), ...(me.customPermissions || [])];
+}
+
+/** ¿El empleado `id` es del negocio de quien hace la petición? (superadmin: siempre) */
+async function sameOrganization(req, id) {
+  if (isSuperadmin(req.user)) return true;
+  const [target, orgId] = await Promise.all([
+    Employee.findById(id).select("organizationId").lean(),
+    resolveUserOrgId(req.user),
+  ]);
+  return !!target && !!orgId && String(target.organizationId) === String(orgId);
+}
 
 const employeeController = {
   // Controlador para crear un nuevo empleado
   createEmployee: async (req, res) => {
     try {
-      const organizationId = req.organization?._id || req.body.organizationId;
+      // El negocio sale de la sesión (superadmin: el del dominio o del body)
+      const organizationId = isSuperadmin(req.user)
+        ? req.organization?._id || req.body.organizationId
+        : await resolveUserOrgId(req.user);
+      if (!organizationId) return sendResponse(res, 403, null, "No tienes permiso para esta acción.");
+      req.body.organizationId = organizationId;
       const limits = await membershipService.getPlanLimits(organizationId);
       if (limits?.maxEmployees !== null && limits?.maxEmployees !== undefined) {
         const count = await Employee.countDocuments({ organizationId, isActive: true });
@@ -82,9 +109,14 @@ const employeeController = {
   updateEmployee: async (req, res) => {
     const { id } = req.params;
     try {
+      // Quién edita y qué: dueño/admin todo (menos el negocio); con
+      // «reordenar profesionales», solo el orden; si no, nada.
+      const scope = employeeEditScope({ user: req.user, permissions: await userPermissions(req.user) });
+      if (!scope) return sendResponse(res, 403, null, "No tienes permiso para esta acción.");
+      if (!(await sameOrganization(req, id))) return sendResponse(res, 404, null, "Empleado no encontrado");
       const updatedEmployee = await employeeService.updateEmployee(
         id,
-        req.body
+        filterEmployeeUpdate(req.body, scope)
       );
       sendResponse(
         res,
@@ -131,6 +163,7 @@ const employeeController = {
   deleteEmployee: async (req, res) => {
     const { id } = req.params;
     try {
+      if (!(await sameOrganization(req, id))) return sendResponse(res, 404, null, "Empleado no encontrado");
       const employeeData = await employeeService.getEmployeeById(id);
       const result = await employeeService.deleteEmployee(id);
 

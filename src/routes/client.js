@@ -29,7 +29,10 @@ router.get(
 );
 // GET /clients/by-identifier?field=documentId&value=...&organizationId=...
 router.get("/by-identifier", clientController.getClientByIdentifier);
-router.put("/:id", clientController.updateClient);
+// Reserva en línea: el cliente ya identificado actualiza sus datos de contacto.
+// Debe repetir el dato con el que se identificó (utils/editGuards.publicClientUpdate).
+// Antes PUT /:id era pública y aceptaba cualquier cambio.
+router.put("/public/:id", clientController.updateClientPublic);
 
 // 🔒 Rutas PROTEGIDAS (requieren autenticación)
 router.post("/", organizationResolver, verifyToken, can.create, clientController.createClient);
@@ -57,6 +60,7 @@ router.get("/loyalty-card/by-token/:token", organizationResolver, verifyToken, c
 router.get("/:id/loyalty-card", organizationResolver, verifyToken, can.read, loyaltyCardController.getClientCardLink);
 router.get("/:id/bookings-link", organizationResolver, verifyToken, can.read, clientBookingsController.getClientBookingsLink);
 router.get("/:id", organizationResolver, verifyToken, can.read, clientController.getClientById);
+router.put("/:id", organizationResolver, verifyToken, can.update, clientController.updateClient);
 router.get("/:id/follow-up-status", organizationResolver, verifyToken, can.read, clientController.getFollowUpStatus);
 router.delete("/:id", organizationResolver, verifyToken, can.remove, clientController.deleteClient);
 router.post("/:id/register-service", organizationResolver, verifyToken, can.stamp, clientController.registerService);

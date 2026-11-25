@@ -5,6 +5,10 @@ import { auditLogService } from "../services/auditLogService.js";
 import mongoose from "mongoose";
 import { getClientFollowUpOverview, getOrgFollowUpOverview } from "../services/followUpReminderService.js";
 import { getClientStats } from "../services/clientStatsService.js";
+import Client from "../models/clientModel.js";
+import Organization from "../models/organizationModel.js";
+import { resolveUserOrgId } from "../middleware/organizationAccess.js";
+import { publicClientUpdate } from "../utils/editGuards.js";
 
 const FOLLOW_UP_VIEWS = ["pending", "sent", "not_sent"];
 
@@ -160,13 +164,48 @@ const clientController = {
   },
 
   // Controlador para actualizar un cliente
+  // PUT /clients/:id (panel): solo clientes del propio negocio; el negocio no cambia
   updateClient: async (req, res) => {
     const { id } = req.params;
     try {
-      const updatedClient = await clientService.updateClient(id, req.body);
+      const isSuperadmin = req.user?.userType === "superadmin" && !!req.user?.adminId;
+      if (!isSuperadmin) {
+        const [client, orgId] = await Promise.all([
+          Client.findById(id).select("organizationId").lean(),
+          resolveUserOrgId(req.user),
+        ]);
+        if (!client || !orgId || String(client.organizationId) !== String(orgId)) {
+          return sendResponse(res, 404, null, "Cliente no encontrado");
+        }
+      }
+      const { organizationId, ...data } = req.body || {}; // eslint-disable-line no-unused-vars
+      const updatedClient = await clientService.updateClient(id, isSuperadmin ? req.body : data);
       sendResponse(res, 200, updatedClient, "Cliente actualizado exitosamente");
     } catch (error) {
       sendResponse(res, 404, null, error.message);
+    }
+  },
+
+  // PUT /clients/public/:id (reserva en línea): exige el dato con el que el
+  // cliente se identificó y solo cambia sus datos de contacto.
+  updateClientPublic: async (req, res) => {
+    const { id } = req.params;
+    try {
+      if (!mongoose.isValidObjectId(id)) return sendResponse(res, 404, null, "Cliente no encontrado");
+      const client = await Client.findById(id).select("organizationId phone_e164 phoneNumber documentId email").lean();
+      if (!client) return sendResponse(res, 404, null, "Cliente no encontrado");
+      const org = await Organization.findById(client.organizationId).select("clientFormConfig").lean();
+      const result = publicClientUpdate({
+        client,
+        body: req.body,
+        identifierField: org?.clientFormConfig?.identifierField || "phone",
+      });
+      if (result.error) return sendResponse(res, 403, null, result.error);
+      if (Object.keys(result.updates).length === 0) return sendResponse(res, 200, null, "Sin cambios");
+      await clientService.updateClient(id, result.updates);
+      sendResponse(res, 200, null, "Datos actualizados");
+    } catch (error) {
+      sendResponse(res, 400, null, error.message);
     }
   },
 
@@ -284,6 +323,29 @@ const clientController = {
     try {
       const client = await clientService.mergeClient(id, sourceId);
       sendResponse(res, 200, client, "Clientes fusionados correctamente");
+    } catch (error) {
+      sendResponse(res, 400, null, error.message);
+    }
+  },
+
+  // PUT /clients/public/:id (reserva en línea): exige el dato con el que el
+  // cliente se identificó y solo cambia sus datos de contacto.
+  updateClientPublic: async (req, res) => {
+    const { id } = req.params;
+    try {
+      if (!mongoose.isValidObjectId(id)) return sendResponse(res, 404, null, "Cliente no encontrado");
+      const client = await Client.findById(id).select("organizationId phone_e164 phoneNumber documentId email").lean();
+      if (!client) return sendResponse(res, 404, null, "Cliente no encontrado");
+      const org = await Organization.findById(client.organizationId).select("clientFormConfig").lean();
+      const result = publicClientUpdate({
+        client,
+        body: req.body,
+        identifierField: org?.clientFormConfig?.identifierField || "phone",
+      });
+      if (result.error) return sendResponse(res, 403, null, result.error);
+      if (Object.keys(result.updates).length === 0) return sendResponse(res, 200, null, "Sin cambios");
+      await clientService.updateClient(id, result.updates);
+      sendResponse(res, 200, null, "Datos actualizados");
     } catch (error) {
       sendResponse(res, 400, null, error.message);
     }
