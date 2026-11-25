@@ -2,6 +2,7 @@ import express from "express";
 import employeeController from "../controllers/employeeController.js";
 import { verifyToken } from "../middleware/authMiddleware.js";
 import { organizationResolver } from "../middleware/organizationResolver.js";
+import { requirePermission } from "../middleware/requirePermission.js";
 
 const router = express.Router();
 
@@ -12,7 +13,7 @@ router.get(
 );
 
 // 🔒 Rutas PROTEGIDAS (requieren autenticación)
-router.post("/", organizationResolver, verifyToken, employeeController.createEmployee);
+router.post("/", organizationResolver, verifyToken, requirePermission("employees:create"), employeeController.createEmployee);
 router.get("/", organizationResolver, verifyToken, employeeController.getEmployees);
 router.get(
   "/me/reminder-preferences",
@@ -34,6 +35,6 @@ router.get(
   employeeController.getEmployeeByPhoneNumber
 );
 router.put("/:id", organizationResolver, verifyToken, employeeController.updateEmployee);
-router.delete("/:id", organizationResolver, verifyToken, employeeController.deleteEmployee);
+router.delete("/:id", organizationResolver, verifyToken, requirePermission("employees:delete"), employeeController.deleteEmployee);
 
 export default router;
