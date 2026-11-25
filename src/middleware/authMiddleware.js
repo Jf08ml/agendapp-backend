@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import Session from "../models/sessionModel.js";
+import { ownOrganizationDecision, resolveUserOrgId } from "./organizationAccess.js";
 
 // Throttle de `lastActiveAt`: evita un write en DB en cada request autenticado.
 // Solo afecta qué tan "fresco" se ve el timestamp en la lista de sesiones, nunca
@@ -75,6 +76,26 @@ export const verifyToken = async (req, res, next) => {
       impersonated: decoded.impersonated || false,
       impersonatedBy: decoded.impersonatedBy || null,
     };
+
+    // Si la ruta ya resolvió el negocio por dominio (organizationResolver), la
+    // sesión tiene que ser de ESE negocio. El dominio sale de X-Tenant-Domain,
+    // que manda el navegador: antes, con una sesión de un negocio se podían
+    // leer o cambiar citas, productos, pedidos… de otro cambiando ese
+    // encabezado. Superadmin pasa siempre.
+    if (req.organization?._id) {
+      const base = { user: req.user, organizationId: req.organization._id };
+      let decision = ownOrganizationDecision(base);
+      if (decision === "need-org") {
+        decision = ownOrganizationDecision({ ...base, userOrgId: await resolveUserOrgId(req.user) });
+      }
+      if (decision !== "allow") {
+        return res.status(403).json({
+          result: "error",
+          message: "Tu sesión es de otro negocio. Inicia sesión en este negocio.",
+          code: "ORG_MISMATCH",
+        });
+      }
+    }
 
     next();
   } catch (error) {
