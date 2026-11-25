@@ -719,6 +719,8 @@ const organizationSchema = new mongoose.Schema({
     gaMeasurementId: { type: String, trim: true, default: "" }, // Google Analytics 4 (G-XXXXXXX)
     googleAdsId: { type: String, trim: true, default: "" }, // Google Ads (AW-XXXXXXX)
     googleAdsConversionLabel: { type: String, trim: true, default: "" }, // Etiqueta de conversión (junto a googleAdsId arma el "send_to")
+    metaPixelId: { type: String, trim: true, default: "" }, // Píxel de Meta (Facebook/Instagram Ads), solo dígitos
+    tiktokPixelId: { type: String, trim: true, default: "" }, // Píxel de TikTok Ads (ej: C4ABCD1234EFGH5678)
   },
   reminderSettings: {
     enabled: {
